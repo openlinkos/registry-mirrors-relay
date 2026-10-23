@@ -449,10 +449,12 @@ func TestBasicAuthEntrance(t *testing.T) {
 	if resp, _ := e.do(t, http.MethodGet, "private.local", "/v2/", basic("alice", "correct horse")); resp.StatusCode != 401 {
 		t.Fatalf("停用的账号应返回 401：%d", resp.StatusCode)
 	}
-	// 失败次数限制（默认每分钟 10 次）
+	// 失败次数限制（默认每分钟 10 次）。用已有账号输错口令：它的哈希 cost 很低，-race 下也很快，
+	// 不会因为测试太慢、令牌在这期间补回来而测不出限制
+	e.update(t, func(d *store.Data) { d.Users[0].Disabled = false })
 	var last int
 	for i := 0; i < 12; i++ {
-		resp, _ := e.do(t, http.MethodGet, "private.local", "/v2/", basic("bob", "x"))
+		resp, _ := e.do(t, http.MethodGet, "private.local", "/v2/", basic("alice", "wrong"))
 		last = resp.StatusCode
 	}
 	if last != 429 {
