@@ -78,7 +78,7 @@
     </header>
     <main class="ol-content" id="main" tabindex="-1">
 {{if not .Writable}}<div class="ol-notices">{{template "alert" (dict "Tone" "info" "Text" (.T "readonly.banner"))}}</div>{{end}}
-{{template "content" .}}
+{{.Body}}
     </main>
     <footer class="ol-footer"><span>registry-mirrors-relay {{.Version}}</span><a href="https://github.com/openlinkos/registry-mirrors-relay" rel="noreferrer">{{.T "app.docs"}}</a></footer>
   </div>
@@ -92,7 +92,7 @@
   </aside>{{end}}
   <div class="ol-auth-body">
     <div class="ol-auth-card">
-{{template "content" .}}
+{{.Body}}
     </div>
     <div class="ol-auth-foot">
       <span>registry-mirrors-relay {{.Version}}</span>

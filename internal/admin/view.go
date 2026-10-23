@@ -27,6 +27,7 @@ type view struct {
 	Bare   bool // 登录、重新输入口令：表单在品牌面板旁边，没有侧栏
 	Data   any
 	Notice string
+	Body   template.HTML // 先渲染好的页面正文，由版式放进去
 }
 
 type crumb struct{ Label, Href string }
@@ -141,8 +142,10 @@ var funcs = template.FuncMap{
 	"list":  func(s ...string) []string { return s },
 }
 
-func parseTemplates() (map[string]*template.Template, error) {
-	base, err := template.New("base").Funcs(funcs).ParseFS(templateFS, "templates/base.html")
+// parseTemplates 把版式、组件和全部页面放进同一个模板集：每个页面文件里的 {{define "content"}} 改名为
+// "page/<文件名>"。html/template 对每个模板只做一次转义分析，共用的版式和组件也只存一份。
+func parseTemplates() (*template.Template, error) {
+	t, err := template.New("base").Funcs(funcs).ParseFS(templateFS, "templates/base.html")
 	if err != nil {
 		return nil, err
 	}
@@ -150,22 +153,24 @@ func parseTemplates() (map[string]*template.Template, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]*template.Template{}
 	for _, f := range files {
 		name := strings.TrimSuffix(strings.TrimPrefix(f, "templates/"), ".html")
 		if name == "base" {
 			continue
 		}
-		t, err := base.Clone()
+		b, err := templateFS.ReadFile(f)
 		if err != nil {
 			return nil, err
 		}
-		if _, err := t.ParseFS(templateFS, f); err != nil {
-			return nil, err
+		text := strings.Replace(string(b), `{{define "content"}}`, `{{define "page/`+name+`"}}`, 1)
+		if _, err := t.New(f).Parse(text); err != nil {
+			return nil, fmt.Errorf("%s：%w", f, err)
 		}
-		out[name] = t
+		if t.Lookup("page/"+name) == nil {
+			return nil, fmt.Errorf("%s 里没有 {{define \"content\"}}", f)
+		}
 	}
-	return out, nil
+	return t, nil
 }
 
 func dict(kv ...any) (map[string]any, error) {

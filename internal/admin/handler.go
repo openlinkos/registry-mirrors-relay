@@ -10,7 +10,6 @@ package admin
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"html/template"
 	"log/slog"
 	"mime"
@@ -69,7 +68,7 @@ type Handler struct {
 	log      *slog.Logger
 	now      func() time.Time
 	assets   *assets
-	pages    map[string]*template.Template
+	tmpl     *template.Template
 	sessions *sessions
 	limiter  *loginLimiter
 	queue    *checkQueue
@@ -118,7 +117,7 @@ func New(a *app.App, o *ops.Ops, opt Options) (*Handler, error) {
 	}
 	h := &Handler{app: a, ops: o, log: opt.Log, now: opt.Now, assets: as, sessions: newSessions(),
 		limiter: newLoginLimiter(limits), queue: &checkQueue{max: 32}, cost: opt.BcryptCost}
-	if h.pages, err = parseTemplates(); err != nil {
+	if h.tmpl, err = parseTemplates(); err != nil {
 		return nil, err
 	}
 	h.routes = h.routeTable()
@@ -562,16 +561,17 @@ func (h *Handler) Session(r *http.Request) (ops.Actor, string, bool, error) {
 
 // render 渲染一个页面。
 func (h *Handler) render(c *ctx, page string, v *view) error {
-	t, ok := h.pages[page]
-	if !ok {
-		return fmt.Errorf("没有页面模板 %s", page)
-	}
 	v.c, v.h = c, h
 	if v.Notice == "" {
 		v.Notice = c.notice()
 	}
 	var buf bytes.Buffer
-	if err := t.ExecuteTemplate(&buf, "layout", v); err != nil {
+	if err := h.tmpl.ExecuteTemplate(&buf, "page/"+page, v); err != nil {
+		return err
+	}
+	v.Body = template.HTML(buf.String()) //nolint:gosec // html/template 刚渲染出来的，已经转义过
+	buf.Reset()
+	if err := h.tmpl.ExecuteTemplate(&buf, "layout", v); err != nil {
 		return err
 	}
 	body := h.assets.withSprite(buf.Bytes())
