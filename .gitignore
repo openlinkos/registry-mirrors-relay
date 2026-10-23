@@ -1,0 +1,8 @@
+/dist/
+/bin/
+*.test
+*.out
+/coverage.*
+/.env
+/config.yaml
+/state.db

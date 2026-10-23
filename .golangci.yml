@@ -1,0 +1,39 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard # errcheck、govet、ineffassign、staticcheck、unused
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - gosec
+    - nilerr
+    - noctx
+    - nolintlint
+    - unconvert
+    - usestdlibvars
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    gosec:
+      excludes:
+        - G115 # 整数转换：这里的转换都有上下界，逐处标注反而降低可读性
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [gosec, noctx, bodyclose]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/openlinkos/registry-mirrors-relay

@@ -1,0 +1,84 @@
+# registry-mirrors-relay 配置示例。只需要写和默认值不同的部分。
+# 运行 registry-mirrors-relay check -config 本文件 -print 可以查看全部生效的值（含默认值）。
+#
+# 这个例子：放在 CDN 之后（CDN 负责 TLS），一个单域名入口覆盖所有标准用法，另有每个上游一个子域名的旧用法。
+
+# 运营数据库和 ACME 证书放在这里，不存放任何镜像数据。
+data_dir: /var/lib/registry-mirrors-relay
+
+listen:
+  http: ":8080"              # 拉取入口（明文），CDN 回源到这里
+  admin: "127.0.0.1:9090"    # 管理后台，只在本机；远程用 SSH 转发或内网访问
+  metrics: "127.0.0.1:9180"  # Prometheus 指标
+
+client_ip:
+  # 只信任 CDN 回源地址发来的 X-Forwarded-For，从右往左取第一个不受信任的地址
+  trusted_proxies:
+    - 10.0.0.0/8
+    - 203.0.113.0/24
+
+site:
+  name: LinkOS Mirrors
+  operator: OpenLinkOS
+  links:
+    home: https://linkos.org
+    status: https://uptime.linkos.org
+    source: https://github.com/openlinkos/registry-mirrors-relay
+
+entrances:
+  # 单域名入口：
+  #   docker pull mirror.example.com/library/nginx         根路径，默认 Docker Hub（daemon.json 的 registry-mirrors 也是这样）
+  #   docker pull mirror.example.com/ghcr.io/owner/image   路径前缀
+  #   containerd 的 hosts.toml 指向这里时，按 ?ns= 选上游
+  - name: mirror
+    hosts: [mirror.example.com]
+
+  # 每个上游一个子域名（兼容旧用法）
+  - hosts: [docker.example.com]
+    upstream: docker.io
+  - hosts: [ghcr.example.com]
+    upstream: ghcr.io
+  - hosts: [gcr.example.com]
+    upstream: gcr.io
+  - hosts: [k8s.example.com]
+    upstream: registry.k8s.io
+  - hosts: [quay.example.com]
+    upstream: quay.io
+
+  # 需要登录的入口：账号在 access.users_file 或管理后台里
+  # - hosts: [private.example.com]
+  #   auth: basic
+
+upstreams:
+  # 内置 docker.io、gcr.io、ghcr.io、registry.k8s.io、quay.io。同名的上游只写要改的字段。
+  quay.io:
+    unlisted_redirect: pass   # 白名单外的重定向原样交给客户端；改成 deny 则返回 502
+  # 新增一个上游
+  mcr.microsoft.com:
+    registry: mcr.microsoft.com
+    redirect_hosts: ['(?:[a-z0-9-]+\.)*mcr\.microsoft\.com', '(?:[a-z0-9-]+\.)*azureedge\.net']
+    token_realm_hosts: ['mcr\.microsoft\.com']
+  # 给 Docker Hub 配一个只能读公开仓库的令牌，提高共用的额度：
+  # docker.io:
+  #   credentials:
+  #     username: your-bot
+  #     password: {env: DOCKERHUB_TOKEN}
+  #     realm_host: auth.docker.io
+  #     public_only: true
+
+access:
+  # users_file: /etc/registry-mirrors-relay/htpasswd   # bcrypt，可用 registry-mirrors-relay hash-password 生成
+  images:
+    deny:
+      - pattern: "ghcr.io/example-bad-actor/**"
+        status: 451
+        message: "此镜像因投诉已屏蔽"
+
+limits:
+  manifest_rate: 2       # 每个客户端每秒的 manifest 请求，突发 120
+  manifest_burst: 120
+  blob_streams_per_client: 16
+
+log:
+  access:
+    output: stdout       # 容器里写 stdout；也可以写 file，按大小轮转
