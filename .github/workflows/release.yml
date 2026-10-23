@@ -45,6 +45,8 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 同一个提交上有多个标签时（例如先发了 -rc），按触发这次运行的标签发布
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
       - name: image digest
         id: image
         env:
