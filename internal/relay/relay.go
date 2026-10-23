@@ -143,6 +143,7 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 	e.Upstream, e.Image, e.Kind, e.Ref = t.Upstream, t.Upstream+"/"+t.Repo, t.Kind.String(), t.Ref
 	if ok, status, msg, rule := rt.Images.Decide(e.Image); !ok {
 		e.Error = "image rule " + rule
+		h.App.Stats.RuleHit(rule)
 		writeError(w, r, status, "DENIED", msg)
 		return
 	}

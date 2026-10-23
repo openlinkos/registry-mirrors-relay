@@ -1,0 +1,42 @@
+{{define "content"}}{{$v := .}}{{$d := .Data}}{{$l := $d.Limits}}
+{{template "header" (dict "Title" (.T "nav.limits") "Desc" (.T "limits.description"))}}
+{{template "notices" .}}
+<div class="ol-stats">
+  <div class="ol-stat"><span class="ol-stat-label">{{.T "limits.inflight"}}</span><span class="ol-stat-value">{{num $d.Stats.Inflight}}</span><span class="ol-stat-meta">{{.T "limits.of" "n" (num $l.MaxInflight)}}</span></div>
+  <div class="ol-stat"><span class="ol-stat-label">{{.T "limits.blobStreams"}}</span><span class="ol-stat-value">{{num $d.Stats.BlobStreams}}</span><span class="ol-stat-meta">{{.T "limits.of" "n" (num $l.MaxBlobStreams)}}</span></div>
+  <div class="ol-stat"><span class="ol-stat-label">{{.T "limits.limited"}}</span><span class="ol-stat-value">{{num $d.Stats.Limited}}</span><span class="ol-stat-meta">{{.T "limits.sinceStart"}}</span></div>
+  <div class="ol-stat"><span class="ol-stat-label">{{.T "limits.tracked"}}</span><span class="ol-stat-value">{{num $d.Stats.TrackedClients}}</span><span class="ol-stat-meta">{{.T "limits.of" "n" (num $l.TrackedClients)}}</span></div>
+</div>
+
+<section class="ol-section">
+  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "limits.settings"}}</h2><p class="ol-section-description">{{.T "limits.settingsHelp"}}</p></div>
+  <dl class="ol-dl">
+    <dt>{{.T "limits.manifestRate"}}</dt><dd>{{if $l.ManifestRate}}{{.T "limits.rateValue" "rate" (num $l.ManifestRate) "burst" (num $l.ManifestBurst) "head" (num $l.HeadWeight)}}{{else}}{{.T "limits.unlimited"}}{{end}}</dd>
+    <dt>{{.T "limits.perClientStreams"}}</dt><dd>{{if $l.BlobStreamsPerClient}}{{num $l.BlobStreamsPerClient}}{{else}}{{.T "limits.unlimited"}}{{end}}</dd>
+    <dt>{{.T "limits.maxInflight"}}</dt><dd>{{if $l.MaxInflight}}{{num $l.MaxInflight}}{{else}}{{.T "limits.unlimited"}}{{end}}</dd>
+    <dt>{{.T "limits.maxBlobStreams"}}</dt><dd>{{if $l.MaxBlobStreams}}{{num $l.MaxBlobStreams}}{{else}}{{.T "limits.unlimited"}}{{end}}</dd>
+    <dt>{{.T "limits.authFailures"}}</dt><dd>{{if $l.AuthFailuresPerMin}}{{.T "limits.perMinute" "n" (num $l.AuthFailuresPerMin)}}{{else}}{{.T "limits.unlimited"}}{{end}}</dd>
+    <dt>{{.T "limits.exempt"}}</dt><dd class="ol-mono">{{if $l.ExemptCIDRs}}{{join $l.ExemptCIDRs ", "}}{{else}}—{{end}}</dd>
+  </dl>
+</section>
+
+<section class="ol-section">
+  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "limits.recent"}}</h2><p class="ol-section-description">{{.T "limits.recentHelp"}}</p></div>
+  {{if $d.Limited}}<div class="ol-table-wrap"><table class="ol-table">
+    <thead><tr><th>{{.T "requests.client"}}</th><th>{{.T "requests.user"}}</th><th class="ol-num">{{.T "limits.times"}}</th><th>{{.T "limits.last"}}</th><th></th></tr></thead>
+    <tbody>{{range $d.Limited}}<tr>
+      <td class="ol-mono"><a href="/admin/requests?client_ip={{.Client}}">{{.Client}}</a></td><td>{{if .User}}<a href="/admin/users/edit?name={{.User}}">{{.User}}</a>{{else}}—{{end}}</td>
+      <td class="ol-num">{{num .Count}}</td><td class="ol-nowrap">{{time .Last}}</td>
+      <td>{{if $v.CanWrite}}<a class="ol-btn ol-btn-danger-soft ol-btn-xs" href="/admin/rules?ban={{.Client}}#bans">{{icon "ban" "sm"}}{{$v.T "rules.ban"}}</a>{{end}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>{{else}}{{template "empty" (dict "Icon" "activity" "Title" (.T "limits.noneLimited") "Text" (.T "limits.noneLimitedText"))}}{{end}}
+</section>
+
+<section class="ol-section">
+  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "limits.overrides"}}</h2><p class="ol-section-description">{{.T "limits.overridesHelp"}}</p></div>
+  {{if $d.Overrides}}<div class="ol-table-wrap"><table class="ol-table ol-table-compact">
+    <thead><tr><th>{{.T "users.name"}}</th><th>{{.T "users.rateLabel"}}</th><th>{{.T "users.streamsLabel"}}</th></tr></thead>
+    <tbody>{{range $d.Overrides}}<tr><td><a href="/admin/users/edit?name={{.Name}}">{{.Name}}</a></td><td>{{if .ManifestRate}}{{num .ManifestRate}}{{else}}—{{end}}</td><td>{{if .BlobStreams}}{{num .BlobStreams}}{{else}}—{{end}}</td></tr>{{end}}</tbody>
+  </table></div>{{else}}<p class="ol-muted">{{.T "limits.noOverrides"}}</p>{{end}}
+</section>
+{{end}}

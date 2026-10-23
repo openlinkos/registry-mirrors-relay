@@ -222,6 +222,8 @@ func resolveSecrets(c *Config) []error {
 	if c.Admin.InitialAdmin.Password.IsSet() {
 		if err := c.Admin.InitialAdmin.Password.resolve(); err != nil {
 			errs = append(errs, fmt.Errorf("admin.initial_admin.password：%w", err))
+		} else if n := len(c.Admin.InitialAdmin.Password.Reveal()); n < 12 || n > 72 {
+			errs = append(errs, errors.New("admin.initial_admin.password 要 12 到 72 个字节"))
 		}
 	}
 	return errs

@@ -1,0 +1,63 @@
+{{define "content"}}{{$d := .Data}}{{$v := .}}
+{{template "header" (dict "Title" (.T "nav.overview") "Desc" (.T "overview.description") "Meta" (list (.T "overview.uptime" "d" $d.Uptime)))}}
+{{template "notices" .}}
+{{with $d.Warnings}}<div class="ol-notices">{{range .}}{{template "alert" (dict "Tone" "warning" "Text" .)}}{{end}}</div>{{end}}
+
+<section class="ol-section" aria-labelledby="now-title">
+  <div class="ol-section-header"><h2 class="ol-section-title" id="now-title">{{.T "overview.now"}}</h2><p class="ol-section-description">{{.T "overview.nowHelp"}}</p></div>
+  <div class="ol-stats">
+    <a class="ol-stat" href="/admin/requests"><span class="ol-stat-label"><span class="ol-stat-icon">{{icon "activity" "sm"}}</span>{{.T "overview.rpm"}}</span><span class="ol-stat-value" data-live="rpm">{{index $d.Live "rpm"}}</span><span class="ol-stat-meta">{{.T "overview.rpmMeta"}}</span></a>
+    <div class="ol-stat"><span class="ol-stat-label"><span class="ol-stat-icon">{{icon "download" "sm"}}</span>{{.T "overview.bytes1h"}}</span><span class="ol-stat-value" data-live="bytes1h">{{index $d.Live "bytes1h"}}</span><span class="ol-stat-meta">{{.T "overview.bytes1hMeta"}}</span></div>
+    <div class="ol-stat"><span class="ol-stat-label"><span class="ol-stat-icon">{{icon "hard-drive" "sm"}}</span>{{.T "overview.streams"}}</span><span class="ol-stat-value" data-live="streams">{{index $d.Live "streams"}}</span><span class="ol-stat-meta">{{.T "overview.inflight"}} <span data-live="inflight">{{index $d.Live "inflight"}}</span></span></div>
+    <a class="ol-stat" href="/admin/requests?status=5"><span class="ol-stat-label"><span class="ol-stat-icon ol-tone-danger">{{icon "circle-alert" "sm"}}</span>{{.T "overview.err1h"}}</span><span class="ol-stat-value" data-live="err1h">{{index $d.Live "err1h"}}</span><span class="ol-stat-meta">{{.T "overview.err1hMeta"}}</span></a>
+    <div class="ol-stat"><span class="ol-stat-label"><span class="ol-stat-icon">{{icon "database" "sm"}}</span>{{.T "overview.hit"}}</span><span class="ol-stat-value" data-live="hit">{{index $d.Live "hit"}}</span><span class="ol-stat-meta">{{.T "overview.cacheBytes"}} <span data-live="cacheBytes">{{index $d.Live "cacheBytes"}}</span></span></div>
+    <a class="ol-stat" href="/admin/limits"><span class="ol-stat-label"><span class="ol-stat-icon ol-tone-warning">{{icon "ban" "sm"}}</span>{{.T "overview.limited1h"}}</span><span class="ol-stat-value" data-live="limited1h">{{index $d.Live "limited1h"}}</span><span class="ol-stat-meta">{{.T "overview.limited1hMeta"}}</span></a>
+    <a class="ol-stat" href="/admin/upstreams"><span class="ol-stat-label"><span class="ol-stat-icon">{{icon "globe" "sm"}}</span>{{.T "overview.quota"}}</span><span class="ol-stat-value" data-live="quota">{{index $d.Live "quota"}}</span><span class="ol-stat-meta">{{with $d.Quota}}{{if .Window}}{{$v.T "overview.quotaWindow" "window" ($v.Dur .Window)}} · {{end}}{{time .Observed}}{{else}}{{$v.T "overview.quotaUnknown"}}{{end}}</span></a>
+  </div>
+</section>
+
+<section class="ol-section" aria-labelledby="day-title">
+  <div class="ol-section-header"><h2 class="ol-section-title" id="day-title">{{.T "overview.day"}}</h2><p class="ol-section-description">{{.T "overview.dayHelp" "requests" (num $d.Day.Requests) "bytes" (bytes $d.Day.Bytes) "limited" (num $d.Day.Limited)}}</p></div>
+  <div class="ol-grid ol-grid-2">
+    <div class="ol-panel">
+      <div class="ol-panel-header"><h3 class="ol-panel-title">{{icon "download"}}{{.T "overview.traffic"}}</h3><span class="ol-muted ol-text-sm">{{.T "overview.peak" "v" $d.Peak}}</span></div>
+      <div class="ol-panel-body">{{$d.Traffic}}<div class="admin-chart-axis"><span>{{.T "overview.dayAgo"}}</span><span>{{.T "overview.nowLabel"}}</span></div></div>
+    </div>
+    <div class="ol-panel">
+      <div class="ol-panel-header"><h3 class="ol-panel-title">{{icon "activity"}}{{.T "overview.requests"}}</h3><span class="ol-cluster ol-text-sm"><span class="admin-legend">{{.T "overview.legendRequests"}}</span><span class="admin-legend admin-legend-error">{{.T "overview.legendErrors"}}</span></span></div>
+      <div class="ol-panel-body">{{$d.Requests}}<div class="admin-chart-axis"><span>{{.T "overview.dayAgo"}}</span><span>{{.T "overview.nowLabel"}}</span></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="ol-section">
+  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "nav.upstreams"}}</h2><div class="ol-section-actions"><a class="ol-btn ol-btn-secondary ol-btn-sm" href="/admin/upstreams">{{.T "overview.allUpstreams"}}</a></div></div>
+  <div class="ol-table-wrap"><table class="ol-table">
+    <thead><tr><th>{{.T "upstreams.name"}}</th><th>{{.T "upstreams.status"}}</th><th class="ol-num">{{.T "upstreams.latency"}}</th><th>{{.T "upstreams.checked"}}</th></tr></thead>
+    <tbody>{{range $d.Upstreams}}<tr>
+      <td><span class="ol-cell-title">{{.Name}}</span><span class="ol-cell-sub ol-mono">{{.Registry}}</span></td>
+      <td>{{template "upstreamStatus" (dict "U" . "V" $v)}}</td>
+      <td class="ol-num">{{with .Health}}{{secs .Latency}}{{else}}—{{end}}</td>
+      <td class="ol-nowrap">{{with .Health}}{{time .Checked}}{{else}}—{{end}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>
+</section>
+
+<div class="ol-grid ol-grid-2">
+  <section class="ol-section">
+    <div class="ol-section-header"><h2 class="ol-section-title">{{.T "overview.topImages"}}</h2></div>
+    {{if $d.Images}}<div class="ol-table-wrap"><table class="ol-table ol-table-compact">
+      <thead><tr><th>{{.T "requests.image"}}</th><th class="ol-num">{{.T "overview.count"}}</th><th class="ol-num">{{.T "overview.bytes"}}</th></tr></thead>
+      <tbody>{{range $d.Images}}<tr><td class="admin-wrap"><a href="/admin/requests?image={{.Key}}">{{.Key}}</a></td><td class="ol-num">{{num .Count}}</td><td class="ol-num">{{bytes .Bytes}}</td></tr>{{end}}</tbody>
+    </table></div>{{else}}{{template "empty" (dict "Icon" "download" "Title" (.T "overview.noTraffic") "Text" (.T "overview.noTrafficText"))}}{{end}}
+  </section>
+  <section class="ol-section">
+    <div class="ol-section-header"><h2 class="ol-section-title">{{.T "overview.topClients"}}</h2><div class="ol-section-actions"><a class="ol-btn ol-btn-secondary ol-btn-sm" href="/admin/abuse">{{.T "nav.abuse"}}</a></div></div>
+    {{if $d.Clients}}<div class="ol-table-wrap"><table class="ol-table ol-table-compact">
+      <thead><tr><th>{{.T "requests.client"}}</th><th class="ol-num">{{.T "overview.count"}}</th><th class="ol-num">{{.T "overview.bytes"}}</th></tr></thead>
+      <tbody>{{range $d.Clients}}<tr><td class="ol-mono"><a href="/admin/requests?client_ip={{.Key}}">{{.Key}}</a></td><td class="ol-num">{{num .Count}}</td><td class="ol-num">{{bytes .Bytes}}</td></tr>{{end}}</tbody>
+    </table></div>{{else}}{{template "empty" (dict "Icon" "user" "Title" (.T "overview.noTraffic") "Text" (.T "overview.noTrafficText"))}}{{end}}
+  </section>
+</div>
+{{end}}
+

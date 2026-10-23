@@ -178,6 +178,8 @@ type Proxy struct {
 	// 试探仍失败时冷却时间加倍，最长 1 分钟。BreakerFailures 为 0 表示不熔断。
 	BreakerFailures int      `yaml:"breaker_failures"`
 	BreakerCooldown Duration `yaml:"breaker_cooldown"`
+	// HealthInterval 是探测各上游 /v2/ 的间隔（不算拉取次数），结果只给管理后台和指标看，不影响 readyz。0 表示不探测。
+	HealthInterval Duration `yaml:"health_interval"`
 }
 
 // Admin 是管理后台。

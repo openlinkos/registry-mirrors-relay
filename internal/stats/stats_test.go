@@ -101,3 +101,10 @@ func TestUnlisted(t *testing.T) {
 		t.Fatalf("%v", c.Unlisted())
 	}
 }
+
+func TestSeriesSinceInFuture(t *testing.T) {
+	c := New(nil)
+	if got := c.Series(time.Now().Add(time.Hour)); len(got) != 0 {
+		t.Fatalf("since 在将来时应返回空：%d", len(got))
+	}
+}

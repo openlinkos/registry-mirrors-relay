@@ -91,9 +91,16 @@ limits:
 #   blob_http2: false     # 镜像层默认走 HTTP/1.1，见 docs/benchmark.md
 #   breaker_failures: 5   # 连续 5 次连不上上游就熔断
 #   breaker_cooldown: 10s
+#   health_interval: 1m   # 探测各上游 /v2/ 的间隔（不算拉取次数），0 表示不探测
 
-# 管理后台和 API（见 docs/api.md）。运营数据（后台建的账号、规则、封禁）存在 data_dir/state.db。
+# 管理后台和 API（见 docs/admin.md、docs/api.md）。运营数据（后台建的账号、规则、封禁）存在 data_dir/state.db。
 admin:
+  # 第一个管理员：运营数据库里还没有管理员时按它创建。也可以停止服务后运行 registry-mirrors-relay admin create。
+  initial_admin:
+    username: admin
+    password: {env: RELAY_ADMIN_PASSWORD}   # 12 到 72 个字节
+  # 放在 https 反向代理之后远程访问时写上；不写时后台只接受用 127.0.0.1、localhost 访问
+  # public_url: https://admin.example.com
   api_tokens:
     - {name: ops, role: admin, token: {env: RELAY_ADMIN_TOKEN}}   # 至少 32 个字符：openssl rand -hex 32
   # store: {driver: none}   # k8s 多副本时：运营数据只读，全部来自配置文件

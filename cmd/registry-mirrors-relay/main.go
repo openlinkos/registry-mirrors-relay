@@ -3,12 +3,14 @@
 //	registry-mirrors-relay [serve] [-config 文件]   启动服务（默认子命令）
 //	registry-mirrors-relay check [-config 文件] [-print]
 //	registry-mirrors-relay hash-password [-user 名字] [-cost 12]
+//	registry-mirrors-relay admin create|password|list [-config 文件] [-name 名字] [-role admin|viewer]
 //	registry-mirrors-relay probe [-url http://127.0.0.1:8080/healthz]
 //	registry-mirrors-relay version
 package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -27,11 +29,14 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
 
+	"github.com/openlinkos/registry-mirrors-relay/internal/admin"
 	"github.com/openlinkos/registry-mirrors-relay/internal/api"
 	"github.com/openlinkos/registry-mirrors-relay/internal/app"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/ops"
 	"github.com/openlinkos/registry-mirrors-relay/internal/relay"
 	"github.com/openlinkos/registry-mirrors-relay/internal/server"
+	"github.com/openlinkos/registry-mirrors-relay/internal/store"
 	"github.com/openlinkos/registry-mirrors-relay/internal/version"
 )
 
@@ -54,6 +59,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cmdCheck(args, stdout, stderr)
 	case "hash-password":
 		return cmdHashPassword(args, stdin, stdout, stderr)
+	case "admin":
+		return cmdAdmin(args, stdin, stdout, stderr)
 	case "probe":
 		return cmdProbe(args, stderr)
 	case "version", "-version", "--version":
@@ -73,6 +80,10 @@ func usage(w io.Writer) {
   registry-mirrors-relay [serve] [-config 文件]        启动服务（默认）
   registry-mirrors-relay check [-config 文件] [-print] 校验配置，-print 打印生效的配置（密钥隐去）
   registry-mirrors-relay hash-password [-user 名字]    从标准输入读口令，输出 bcrypt 哈希（htpasswd 格式）
+  registry-mirrors-relay admin create -name 名字 [-role admin|viewer]   新建后台管理员（口令从标准输入读）
+  registry-mirrors-relay admin password -name 名字      重设后台管理员的口令（并启用）
+  registry-mirrors-relay admin list                     列出后台管理员
+                                                        admin 子命令要先停止服务：运营数据库同时只能被一个进程打开
   registry-mirrors-relay probe [-url 地址]             健康检查，给容器的 HEALTHCHECK 用
   registry-mirrors-relay version
 
@@ -142,13 +153,19 @@ func cmdServe(args []string, stderr io.Writer) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go a.Watch(ctx)     // 配置文件变化时自动重载
-	go a.Stats.Run(ctx) // 每小时把统计存进运营数据库
+	go a.Watch(ctx)          // 配置文件变化时自动重载
+	go a.Stats.Run(ctx)      // 每小时把统计存进运营数据库
+	go a.WatchUpstreams(ctx) // 每分钟探测一次各上游的 /v2/
 	watchSignals(ctx, a, log)
 
+	adminH, err := adminHandler(a, log)
+	if err != nil {
+		log.Error("启动失败", "err", err)
+		return 1
+	}
 	cfg := res.Config
 	srv := server.New(cfg, log, relay.New(relay.Deps{App: a, Log: log}),
-		server.Listener{Name: "管理后台", Addr: cfg.Listen.Admin, Handler: adminHandler(a)},
+		server.Listener{Name: "管理后台", Addr: cfg.Listen.Admin, Handler: adminH},
 		server.Listener{Name: "指标", Addr: cfg.Listen.Metrics, Handler: metricsHandler(a, cfg.Metrics.Pprof)},
 	)
 	if err := srv.Run(ctx); err != nil {
@@ -159,11 +176,20 @@ func cmdServe(args []string, stderr io.Writer) int {
 	return 0
 }
 
-// adminHandler 是管理后台的监听：/admin/api/v1/ 是 JSON API。网页后台在后续版本提供。
-func adminHandler(a *app.App) http.Handler {
+// adminHandler 是管理后台的监听：/admin/ 是网页后台，/admin/api/v1/ 是 JSON API（也认网页后台的会话），
+// 根路径跳转到 /admin/。
+func adminHandler(a *app.App, log *slog.Logger) (http.Handler, error) {
+	o := ops.New(a)
+	web, err := admin.New(a, o, admin.Options{Log: log})
+	if err != nil {
+		return nil, err
+	}
 	mux := http.NewServeMux()
-	mux.Handle(api.Prefix+"/", api.New(a))
-	return mux
+	mux.Handle(api.Prefix+"/", api.New(a, o, api.Options{Session: web.Session}))
+	mux.Handle("/admin/", web)
+	mux.Handle("/admin", web)
+	mux.Handle("GET /{$}", http.RedirectHandler("/admin/", http.StatusSeeOther))
+	return mux, nil
 }
 
 // metricsHandler 是指标的监听：/metrics，开了 metrics.pprof 时还有 /debug/pprof/。
@@ -281,6 +307,108 @@ func checkPassword(pw string) (string, error) {
 		return "", errors.New("口令最多 72 个字节（bcrypt 的上限）")
 	}
 	return pw, nil
+}
+
+// cmdAdmin 在服务停止时管理后台管理员：create、password、list。直接打开运营数据库（bbolt 同时只能被一个进程打开，
+// 服务在跑时会在 2 秒后报错）。操作记进审计，操作人是 cli:<系统用户>。
+func cmdAdmin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		fmt.Fprintln(stderr, "用法：registry-mirrors-relay admin create|password|list [-config 文件] [-name 名字] [-role admin|viewer]")
+		return 2
+	}
+	sub, args := args[0], args[1:]
+	fl := flag.NewFlagSet("admin "+sub, flag.ContinueOnError)
+	fl.SetOutput(stderr)
+	cfgPath := fl.String("config", "", "配置文件")
+	name := fl.String("name", "", "管理员的用户名")
+	role := fl.String("role", "admin", "角色：admin（可修改）或 viewer（只读）")
+	if err := fl.Parse(args); err != nil {
+		return 2
+	}
+	res, _, err := loadConfig(*cfgPath)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	cfg := res.Config
+	if cfg.Admin.Store.Driver != "bolt" {
+		fmt.Fprintln(stderr, "运营数据是只读的（admin.store.driver: none）：管理员来自配置里的 admin.initial_admin")
+		return 1
+	}
+	if sub != "list" && !ops.ValidName(*name) {
+		fmt.Fprintln(stderr, "要用 -name 给出用户名：字母、数字和 . _ -，以字母或数字开头，最长 64 个字符")
+		return 2
+	}
+	st, err := store.OpenBolt(cfg.Admin.Store.Path)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		fmt.Fprintln(stderr, "服务在运行时请先停止它，或者在网页后台里操作。")
+		return 1
+	}
+	defer func() { _ = st.Close() }()
+	actor := "cli:" + cmp.Or(os.Getenv("USER"), os.Getenv("USERNAME"), "unknown")
+
+	switch sub {
+	case "list":
+		for _, a := range st.Data().Admins {
+			status := "正常"
+			if a.Disabled {
+				status = "已停用"
+			}
+			fmt.Fprintln(stdout, strings.Join([]string{a.Name, a.Role, status, a.Created.Format(time.RFC3339)}, "  "))
+		}
+		return 0
+	case "create", "password":
+	default:
+		fmt.Fprintf(stderr, "不认识的 admin 子命令 %q（create、password、list）\n", sub)
+		return 2
+	}
+	if *role != "admin" && *role != "viewer" {
+		fmt.Fprintln(stderr, "-role 只能是 admin 或 viewer")
+		return 2
+	}
+	pw, err := readPassword(stdin, stderr)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	hash, err := ops.HashPassword(pw)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	err = st.Update(func(d *store.Data) error {
+		for i := range d.Admins {
+			if d.Admins[i].Name != *name {
+				continue
+			}
+			if sub == "create" {
+				return fmt.Errorf("管理员 %s 已存在，要重设口令请用 admin password", *name)
+			}
+			d.Admins[i].Hash, d.Admins[i].Disabled = hash, false
+			return nil
+		}
+		if sub == "password" {
+			return fmt.Errorf("没有管理员 %s，要新建请用 admin create", *name)
+		}
+		d.Admins = append(d.Admins, store.Admin{Name: *name, Hash: hash, Role: *role, Created: time.Now().UTC()})
+		return nil
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	action := "admin.create"
+	if sub == "password" {
+		action = "admin.update"
+	}
+	_ = st.Audit(store.AuditEntry{Actor: actor, Action: action, Target: *name, Detail: "cli"})
+	if sub == "create" {
+		fmt.Fprintf(stdout, "已创建管理员 %s（%s）\n", *name, *role)
+	} else {
+		fmt.Fprintf(stdout, "已重设 %s 的口令\n", *name)
+	}
+	return 0
 }
 
 func cmdProbe(args []string, stderr io.Writer) int {

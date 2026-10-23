@@ -72,6 +72,15 @@ type Admin struct {
 	Created  time.Time `json:"created"`
 }
 
+// Site 是在后台改的站点信息。设置了就整体代替配置文件里的 site（用法页、后台标题都用它）。
+type Site struct {
+	Name      string            `json:"name"`
+	Operator  string            `json:"operator,omitempty"`
+	Links     map[string]string `json:"links,omitempty"`
+	Updated   time.Time         `json:"updated"`
+	UpdatedBy string            `json:"updated_by,omitempty"`
+}
+
 // Data 是全部运营数据。很小（通常几 KB），整体读写。
 type Data struct {
 	Users      []ClientUser `json:"users,omitempty"`
@@ -82,6 +91,7 @@ type Data struct {
 	Admins     []Admin      `json:"admins,omitempty"`
 	// ExtraRedirectHosts 是在后台加进白名单的重定向主机（精确主机名，不是正则），按上游分
 	ExtraRedirectHosts map[string][]string `json:"extra_redirect_hosts,omitempty"`
+	Site               *Site               `json:"site,omitempty"`
 	Updated            time.Time           `json:"updated"`
 }
 

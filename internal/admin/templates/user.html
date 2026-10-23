@@ -1,0 +1,65 @@
+{{define "content"}}{{$u := .Data.User}}
+{{template "header" (dict "Title" $u.Name "Desc" (.T "user.description") "Meta" (list (.T "users.lastSeenMeta" "v" (.Ago $u.LastSeen))))}}
+{{template "notices" .}}
+{{if or (ne $u.Source "store") (not .CanWrite)}}
+<div class="ol-stack">
+  {{if ne $u.Source "store"}}{{template "alert" (dict "Tone" "info" "Text" (.T "user.fromFile"))}}{{end}}
+  <dl class="ol-dl">
+    <dt>{{.T "users.status"}}</dt><dd>{{if $u.Disabled}}{{.T "users.disabled"}}{{else}}{{.T "users.active"}}{{end}}</dd>
+    <dt>{{.T "users.rateLabel"}}</dt><dd>{{if $u.ManifestRate}}{{num $u.ManifestRate}}{{else}}{{.T "users.defaultLimits"}}{{end}}</dd>
+    <dt>{{.T "users.streamsLabel"}}</dt><dd>{{if $u.BlobStreams}}{{num $u.BlobStreams}}{{else}}{{.T "users.defaultLimits"}}{{end}}</dd>
+    {{with $u.Note}}<dt>{{$.T "users.note"}}</dt><dd>{{.}}</dd>{{end}}
+  </dl>
+</div>
+{{else}}
+<section class="ol-section">
+  <form method="post" action="/admin/users/update" class="ol-form">
+    {{template "csrf" .}}
+    <input type="hidden" name="name" value="{{$u.Name}}">
+    <div class="ol-field">
+      <label class="ol-check"><input type="checkbox" role="switch" class="ol-switch" name="disabled"{{if $u.Disabled}} checked{{end}}> {{.T "user.disable"}}</label>
+      <p class="ol-hint">{{.T "user.disableHint"}}</p>
+    </div>
+    <div class="ol-grid ol-grid-2">
+      <div class="ol-field">
+        <label class="ol-label" for="manifest_rate">{{.T "users.rateLabel"}}</label>
+        <input class="ol-input admin-input-short" id="manifest_rate" name="manifest_rate" type="number" min="0" max="1000" step="0.1" value="{{if $u.ManifestRate}}{{$u.ManifestRate}}{{end}}">
+        <p class="ol-hint">{{.T "users.rateHint"}}</p>
+      </div>
+      <div class="ol-field">
+        <label class="ol-label" for="blob_streams">{{.T "users.streamsLabel"}}</label>
+        <input class="ol-input admin-input-short" id="blob_streams" name="blob_streams" type="number" min="0" max="10000" step="1" value="{{if $u.BlobStreams}}{{$u.BlobStreams}}{{end}}">
+        <p class="ol-hint">{{.T "users.streamsHint"}}</p>
+      </div>
+    </div>
+    <div class="ol-field">
+      <label class="ol-label" for="note">{{.T "users.note"}}</label>
+      <input class="ol-input" id="note" name="note" value="{{$u.Note}}" maxlength="500">
+    </div>
+    <fieldset class="ol-fieldset">
+      <legend class="ol-label">{{.T "user.resetPassword"}}</legend>
+      <div class="ol-field">
+        <label class="ol-label" for="password">{{.T "user.newPassword"}}</label>
+        <input class="ol-input" id="password" type="password" name="password" minlength="12" maxlength="72" autocomplete="new-password">
+        <p class="ol-hint">{{.T "user.newPasswordHint"}}</p>
+      </div>
+      <label class="ol-check"><input type="checkbox" class="ol-checkbox" name="generate"> {{.T "user.generate"}}</label>
+    </fieldset>
+    <div class="ol-form-actions">
+      <button type="submit" class="ol-btn ol-btn-primary">{{icon "check" "sm"}}{{.T "action.save"}}</button>
+      <a class="ol-btn ol-btn-ghost" href="/admin/users">{{.T "action.cancel"}}</a>
+    </div>
+  </form>
+</section>
+<section class="ol-panel ol-panel-danger">
+  <div class="ol-panel-header"><h2 class="ol-panel-title">{{icon "triangle-alert"}}{{.T "user.deleteTitle"}}</h2></div>
+  <div class="ol-panel-body ol-stack">
+    <p>{{.T "user.deleteHelp" "name" $u.Name}}</p>
+    <form method="post" action="/admin/users/delete" data-confirm="{{.T "users.deleteConfirm" "name" $u.Name}}">
+      {{template "csrf" .}}<input type="hidden" name="name" value="{{$u.Name}}">
+      <button type="submit" class="ol-btn ol-btn-danger">{{icon "trash-2" "sm"}}{{.T "user.deleteButton" "name" $u.Name}}</button>
+    </form>
+  </div>
+</section>
+{{end}}
+{{end}}

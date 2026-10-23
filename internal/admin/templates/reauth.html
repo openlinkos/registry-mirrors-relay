@@ -1,0 +1,15 @@
+{{define "content"}}<h1 class="ol-auth-title">{{.T "auth.reauthTitle"}}</h1>
+<p>{{.T "auth.reauthHelp" "name" .Sess.Admin}}</p>
+{{with .FormErr}}{{template "alert" (dict "Tone" "danger" "Text" .)}}{{end}}
+<form method="post" action="/admin/reauth" class="ol-stack">
+  {{template "csrf" .}}
+  <input type="hidden" name="next" value="{{.Data.Next}}">
+  <input type="text" name="username" value="{{.Sess.Admin}}" autocomplete="username" hidden>
+  <div class="ol-field">
+    <label class="ol-label" for="password">{{.T "auth.password"}}</label>
+    <input class="ol-input ol-input-lg" id="password" type="password" name="password" required maxlength="128" autocomplete="current-password" spellcheck="false" autofocus>
+  </div>
+  <button type="submit" class="ol-btn ol-btn-primary ol-btn-lg ol-btn-block">{{.T "auth.confirm"}}</button>
+  <a class="ol-btn ol-btn-ghost ol-btn-block" href="/admin/">{{.T "action.cancel"}}</a>
+</form>
+{{end}}

@@ -1,0 +1,30 @@
+{{define "content"}}{{$v := .}}{{$d := .Data}}{{$f := $d.Filter}}
+{{template "header" (dict "Title" (.T "nav.requests") "Desc" (.T "requests.description"))}}
+{{template "notices" .}}
+<form method="get" action="/admin/requests" class="ol-toolbar" role="search">
+  <div class="ol-field ol-grow"><label class="ol-label" for="q">{{.T "requests.search"}}</label><input class="ol-input ol-input-sm" id="q" type="search" name="q" value="{{$f.Get "q"}}" placeholder="{{.T "requests.searchHint"}}" maxlength="200"></div>
+  <div class="ol-field"><label class="ol-label" for="client_ip">{{.T "requests.client"}}</label><input class="ol-input ol-input-sm ol-input-mono admin-input-short" id="client_ip" name="client_ip" value="{{$f.Get "client_ip"}}" maxlength="64" spellcheck="false"></div>
+  <div class="ol-field"><label class="ol-label" for="image">{{.T "requests.image"}}</label><input class="ol-input ol-input-sm ol-input-mono" id="image" name="image" value="{{$f.Get "image"}}" maxlength="300" spellcheck="false"></div>
+  <div class="ol-field"><label class="ol-label" for="upstream">{{.T "requests.upstream"}}</label><select class="ol-select ol-input-sm" id="upstream" name="upstream"><option value="">{{.T "requests.any"}}</option>{{range $d.Upstreams}}<option value="{{.}}"{{if eq ($f.Get "upstream") .}} selected{{end}}>{{.}}</option>{{end}}</select></div>
+  <div class="ol-field"><label class="ol-label" for="status">{{.T "requests.status"}}</label><select class="ol-select ol-input-sm" id="status" name="status">{{$s := $f.Get "status"}}<option value="">{{.T "requests.any"}}</option>{{range (list "2" "3" "4" "5" "429")}}<option value="{{.}}"{{if eq $s .}} selected{{end}}>{{if eq (len .) 1}}{{.}}xx{{else}}{{.}}{{end}}</option>{{end}}</select></div>
+  <button type="submit" class="ol-btn ol-btn-secondary ol-btn-sm">{{icon "filter" "sm"}}{{.T "requests.filter"}}</button>
+  {{if $d.Filtered}}<a class="ol-btn ol-btn-ghost ol-btn-sm" href="/admin/requests">{{icon "x" "sm"}}{{.T "requests.clear"}}</a>{{end}}
+</form>
+<section class="ol-section">
+  {{if $d.Rows}}<div class="ol-table-wrap"><table class="ol-table ol-table-compact">
+    <thead><tr><th>{{.T "requests.time"}}</th><th>{{.T "requests.client"}}</th><th>{{.T "requests.request"}}</th><th>{{.T "requests.status"}}</th><th class="ol-num">{{.T "requests.size"}}</th><th class="ol-num">{{.T "requests.duration"}}</th><th>{{.T "requests.cache"}}</th></tr></thead>
+    <tbody>{{range $d.Rows}}<tr>
+      <td class="ol-nowrap">{{time .Time}}</td>
+      <td><a class="ol-mono" href="/admin/requests?client_ip={{.ClientIP}}">{{.ClientIP}}</a>{{with .User}}<span class="ol-cell-sub">{{.}}</span>{{end}}</td>
+      <td class="admin-wrap">{{if .Image}}<a class="ol-cell-title" href="/admin/requests?image={{.Image}}">{{.Image}}</a>{{end}}<span class="ol-cell-sub ol-mono">{{.Method}} {{.Host}}{{.URI}}</span>{{with .Error}}<span class="ol-cell-sub">{{.}}</span>{{end}}</td>
+      <td>{{template "badge" (dict "Text" (str .Status) "Tone" (tone .Status))}}</td>
+      <td class="ol-num">{{bytes .Size}}</td>
+      <td class="ol-num">{{secs .Duration}}</td>
+      <td>{{if .Cache}}{{.Cache}}{{else}}—{{end}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>
+  {{template "pager" (dict "V" $v "Page" $d.Pager.Page "Prev" $d.Pager.Prev "Next" $d.Pager.Next)}}
+  <p class="ol-hint admin-after">{{.T "requests.ringHelp"}}</p>
+  {{else}}{{template "empty" (dict "Icon" "list" "Title" (.T "requests.none") "Text" (.T "requests.noneText"))}}{{end}}
+</section>
+{{end}}

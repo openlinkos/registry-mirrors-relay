@@ -1,0 +1,37 @@
+{{define "content"}}{{$d := .Data}}
+{{template "header" (dict "Title" (.T "nav.system") "Desc" (.T "system.description"))}}
+{{template "notices" .}}
+{{with $d.Reload}}{{if .Err}}<div class="ol-notices">{{template "alert" (dict "Tone" "danger" "Title" ($.T "system.reloadFailed") "Text" .Err)}}</div>{{end}}{{if .Restart}}<div class="ol-notices">{{template "alert" (dict "Tone" "warning" "Text" ($.T "overview.restartNeeded" "fields" (join .Restart ", ")))}}</div>{{end}}{{end}}
+<div class="ol-grid ol-grid-2">
+  <section class="ol-panel">
+    <div class="ol-panel-header"><h2 class="ol-panel-title">{{icon "cpu"}}{{.T "system.process"}}</h2></div>
+    <div class="ol-panel-body"><dl class="ol-dl">
+      <dt>{{.T "system.version"}}</dt><dd class="ol-mono">{{$d.Version}} ({{$d.Go}})</dd>
+      <dt>{{.T "system.started"}}</dt><dd>{{time $d.Started}} · {{$d.Uptime}}</dd>
+      <dt>{{.T "system.memory"}}</dt><dd>{{.T "system.memoryValue" "heap" (bytes $d.HeapInuse) "sys" (bytes $d.Sys)}}</dd>
+      <dt>{{.T "system.memLimit"}}</dt><dd>{{if $d.MemLimit}}{{bytes $d.MemLimit}}{{else}}{{.T "system.noLimit"}}{{end}}</dd>
+      <dt>{{.T "system.goroutines"}}</dt><dd>{{num $d.Goroutines}} · GOMAXPROCS {{$d.Procs}}</dd>
+      <dt>{{.T "system.dropped"}}</dt><dd>{{num $d.Dropped}}</dd>
+    </dl></div>
+  </section>
+  <section class="ol-panel">
+    <div class="ol-panel-header"><h2 class="ol-panel-title">{{icon "settings"}}{{.T "system.config"}}</h2></div>
+    <div class="ol-panel-body ol-stack"><dl class="ol-dl">
+      <dt>{{.T "system.configPath"}}</dt><dd class="ol-mono ol-break">{{if $d.ConfigPath}}{{$d.ConfigPath}}{{else}}{{.T "system.defaultsOnly"}}{{end}}</dd>
+      <dt>{{.T "system.runtimeBuilt"}}</dt><dd>{{time $d.Built}}</dd>
+      <dt>{{.T "system.lastReload"}}</dt><dd>{{with $d.Reload}}{{time .Time}}{{if .Err}} · {{$.T "system.failed"}}{{end}}{{else}}—{{end}}</dd>
+      <dt>{{.T "system.store"}}</dt><dd class="ol-mono ol-break">{{$d.StoreDriver}}{{if eq $d.StoreDriver "bolt"}} · {{$d.StorePath}}{{end}}{{if not $d.Writable}} · {{.T "system.readOnly"}}{{end}}</dd>
+      <dt>{{.T "system.listeners"}}</dt><dd class="ol-mono">{{.T "system.adminAt" "addr" $d.Admin}} · {{.T "system.metricsAt" "addr" $d.Metrics}}</dd>
+      <dt>{{.T "system.pprof"}}</dt><dd>{{if $d.Pprof}}{{.T "system.pprofOn" "addr" $d.Metrics}}{{else}}{{.T "system.pprofOff"}}{{end}}</dd>
+    </dl>
+    {{if .IsAdmin}}<form method="post" action="/admin/reload">{{template "csrf" .}}<button type="submit" class="ol-btn ol-btn-secondary ol-btn-sm"{{if not $d.ConfigPath}} disabled{{end}}>{{icon "refresh-cw" "sm"}}{{.T "system.reload"}}</button></form><p class="ol-hint">{{.T "system.reloadHelp"}}</p>{{end}}
+    </div>
+  </section>
+</div>
+<section class="ol-section">
+  <details class="ol-details"><summary>{{.T "system.effective"}}</summary>
+    {{template "snippet" (dict "ID" "config-yaml" "Label" "config.yaml" "Code" $d.Config "V" .)}}
+    <p class="ol-hint">{{.T "system.effectiveHelp"}}</p>
+  </details>
+</section>
+{{end}}

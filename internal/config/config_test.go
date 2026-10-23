@@ -146,11 +146,11 @@ upstreams:
 
 func TestSecretFromFileAndMissing(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "pw")
-	if err := os.WriteFile(p, []byte("s3cret\n"), 0o600); err != nil {
+	if err := os.WriteFile(p, []byte("s3cret-passphrase\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	res := mustParse(t, "admin:\n  initial_admin:\n    username: root\n    password: {file: "+filepath.ToSlash(p)+"}\n")
-	if res.Config.Admin.InitialAdmin.Password.Reveal() != "s3cret" {
+	if res.Config.Admin.InitialAdmin.Password.Reveal() != "s3cret-passphrase" {
 		t.Fatal("文件末尾的换行应去掉")
 	}
 	parseErr(t, "admin:\n  initial_admin:\n    username: root\n    password: {env: NOT_SET_ANYWHERE_42}\n")
@@ -241,6 +241,7 @@ func TestExampleConfig(t *testing.T) {
 	}
 	t.Setenv("DOCKERHUB_TOKEN", "x")
 	t.Setenv("RELAY_ADMIN_TOKEN", "0123456789abcdef0123456789abcdef")
+	t.Setenv("RELAY_ADMIN_PASSWORD", "example-admin-password")
 	if _, err := Parse(b); err != nil {
 		t.Fatalf("示例配置应能通过校验：%v", err)
 	}

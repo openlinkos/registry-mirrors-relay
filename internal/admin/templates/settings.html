@@ -1,0 +1,34 @@
+{{define "content"}}{{$v := .}}{{$d := .Data}}{{$s := $d.Site}}
+{{template "header" (dict "Title" (.T "nav.settings") "Desc" (.T "settings.description"))}}
+{{template "notices" .}}
+<section class="ol-section">
+  <div class="ol-section-header">
+    <h2 class="ol-section-title">{{.T "settings.site"}}</h2>
+    <p class="ol-section-description">{{if eq $s.Source "store"}}{{.T "settings.fromStore" "by" $s.UpdatedBy}} {{time $s.Updated}}{{else}}{{.T "settings.fromConfig"}}{{end}}</p>
+  </div>
+  {{if .CanWrite}}<form method="post" action="/admin/settings/site" class="ol-form">
+    {{template "csrf" .}}
+    <div class="ol-grid ol-grid-2">
+      <div class="ol-field"><label class="ol-label" for="name">{{.T "settings.name"}} <span class="ol-required">*</span></label><input class="ol-input" id="name" name="name" value="{{or (.F "name") $s.Name}}" required maxlength="80" aria-describedby="name-hint"><p class="ol-hint" id="name-hint">{{.T "settings.nameHint"}}</p></div>
+      <div class="ol-field"><label class="ol-label" for="operator">{{.T "settings.operator"}}</label><input class="ol-input" id="operator" name="operator" value="{{or (.F "operator") $s.Operator}}" maxlength="120" aria-describedby="operator-hint"><p class="ol-hint" id="operator-hint">{{.T "settings.operatorHint"}}</p></div>
+      {{range $d.LinkKeys}}<div class="ol-field"><label class="ol-label" for="link_{{.}}">{{$v.T (print "settings.link." .)}}</label><input class="ol-input ol-input-mono" id="link_{{.}}" name="link_{{.}}" type="url" value="{{or ($v.F (print "link_" .)) (index $s.Links .)}}" placeholder="https://" maxlength="500" spellcheck="false"></div>{{end}}
+    </div>
+    <div class="ol-form-actions"><button type="submit" class="ol-btn ol-btn-primary">{{icon "check" "sm"}}{{.T "action.save"}}</button></div>
+  </form>
+  {{if eq $s.Source "store"}}<form method="post" action="/admin/settings/reset" class="admin-after" data-confirm="{{.T "settings.resetConfirm"}}">{{template "csrf" .}}<button type="submit" class="ol-btn ol-btn-ghost ol-btn-sm">{{icon "refresh-cw" "sm"}}{{.T "settings.reset"}}</button></form>{{end}}
+  {{else}}<dl class="ol-dl">
+    <dt>{{.T "settings.name"}}</dt><dd>{{$s.Name}}</dd>
+    <dt>{{.T "settings.operator"}}</dt><dd>{{if $s.Operator}}{{$s.Operator}}{{else}}—{{end}}</dd>
+    {{range $d.LinkKeys}}<dt>{{$v.T (print "settings.link." .)}}</dt><dd class="ol-mono ol-break">{{with index $s.Links .}}{{.}}{{else}}—{{end}}</dd>{{end}}
+  </dl>{{end}}
+</section>
+
+<section class="ol-section">
+  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "settings.log"}}</h2><p class="ol-section-description">{{.T "settings.logHelp"}}</p></div>
+  <dl class="ol-dl">
+    <dt>{{.T "settings.logLevel"}}</dt><dd class="ol-mono">{{$d.Log.Level}}</dd>
+    <dt>{{.T "settings.accessLog"}}</dt><dd class="ol-mono">{{$d.Log.Access.Output}}{{if eq $d.Log.Access.Output "file"}} → {{$d.Log.Access.Path}}{{end}}</dd>
+    {{if eq $d.Log.Access.Output "file"}}<dt>{{.T "settings.rotation"}}</dt><dd>{{.T "settings.rotationValue" "size" (str $d.Log.Access.MaxSize) "keep" (num $d.Log.Access.Keep)}}</dd>{{end}}
+  </dl>
+</section>
+{{end}}

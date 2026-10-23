@@ -1,0 +1,22 @@
+{{define "content"}}<h1 class="ol-auth-title">{{.T "auth.signIn"}}</h1>
+<p>{{.T "auth.signInHelp"}}</p>
+{{with .FormErr}}{{template "alert" (dict "Tone" "danger" "Text" .)}}{{end}}
+{{if .Data.NoAdmins}}{{template "alert" (dict "Tone" "info" "Title" (.T "auth.noAdminsTitle") "Text" (.T "auth.noAdmins"))}}{{end}}
+<form method="post" action="/admin/login" class="ol-stack">
+  <input type="hidden" name="next" value="{{.Data.Next}}">
+  <div class="ol-field">
+    <label class="ol-label" for="username">{{.T "auth.username"}}</label>
+    <input class="ol-input ol-input-lg" id="username" type="text" name="username" value="{{.Data.Username}}" required maxlength="64" autocomplete="username" autocapitalize="none" spellcheck="false"{{if not .Data.Username}} autofocus{{end}}>
+  </div>
+  <div class="ol-field">
+    <label class="ol-label" for="password">{{.T "auth.password"}}</label>
+    <input class="ol-input ol-input-lg" id="password" type="password" name="password" required maxlength="128" autocomplete="current-password" spellcheck="false"{{if .Data.Username}} autofocus{{end}}>
+  </div>
+  <button type="submit" class="ol-btn ol-btn-primary ol-btn-lg ol-btn-block">{{.T "auth.signIn"}}</button>
+</form>
+<details class="ol-details">
+  <summary>{{.T "auth.forgot"}}</summary>
+  <p class="ol-hint">{{.T "auth.forgotHelp"}}</p>
+  <div class="ol-code"><pre><code>registry-mirrors-relay admin password -config /etc/registry-mirrors-relay/config.yaml -name &lt;{{.T "auth.username"}}&gt;</code></pre></div>
+</details>
+{{end}}

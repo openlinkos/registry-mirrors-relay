@@ -45,7 +45,7 @@
 - [x] M1 代理核心：按域名、端口和单域名（前缀、`ns`、根路径）的入口，令牌、重定向、访问日志、用法页
 - [x] M2 manifest 缓存、熔断、性能压测（结果见 [docs/benchmark.md](docs/benchmark.md)）
 - [x] M3 访问控制与运营数据：账号、IP 和镜像规则、限流、指标、热重载、[管理 API](docs/api.md)
-- [ ] M4 管理后台
+- [x] M4 [管理后台](docs/admin.md)：概览、上游、用法配置生成、账号、规则、限流、请求、滥用、审计、设置、管理员与令牌，中英文、深浅色
 - [ ] M5 部署与发布：镜像、Compose、Kubernetes、签名的 v0.1.0
 - [ ] M6 Helm chart
 

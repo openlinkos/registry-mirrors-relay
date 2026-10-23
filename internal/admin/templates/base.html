@@ -1,0 +1,154 @@
+{{define "layout"}}<!doctype html>
+<html lang="{{.HTMLLang}}"{{if ne .Theme "auto"}} data-theme="{{.Theme}}"{{end}}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="same-origin">
+<meta name="color-scheme" content="{{if eq .Theme "auto"}}light dark{{else}}{{.Theme}}{{end}}">
+<title>{{.Title}} – {{.SiteName}} {{.T "app.admin"}}</title>
+<link rel="icon" href="{{.Asset "favicon.svg"}}" type="image/svg+xml">
+<link rel="stylesheet" href="{{.Asset "ui.css"}}">
+<link rel="stylesheet" href="{{.Asset "admin.css"}}">
+<script type="module" src="{{.Asset "admin.js"}}"></script>
+</head>
+<body data-brand="linkos-mirrors">
+<svg data-sprite hidden></svg>
+{{if or .Bare (not .Sess)}}{{template "authShell" .}}{{else}}{{template "appShell" .}}{{end}}
+</body>
+</html>
+{{end}}
+
+{{define "logo"}}{{if eq .V.Theme "dark"}}<img src="{{.V.Asset "logo-dark.svg"}}" alt="" width="{{.Size}}" height="{{.Size}}">{{else if eq .V.Theme "light"}}<img src="{{.V.Asset "logo.svg"}}" alt="" width="{{.Size}}" height="{{.Size}}">{{else}}<picture><source media="(prefers-color-scheme: dark)" srcset="{{.V.Asset "logo-dark.svg"}}"><img src="{{.V.Asset "logo.svg"}}" alt="" width="{{.Size}}" height="{{.Size}}"></picture>{{end}}{{end}}
+
+{{define "langForm"}}<form method="post" action="/admin/prefs">
+  <input type="hidden" name="lang" value="{{.V.OtherLang}}">
+  <input type="hidden" name="next" value="{{.V.Here}}">
+  <button type="submit" class="{{.Class}}" lang="{{.V.OtherHTMLLang}}">{{icon "languages" "sm"}}{{.V.T "prefs.switchLanguage"}}</button>
+</form>{{end}}
+
+{{define "themeForm"}}<form method="post" action="/admin/prefs">
+  <input type="hidden" name="next" value="{{.V.Here}}">
+  <fieldset class="ol-segmented{{if not .Compact}} ol-segmented-block{{end}}">
+    <legend class="ol-sr-only">{{.V.T "prefs.theme"}}</legend>
+    {{$v := .V}}{{$compact := .Compact}}
+    {{range $t := (list "auto" "light" "dark")}}<button type="submit" name="theme" value="{{$t}}" aria-pressed="{{if eq $v.Theme $t}}true{{else}}false{{end}}" title="{{$v.T (print "theme." $t)}}"{{if $compact}} aria-label="{{$v.T (print "theme." $t)}}"{{end}}>{{if eq $t "auto"}}{{icon "sun-moon" "sm"}}{{else if eq $t "light"}}{{icon "sun" "sm"}}{{else}}{{icon "moon" "sm"}}{{end}}{{if not $compact}}{{$v.T (print "theme." $t)}}{{end}}</button>{{end}}
+  </fieldset>
+</form>{{end}}
+
+{{define "appShell"}}<a class="ol-skip-link" href="#main">{{.T "nav.skip"}}</a>
+<div class="ol-app">
+  <aside class="ol-sidebar">
+    <input type="checkbox" id="nav-toggle" class="ol-nav-toggle">
+    <div class="ol-sidebar-head">
+      <a class="ol-brand" href="/admin/">{{template "logo" (dict "V" . "Size" 22)}}<span>{{.SiteName}}</span></a>
+      <span class="ol-brand-tag">{{.T "app.admin"}}</span>
+      <label for="nav-toggle" class="ol-btn ol-btn-ghost ol-btn-icon ol-nav-toggle-button">{{icon "menu"}}<span class="ol-sr-only">{{.T "nav.menu"}}</span></label>
+    </div>
+    <nav class="ol-nav" aria-label="{{.T "nav.label"}}">
+      {{range .NavGroups}}<div class="ol-nav-group">
+        {{if .Label}}<div class="ol-nav-label">{{.Label}}</div>{{end}}
+        {{range .Items}}<a class="ol-nav-item" href="{{.Path}}"{{if .Current}} aria-current="page"{{end}}>{{icon .Icon}}{{.Label}}</a>
+        {{end}}
+      </div>
+      {{end}}
+    </nav>
+    <div class="ol-sidebar-foot">
+      {{template "themeForm" (dict "V" . "Compact" false)}}
+      <div class="ol-cluster">
+        <a class="ol-btn ol-btn-ghost ol-btn-sm" href="/admin/account">{{icon "user" "sm"}}{{.Sess.Admin}}</a>
+        {{template "langForm" (dict "V" . "Class" "ol-btn ol-btn-ghost ol-btn-sm")}}
+        <form method="post" action="/admin/logout"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button type="submit" class="ol-btn ol-btn-ghost ol-btn-sm">{{icon "log-out" "sm"}}{{.T "auth.signOut"}}</button></form>
+      </div>
+    </div>
+  </aside>
+  <div class="ol-main">
+    <header class="ol-topbar">
+      <nav aria-label="{{.T "nav.breadcrumb"}}"><ol class="ol-breadcrumb">
+        {{with .Group}}<li>{{.}}</li>{{end}}
+        {{range .Crumbs}}<li>{{if .Href}}<a href="{{.Href}}">{{.Label}}</a>{{else}}{{.Label}}{{end}}</li>{{end}}
+        <li><span aria-current="page">{{.Title}}</span></li>
+      </ol></nav>
+      {{if ne .Nav "requests"}}<div class="ol-topbar-actions">
+        <form class="ol-search" method="get" action="/admin/requests" role="search">
+          {{icon "search"}}
+          <input class="ol-input" type="search" name="q" placeholder="{{.T "search.quick"}}" aria-label="{{.T "search.label"}}">
+        </form>
+      </div>{{end}}
+    </header>
+    <main class="ol-content" id="main" tabindex="-1">
+{{if not .Writable}}<div class="ol-notices">{{template "alert" (dict "Tone" "info" "Text" (.T "readonly.banner"))}}</div>{{end}}
+{{template "content" .}}
+    </main>
+    <footer class="ol-footer"><span>registry-mirrors-relay {{.Version}}</span><a href="https://github.com/openlinkos/registry-mirrors-relay" rel="noreferrer">{{.T "app.docs"}}</a></footer>
+  </div>
+</div>{{end}}
+
+{{define "authShell"}}<main class="ol-auth" id="main">
+  {{if .Bare}}<aside class="ol-auth-aside">
+    <div class="ol-auth-rings" aria-hidden="true"></div>
+    <a class="ol-auth-brand" href="/admin/"><img src="{{.Asset "logo-dark.svg"}}" alt="" width="24" height="24"><span>{{.SiteName}}</span></a>
+    <p class="ol-auth-statement">{{.T "auth.statement"}}</p>
+  </aside>{{end}}
+  <div class="ol-auth-body">
+    <div class="ol-auth-card">
+{{template "content" .}}
+    </div>
+    <div class="ol-auth-foot">
+      <span>registry-mirrors-relay {{.Version}}</span>
+      {{template "langForm" (dict "V" . "Class" "ol-btn ol-btn-link")}}
+      <a href="https://github.com/openlinkos/registry-mirrors-relay" rel="noreferrer">{{.T "app.docs"}}</a>
+      {{template "themeForm" (dict "V" . "Compact" true)}}
+    </div>
+  </div>
+</main>{{end}}
+
+{{/* 页头：标题、说明、元信息 */}}
+{{define "header"}}<div class="ol-page-header">
+  <div class="ol-page-heading">
+    <h1 class="ol-page-title">{{.Title}}</h1>
+    {{with .Desc}}<p class="ol-page-description">{{.}}</p>{{end}}
+    {{with .Meta}}<ul class="ol-page-meta">{{range .}}<li>{{.}}</li>{{end}}</ul>{{end}}
+  </div>
+</div>{{end}}
+
+{{/* 成功提示（PRG 跳转回来时）和表单错误 */}}
+{{define "notices"}}{{if or .Notice .FormErr}}<div class="ol-notices">
+  {{with .Notice}}{{template "alert" (dict "Tone" "success" "Text" .)}}{{end}}
+  {{with .FormErr}}{{template "alert" (dict "Tone" "danger" "Text" .)}}{{end}}
+</div>{{end}}{{end}}
+
+{{define "alert"}}<div class="ol-alert ol-alert-{{.Tone}}" role="{{if eq .Tone "danger"}}alert{{else}}status{{end}}">{{if eq .Tone "success"}}{{icon "circle-check"}}{{else if eq .Tone "warning"}}{{icon "triangle-alert"}}{{else if eq .Tone "danger"}}{{icon "circle-alert"}}{{else}}{{icon "info"}}{{end}}<div class="ol-alert-body">{{with .Title}}<p class="ol-alert-title">{{.}}</p>{{end}}<p>{{.Text}}</p></div></div>{{end}}
+
+{{define "empty"}}<div class="ol-empty">
+  <span class="ol-empty-icon">{{icon .Icon "lg"}}</span>
+  <p class="ol-empty-title">{{.Title}}</p>
+  {{with .Text}}<p class="ol-empty-text">{{.}}</p>{{end}}
+</div>{{end}}
+
+{{define "badge"}}<span class="ol-badge{{if and .Tone (ne .Tone "neutral")}} ol-badge-{{.Tone}}{{end}}{{if .Square}} ol-badge-square{{end}}">{{if .Dot}}<span class="ol-dot"></span>{{end}}{{.Text}}</span>{{end}}
+
+{{define "source"}}{{if eq .Source "config"}}{{template "badge" (dict "Text" (.V.T "source.config") "Square" true)}}{{else}}{{template "badge" (dict "Text" (.V.T "source.store") "Tone" "accent" "Square" true)}}{{end}}{{end}}
+
+{{define "copy"}}<button type="button" class="ol-btn ol-btn-ghost ol-btn-sm ol-btn-icon ol-copy" data-copy="{{.ID}}" data-copied="{{.V.T "action.copied"}}" aria-label="{{.V.T "action.copy"}}" title="{{.V.T "action.copy"}}" hidden><span data-copy-icon>{{icon "copy" "sm"}}</span><span data-copied-icon hidden>{{icon "check" "sm"}}</span></button>{{end}}
+
+{{define "copyLabelled"}}<button type="button" class="ol-btn ol-btn-secondary ol-btn-sm" data-copy="{{.ID}}" data-copied="{{.V.T "action.copied"}}" hidden><span data-copy-icon>{{icon "copy" "sm"}}</span><span data-copied-icon hidden>{{icon "check" "sm"}}</span><span data-copy-label>{{.V.T "action.copy"}}</span></button>{{end}}
+
+{{define "snippet"}}<div class="ol-code">
+  <div class="ol-code-label">{{icon "terminal" "sm"}}{{.Label}}</div>
+  <pre id="{{.ID}}"><code>{{.Code}}</code></pre>
+  {{template "copy" (dict "ID" .ID "V" .V)}}
+</div>{{end}}
+
+{{define "csrf"}}<input type="hidden" name="_csrf" value="{{.CSRF}}">{{end}}
+
+{{/* 表格行里的删除按钮：一个只有隐藏字段的小表单 */}}
+{{define "deleteButton"}}<form method="post" action="{{.Action}}" class="admin-inline" data-confirm="{{.Confirm}}">
+  <input type="hidden" name="_csrf" value="{{.V.CSRF}}">
+  {{range $k, $v := .Fields}}<input type="hidden" name="{{$k}}" value="{{$v}}">{{end}}
+  <button type="submit" class="ol-btn ol-btn-danger-soft ol-btn-xs">{{icon "trash-2" "sm"}}{{if .Label}}{{.Label}}{{else}}{{.V.T "action.delete"}}{{end}}</button>
+</form>{{end}}
+
+{{define "pager"}}{{if or .Prev .Next}}<nav class="ol-pager" aria-label="{{.V.T "pager.label"}}"><span>{{.V.T "pager.page" "n" .Page}}</span><span class="ol-pager-links">{{if .Prev}}<a class="ol-btn ol-btn-secondary ol-btn-sm" href="{{.Prev}}">{{.V.T "pager.previous"}}</a>{{else}}<a class="ol-btn ol-btn-secondary ol-btn-sm" aria-disabled="true">{{.V.T "pager.previous"}}</a>{{end}}{{if .Next}}<a class="ol-btn ol-btn-secondary ol-btn-sm" href="{{.Next}}">{{.V.T "pager.next"}}</a>{{else}}<a class="ol-btn ol-btn-secondary ol-btn-sm" aria-disabled="true">{{.V.T "pager.next"}}</a>{{end}}</span></nav>{{end}}{{end}}
+
+{{define "upstreamStatus"}}{{if .U.BreakerOpen}}{{template "badge" (dict "Text" (.V.T "upstreams.breakerOpen") "Tone" "danger" "Dot" true)}}{{else if not .U.Health}}{{template "badge" (dict "Text" (.V.T "upstreams.unknown") "Dot" true)}}{{else if .U.Health.OK}}{{template "badge" (dict "Text" (.V.T "upstreams.ok") "Tone" "success" "Dot" true)}}{{else}}{{template "badge" (dict "Text" (.V.T "upstreams.down") "Tone" "danger" "Dot" true)}}{{end}}{{end}}

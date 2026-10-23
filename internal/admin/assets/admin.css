@@ -1,0 +1,79 @@
+/*
+ * 管理后台对 OpenLinkOS 设计系统（@openlinkos/ui，先于本文件以 ui.css 加载）的少量补充。
+ * 其余全部用设计系统自己的类。只用设计系统的变量，不写死颜色。规则不在任何层里，所以优先于设计系统。
+ */
+
+/* 概览页的曲线：服务端画好的 SVG，颜色在这里给，页面里没有内联样式。 */
+.admin-chart {
+  display: block;
+  inline-size: 100%;
+  block-size: 9rem;
+}
+
+.admin-chart-grid {
+  stroke: var(--ol-color-border);
+  stroke-width: 1;
+}
+
+.admin-chart-area {
+  fill: var(--ol-color-accent-bg);
+}
+
+.admin-chart-line {
+  fill: none;
+  stroke: var(--ol-color-accent-solid);
+  stroke-width: 1.5;
+}
+
+.admin-chart-error {
+  fill: none;
+  stroke: var(--ol-color-danger-solid);
+  stroke-width: 1.5;
+}
+
+.admin-chart-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--ol-space-2);
+  margin-block-start: var(--ol-space-1);
+  color: var(--ol-color-fg-muted);
+  font-size: var(--ol-font-size-xs);
+}
+
+.admin-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ol-space-1);
+}
+
+.admin-legend::before {
+  content: "";
+  inline-size: 0.75rem;
+  block-size: 2px;
+  background: var(--ol-color-accent-solid);
+}
+
+.admin-legend-error::before {
+  background: var(--ol-color-danger-solid);
+}
+
+/* 表格行里的小表单（删除、加入白名单）：和按钮一样只占自己的宽度。 */
+.admin-inline {
+  display: inline-flex;
+  margin: 0;
+}
+
+/* 表格里较长的值（URI、正则）：换行，不撑宽表格。 */
+.admin-wrap {
+  overflow-wrap: anywhere;
+  max-inline-size: 36rem;
+}
+
+.admin-input-short {
+  max-inline-size: 9rem;
+}
+
+/* 表单底下的说明、表格后面的文字。 */
+.admin-after {
+  margin-block-start: var(--ol-space-3);
+}

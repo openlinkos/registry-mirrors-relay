@@ -1,0 +1,55 @@
+{{define "content"}}{{$v := .}}
+{{template "header" (dict "Title" (.T "nav.users") "Desc" (.T "users.description"))}}
+{{template "notices" .}}
+<section class="ol-section">
+  {{if .Data}}<div class="ol-table-wrap"><table class="ol-table">
+    <thead><tr><th>{{.T "users.name"}}</th><th>{{.T "users.status"}}</th><th>{{.T "users.limits"}}</th><th>{{.T "users.lastSeen"}}</th><th>{{.T "users.created"}}</th><th></th></tr></thead>
+    <tbody>{{range .Data}}<tr>
+      <td><a class="ol-cell-title" href="/admin/users/edit?name={{.Name}}">{{.Name}}</a>{{with .Note}}<span class="ol-cell-sub">{{.}}</span>{{end}}</td>
+      <td><span class="ol-cluster">{{if .Disabled}}{{template "badge" (dict "Text" ($v.T "users.disabled") "Tone" "warning" "Dot" true)}}{{else}}{{template "badge" (dict "Text" ($v.T "users.active") "Tone" "success" "Dot" true)}}{{end}}{{template "source" (dict "Source" .Source "V" $v)}}</span></td>
+      <td class="ol-text-sm">{{if or .ManifestRate .BlobStreams}}{{if .ManifestRate}}{{$v.T "users.rate" "n" (num .ManifestRate)}}{{end}} {{if .BlobStreams}}{{$v.T "users.streams" "n" (num .BlobStreams)}}{{end}}{{else}}{{$v.T "users.defaultLimits"}}{{end}}</td>
+      <td class="ol-nowrap">{{$v.Ago .LastSeen}}</td>
+      <td class="ol-nowrap">{{time .Created}}</td>
+      <td>{{if and $v.CanWrite (eq .Source "store")}}<span class="ol-cluster"><a class="ol-btn ol-btn-secondary ol-btn-xs" href="/admin/users/edit?name={{.Name}}">{{icon "pencil" "sm"}}{{$v.T "action.edit"}}</a>{{template "deleteButton" (dict "V" $v "Action" "/admin/users/delete" "Fields" (dict "name" .Name) "Confirm" ($v.T "users.deleteConfirm" "name" .Name))}}</span>{{end}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>
+  <p class="ol-hint admin-after">{{.T "users.lastSeenHelp"}}</p>
+  {{else}}{{template "empty" (dict "Icon" "user" "Title" (.T "users.none") "Text" (.T "users.noneText"))}}{{end}}
+</section>
+
+{{if .CanWrite}}<section class="ol-panel">
+  <div class="ol-panel-header"><h2 class="ol-panel-title">{{icon "plus"}}{{.T "users.create"}}</h2></div>
+  <div class="ol-panel-body">
+    <form method="post" action="/admin/users/create" class="ol-form">
+      {{template "csrf" .}}
+      <div class="ol-grid ol-grid-2">
+        <div class="ol-field">
+          <label class="ol-label" for="name">{{.T "users.name"}} <span class="ol-required">*</span></label>
+          <input class="ol-input ol-input-mono" id="name" name="name" value="{{.F "name"}}" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}" autocomplete="off" spellcheck="false" aria-describedby="name-hint">
+          <p class="ol-hint" id="name-hint">{{.T "users.nameHint"}}</p>
+        </div>
+        <div class="ol-field">
+          <label class="ol-label" for="password">{{.T "users.password"}}</label>
+          <input class="ol-input" id="password" type="password" name="password" minlength="12" maxlength="72" autocomplete="new-password" aria-describedby="password-hint">
+          <p class="ol-hint" id="password-hint">{{.T "users.passwordHint"}}</p>
+        </div>
+        <div class="ol-field">
+          <label class="ol-label" for="manifest_rate">{{.T "users.rateLabel"}}</label>
+          <input class="ol-input admin-input-short" id="manifest_rate" name="manifest_rate" type="number" min="0" max="1000" step="0.1" value="{{.F "manifest_rate"}}" aria-describedby="rate-hint">
+          <p class="ol-hint" id="rate-hint">{{.T "users.rateHint"}}</p>
+        </div>
+        <div class="ol-field">
+          <label class="ol-label" for="blob_streams">{{.T "users.streamsLabel"}}</label>
+          <input class="ol-input admin-input-short" id="blob_streams" name="blob_streams" type="number" min="0" max="10000" step="1" value="{{.F "blob_streams"}}" aria-describedby="streams-hint">
+          <p class="ol-hint" id="streams-hint">{{.T "users.streamsHint"}}</p>
+        </div>
+      </div>
+      <div class="ol-field">
+        <label class="ol-label" for="note">{{.T "users.note"}}</label>
+        <input class="ol-input" id="note" name="note" value="{{.F "note"}}" maxlength="500">
+      </div>
+      <div class="ol-form-actions"><button type="submit" class="ol-btn ol-btn-primary">{{icon "plus" "sm"}}{{.T "users.createButton"}}</button></div>
+    </form>
+  </div>
+</section>{{end}}
+{{end}}

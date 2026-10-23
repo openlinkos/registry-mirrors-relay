@@ -1,0 +1,81 @@
+{{define "content"}}{{$v := .}}{{$d := .Data}}
+{{template "header" (dict "Title" (.T "nav.rules") "Desc" (.T "rules.description"))}}
+{{template "notices" .}}
+
+<section class="ol-section" id="test">
+  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "rules.test"}}</h2><p class="ol-section-description">{{.T "rules.testHelp"}}</p></div>
+  <form method="get" action="/admin/rules#test" class="ol-toolbar">
+    <label class="ol-sr-only" for="image">{{.T "rules.testImage"}}</label>
+    <input class="ol-input ol-input-mono ol-grow" id="image" name="image" value="{{$d.TestImage}}" placeholder="nginx:1.27 / ghcr.io/owner/image" required maxlength="300" autocomplete="off" spellcheck="false">
+    <button type="submit" class="ol-btn ol-btn-secondary">{{icon "search" "sm"}}{{.T "rules.testButton"}}</button>
+  </form>
+  {{with $d.Test}}<div class="admin-after">{{if .Allowed}}{{template "alert" (dict "Tone" "success" "Title" .Image "Text" ($v.T "rules.allowed"))}}{{else}}{{template "alert" (dict "Tone" "danger" "Title" .Image "Text" ($v.T "rules.denied" "status" (str .Status) "rule" .Rule "message" .Message))}}{{end}}</div>{{end}}
+</section>
+
+<section class="ol-section" id="bans">
+  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "rules.bans"}}</h2><p class="ol-section-description">{{.T "rules.bansHelp"}}</p></div>
+  {{if $d.Bans}}<div class="ol-table-wrap"><table class="ol-table">
+    <thead><tr><th>{{.T "rules.cidr"}}</th><th>{{.T "rules.until"}}</th><th>{{.T "rules.reason"}}</th><th>{{.T "rules.by"}}</th><th></th></tr></thead>
+    <tbody>{{range $d.Bans}}<tr>
+      <td class="ol-mono">{{.CIDR}}</td><td class="ol-nowrap">{{time .Until}}</td><td>{{.Reason}}</td><td class="ol-text-sm">{{.CreatedBy}}</td>
+      <td>{{if $v.CanWrite}}{{template "deleteButton" (dict "V" $v "Action" "/admin/bans/delete" "Fields" (dict "cidr" .CIDR) "Confirm" ($v.T "rules.unbanConfirm" "cidr" .CIDR) "Label" ($v.T "rules.unban"))}}{{end}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>{{else}}<p class="ol-muted">{{.T "rules.noBans"}}</p>{{end}}
+  {{if .CanWrite}}<form method="post" action="/admin/bans/add" class="ol-toolbar admin-after">
+    {{template "csrf" .}}
+    <div class="ol-field"><label class="ol-label" for="ban-cidr">{{.T "rules.cidr"}}</label><input class="ol-input ol-input-sm ol-input-mono" id="ban-cidr" name="cidr" value="{{or (.F "cidr") $d.BanCIDR}}" placeholder="198.51.100.7" required maxlength="64" autocomplete="off" spellcheck="false"></div>
+    <div class="ol-field"><label class="ol-label" for="ban-duration">{{.T "rules.duration"}}</label><input class="ol-input ol-input-sm admin-input-short" id="ban-duration" name="duration" value="{{or (.F "duration") "24h"}}" list="durations" required maxlength="10" autocomplete="off"><datalist id="durations"><option value="1h"><option value="6h"><option value="24h"><option value="7d"><option value="30d"></datalist></div>
+    <div class="ol-field ol-grow"><label class="ol-label" for="ban-reason">{{.T "rules.reason"}}</label><input class="ol-input ol-input-sm" id="ban-reason" name="reason" value="{{.F "reason"}}" maxlength="500"></div>
+    <button type="submit" class="ol-btn ol-btn-danger ol-btn-sm">{{icon "ban" "sm"}}{{.T "rules.ban"}}</button>
+  </form>{{end}}
+</section>
+
+<section class="ol-section" id="ip">
+  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "rules.ip"}}</h2><p class="ol-section-description">{{.T "rules.ipHelp"}}</p></div>
+  {{if $d.IP}}<div class="ol-table-wrap"><table class="ol-table">
+    <thead><tr><th>{{.T "rules.cidr"}}</th><th>{{.T "rules.kind"}}</th><th>{{.T "users.note"}}</th><th>{{.T "rules.source"}}</th><th></th></tr></thead>
+    <tbody>{{range $d.IP}}<tr>
+      <td class="ol-mono">{{.CIDR}}</td>
+      <td>{{if eq .Kind "allow"}}{{template "badge" (dict "Text" ($v.T "rules.allow") "Tone" "success")}}{{else}}{{template "badge" (dict "Text" ($v.T "rules.deny") "Tone" "danger")}}{{end}}</td>
+      <td>{{.Note}}</td><td>{{template "source" (dict "Source" .Source "V" $v)}}</td>
+      <td>{{if and $v.CanWrite (eq .Source "store")}}{{template "deleteButton" (dict "V" $v "Action" "/admin/rules/ip/delete" "Fields" (dict "cidr" .CIDR "kind" .Kind) "Confirm" ($v.T "rules.deleteConfirm" "rule" .CIDR))}}{{end}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>{{else}}<p class="ol-muted">{{.T "rules.noIP"}}</p>{{end}}
+  {{if .CanWrite}}<form method="post" action="/admin/rules/ip/add" class="ol-toolbar admin-after">
+    {{template "csrf" .}}
+    <div class="ol-field"><label class="ol-label" for="ip-cidr">{{.T "rules.cidr"}}</label><input class="ol-input ol-input-sm ol-input-mono" id="ip-cidr" name="cidr" placeholder="203.0.113.0/24" required maxlength="64" autocomplete="off" spellcheck="false"></div>
+    <div class="ol-field"><label class="ol-label" for="ip-kind">{{.T "rules.kind"}}</label><select class="ol-select ol-input-sm" id="ip-kind" name="kind"><option value="deny">{{.T "rules.deny"}}</option><option value="allow">{{.T "rules.allow"}}</option></select></div>
+    <div class="ol-field ol-grow"><label class="ol-label" for="ip-note">{{.T "users.note"}}</label><input class="ol-input ol-input-sm" id="ip-note" name="note" maxlength="500"></div>
+    <button type="submit" class="ol-btn ol-btn-secondary ol-btn-sm">{{icon "plus" "sm"}}{{.T "rules.add"}}</button>
+  </form>
+  <p class="ol-hint admin-after">{{.T "rules.allowWarning"}}</p>{{end}}
+</section>
+
+<section class="ol-section" id="images">
+  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "rules.images"}}</h2><p class="ol-section-description">{{.T "rules.imagesHelp"}}</p></div>
+  {{if $d.Images}}<div class="ol-table-wrap"><table class="ol-table">
+    <thead><tr><th>{{.T "rules.pattern"}}</th><th>{{.T "rules.kind"}}</th><th>{{.T "rules.message"}}</th><th class="ol-num">{{.T "rules.hits"}}</th><th>{{.T "rules.source"}}</th><th></th></tr></thead>
+    <tbody>{{range $d.Images}}<tr>
+      <td class="ol-mono admin-wrap">{{.Pattern}}{{with .Note}}<span class="ol-cell-sub">{{.}}</span>{{end}}</td>
+      <td>{{if eq .Kind "allow"}}{{template "badge" (dict "Text" ($v.T "rules.allow") "Tone" "success")}}{{else}}{{template "badge" (dict "Text" (print ($v.T "rules.deny") " " .Status) "Tone" "danger")}}{{end}}</td>
+      <td>{{.Message}}</td>
+      <td class="ol-num">{{if eq .Kind "deny"}}{{num .Hits}}{{else}}—{{end}}</td>
+      <td>{{template "source" (dict "Source" .Source "V" $v)}}</td>
+      <td>{{if and $v.CanWrite (eq .Source "store")}}{{template "deleteButton" (dict "V" $v "Action" "/admin/rules/image/delete" "Fields" (dict "pattern" .Pattern "kind" .Kind) "Confirm" ($v.T "rules.deleteConfirm" "rule" .Pattern))}}{{end}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>{{else}}<p class="ol-muted">{{.T "rules.noImages"}}</p>{{end}}
+  {{if .CanWrite}}<form method="post" action="/admin/rules/image/add" class="ol-form admin-after">
+    {{template "csrf" .}}
+    <div class="ol-grid ol-grid-2">
+      <div class="ol-field"><label class="ol-label" for="img-pattern">{{.T "rules.pattern"}} <span class="ol-required">*</span></label><input class="ol-input ol-input-mono" id="img-pattern" name="pattern" value="{{.F "pattern"}}" placeholder="ghcr.io/example-bad-actor/**" required maxlength="300" autocomplete="off" spellcheck="false" aria-describedby="pattern-hint"><p class="ol-hint" id="pattern-hint">{{.T "rules.patternHint" "upstreams" (join $d.Upstreams ", ")}}</p></div>
+      <div class="ol-cluster">
+        <div class="ol-field"><label class="ol-label" for="img-kind">{{.T "rules.kind"}}</label><select class="ol-select" id="img-kind" name="kind"><option value="deny">{{.T "rules.deny"}}</option><option value="allow">{{.T "rules.allow"}}</option></select></div>
+        <div class="ol-field"><label class="ol-label" for="img-status">{{.T "rules.status"}}</label><select class="ol-select" id="img-status" name="status"><option value="403">403</option><option value="451">451</option></select></div>
+      </div>
+      <div class="ol-field"><label class="ol-label" for="img-message">{{.T "rules.message"}}</label><input class="ol-input" id="img-message" name="message" value="{{.F "message"}}" maxlength="300" aria-describedby="message-hint"><p class="ol-hint" id="message-hint">{{.T "rules.messageHint"}}</p></div>
+      <div class="ol-field"><label class="ol-label" for="img-note">{{.T "users.note"}}</label><input class="ol-input" id="img-note" name="note" value="{{.F "note"}}" maxlength="500"></div>
+    </div>
+    <div class="ol-form-actions"><button type="submit" class="ol-btn ol-btn-secondary">{{icon "plus" "sm"}}{{.T "rules.add"}}</button></div>
+  </form>{{end}}
+</section>
+{{end}}

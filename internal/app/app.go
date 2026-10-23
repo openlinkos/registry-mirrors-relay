@@ -57,6 +57,7 @@ type Runtime struct {
 	Manifests *manifest.Cache
 	Tokens    map[[32]byte]Token // SHA-256(令牌) → 身份
 	Data      store.Data         // 运营数据的快照（API 列表用）
+	Site      config.Site        // 生效的站点信息：后台设置过就用它，否则用配置文件的
 	Built     time.Time
 
 	poolKey, cacheKey string
@@ -88,6 +89,9 @@ type App struct {
 	mu      sync.Mutex // 串行化重载
 	cfgHash [32]byte
 	reload  atomic.Pointer[ReloadStatus]
+
+	healthMu sync.Mutex
+	health   map[string]upstream.Health
 }
 
 // ReloadStatus 是最近一次重载的结果。
@@ -141,6 +145,9 @@ func New(res *config.Result, raw []byte, opt Options) (*App, error) {
 
 // Runtime 返回当前生效的设置。
 func (a *App) Runtime() *Runtime { return a.rt.Load() }
+
+// ConfigPath 是配置文件的路径，只用默认值时为空。
+func (a *App) ConfigPath() string { return a.opt.ConfigPath }
 
 // LastReload 返回最近一次重载的结果，没有重载过时为 nil。
 func (a *App) LastReload() *ReloadStatus { return a.reload.Load() }
@@ -338,7 +345,13 @@ func (a *App) build(cfg *config.Config, prev *Runtime) (*Runtime, error) {
 	}
 	rt.IPs = clientip.New(trusted, cfg.ClientIP.UseXRealIP)
 	rt.Router = route.New(cfg)
-	if rt.Web, err = web.New(cfg); err != nil {
+	rt.Site = cfg.Site
+	if s := data.Site; s != nil {
+		rt.Site = config.Site{Name: s.Name, Operator: s.Operator, Links: s.Links}
+	}
+	wcfg := *cfg
+	wcfg.Site = rt.Site
+	if rt.Web, err = web.New(&wcfg); err != nil {
 		return nil, err
 	}
 	a.Limiter.SetConfig(limitConfig(cfg))
@@ -460,6 +473,54 @@ func (a *App) Watch(ctx context.Context) {
 	}
 }
 
+// Health 返回各上游最近一次探测的结果。
+func (a *App) Health() map[string]upstream.Health {
+	a.healthMu.Lock()
+	defer a.healthMu.Unlock()
+	out := make(map[string]upstream.Health, len(a.health))
+	for k, v := range a.health {
+		out[k] = v
+	}
+	return out
+}
+
+// CheckUpstream 立即探测一个上游并记下结果。没有这个上游时 ok 为 false。
+func (a *App) CheckUpstream(ctx context.Context, name string) (h upstream.Health, ok bool) {
+	u := a.Runtime().Pool.Get(name)
+	if u == nil {
+		return h, false
+	}
+	h = u.Probe(ctx)
+	a.healthMu.Lock()
+	if a.health == nil {
+		a.health = map[string]upstream.Health{}
+	}
+	a.health[name] = h
+	a.healthMu.Unlock()
+	return h, true
+}
+
+// WatchUpstreams 按 proxy.health_interval 探测所有上游，启动时先探测一次。
+func (a *App) WatchUpstreams(ctx context.Context) {
+	for {
+		iv := a.Runtime().Config.Proxy.HealthInterval.D()
+		if iv > 0 {
+			var wg sync.WaitGroup
+			for _, name := range a.Runtime().Pool.Names() {
+				wg.Go(func() { a.CheckUpstream(ctx, name) })
+			}
+			wg.Wait()
+		} else {
+			iv = time.Minute // 关着时也每分钟看一次设置有没有改
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(iv):
+		}
+	}
+}
+
 // Close 存下统计、写完访问日志、关闭连接和运营数据库。
 func (a *App) Close() {
 	a.Stats.Flush()
@@ -506,6 +567,41 @@ func (a *App) registerMetrics() {
 				v = 1
 			}
 			out = append(out, metrics.Sample{Labels: metrics.Labels("upstream", name), Value: v})
+		}
+		return out
+	})
+	m.Register("relay_upstream_probe_up", "上游最近一次探测是否正常（/v2/ 返回 200 或 401）", "gauge", func() []metrics.Sample {
+		var out []metrics.Sample
+		health := a.Health()
+		for _, name := range a.Runtime().Pool.Names() {
+			h, ok := health[name]
+			if !ok {
+				continue
+			}
+			v := 0.0
+			if h.OK {
+				v = 1
+			}
+			out = append(out, metrics.Sample{Labels: metrics.Labels("upstream", name), Value: v})
+		}
+		return out
+	})
+	m.Register("relay_upstream_probe_seconds", "上游最近一次探测的耗时", "gauge", func() []metrics.Sample {
+		var out []metrics.Sample
+		health := a.Health()
+		for _, name := range a.Runtime().Pool.Names() {
+			if h, ok := health[name]; ok {
+				out = append(out, metrics.Sample{Labels: metrics.Labels("upstream", name), Value: h.Latency.Seconds()})
+			}
+		}
+		return out
+	})
+	m.Register("relay_upstream_quota_remaining", "上游在响应头里报告的剩余拉取额度（Docker Hub 的 Ratelimit-Remaining）", "gauge", func() []metrics.Sample {
+		var out []metrics.Sample
+		for _, name := range a.Runtime().Pool.Names() {
+			if q := a.Runtime().Pool.Get(name).Quota(); q != nil {
+				out = append(out, metrics.Sample{Labels: metrics.Labels("upstream", name), Value: float64(q.Remaining)})
+			}
 		}
 		return out
 	})

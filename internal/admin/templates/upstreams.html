@@ -1,0 +1,52 @@
+{{define "content"}}{{$v := .}}
+{{template "header" (dict "Title" (.T "nav.upstreams") "Desc" (.T "upstreams.description"))}}
+{{template "notices" .}}
+<div class="ol-stack">
+{{range .Data}}{{$u := .}}
+<section class="ol-panel">
+  <div class="ol-panel-header">
+    <h2 class="ol-panel-title">{{icon "server"}}{{.Name}}</h2>
+    <span class="ol-cluster">{{template "upstreamStatus" (dict "U" . "V" $v)}}{{if .Credentials}}{{template "badge" (dict "Text" ($v.T "upstreams.credentials") "Tone" "info" "Square" true)}}{{end}}</span>
+  </div>
+  <div class="ol-panel-body ol-stack">
+    <dl class="ol-dl">
+      <dt>{{$v.T "upstreams.registry"}}</dt><dd class="ol-mono">{{.Registry}}</dd>
+      <dt>{{$v.T "upstreams.health"}}</dt><dd>{{with .Health}}{{if .OK}}{{$v.T "upstreams.healthOK" "status" (str .Status) "latency" (secs .Latency)}}{{else}}{{.Error}}{{end}} · {{time .Checked}}{{else}}{{$v.T "upstreams.notChecked"}}{{end}}</dd>
+      {{with .Quota}}<dt>{{$v.T "upstreams.quota"}}</dt><dd>{{$v.T "upstreams.quotaValue" "remaining" (num .Remaining) "limit" (num .Limit)}}{{if .Window}} · {{$v.T "overview.quotaWindow" "window" ($v.Dur .Window)}}{{end}} · {{time .Observed}}</dd>{{end}}
+      <dt>{{$v.T "upstreams.unlisted"}}</dt><dd>{{if eq .Unlisted "deny"}}{{$v.T "upstreams.unlistedDeny"}}{{else}}{{$v.T "upstreams.unlistedPass"}}{{end}}</dd>
+    </dl>
+    {{if $v.IsAdmin}}<form method="post" action="/admin/upstreams/check">{{template "csrf" $v}}<input type="hidden" name="upstream" value="{{.Name}}"><button type="submit" class="ol-btn ol-btn-secondary ol-btn-sm">{{icon "refresh-cw" "sm"}}{{$v.T "upstreams.check"}}</button></form>{{end}}
+
+    {{with .UnlistedHosts}}<div>
+      <h3 class="ol-heading-sm">{{$v.T "upstreams.unlistedSeen"}}</h3>
+      <p class="ol-hint">{{$v.T "upstreams.unlistedSeenHelp"}}</p>
+      <div class="ol-table-wrap"><table class="ol-table ol-table-compact">
+        <thead><tr><th>{{$v.T "upstreams.host"}}</th><th class="ol-num">{{$v.T "upstreams.times"}}</th><th></th></tr></thead>
+        <tbody>{{range $host, $n := .}}<tr><td class="ol-mono">{{$host}}</td><td class="ol-num">{{num $n}}</td><td>{{if $v.CanWrite}}<form method="post" action="/admin/upstreams/hosts/add" class="admin-inline">{{template "csrf" $v}}<input type="hidden" name="upstream" value="{{$u.Name}}"><input type="hidden" name="host" value="{{$host}}"><button type="submit" class="ol-btn ol-btn-soft ol-btn-xs">{{icon "plus" "sm"}}{{$v.T "upstreams.allow"}}</button></form>{{end}}</td></tr>{{end}}</tbody>
+      </table></div>
+    </div>{{end}}
+
+    {{with .AddedHosts}}<div>
+      <h3 class="ol-heading-sm">{{$v.T "upstreams.added"}}</h3>
+      <div class="ol-table-wrap"><table class="ol-table ol-table-compact">
+        <thead><tr><th>{{$v.T "upstreams.host"}}</th><th></th></tr></thead>
+        <tbody>{{range .}}<tr><td class="ol-mono">{{.}}</td><td>{{if $v.CanWrite}}{{template "deleteButton" (dict "V" $v "Action" "/admin/upstreams/hosts/delete" "Fields" (dict "upstream" $u.Name "host" .) "Confirm" ($v.T "upstreams.removeConfirm" "host" .) "Label" ($v.T "upstreams.remove"))}}{{end}}</td></tr>{{end}}</tbody>
+      </table></div>
+    </div>{{end}}
+
+    {{if $v.CanWrite}}<form method="post" action="/admin/upstreams/hosts/add" class="ol-toolbar">
+      {{template "csrf" $v}}<input type="hidden" name="upstream" value="{{.Name}}">
+      <label class="ol-sr-only" for="host-{{.Name}}">{{$v.T "upstreams.addHost"}}</label>
+      <input class="ol-input ol-input-sm ol-input-mono ol-grow" id="host-{{.Name}}" name="host" placeholder="cdn.example.com" required maxlength="253" autocomplete="off" spellcheck="false">
+      <button type="submit" class="ol-btn ol-btn-secondary ol-btn-sm">{{icon "plus" "sm"}}{{$v.T "upstreams.addHost"}}</button>
+    </form>{{end}}
+
+    <details class="ol-details"><summary>{{$v.T "upstreams.allowlist" "n" (len .RedirectHosts)}}</summary>
+      <div class="ol-code ol-code-wrap"><pre><code>{{join .RedirectHosts "\n"}}</code></pre></div>
+      <p class="ol-hint">{{$v.T "upstreams.allowlistHelp"}}</p>
+    </details>
+  </div>
+</section>
+{{end}}
+</div>
+{{end}}

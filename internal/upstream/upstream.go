@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/breaker"
@@ -66,6 +67,7 @@ type Upstream struct {
 
 	mu         sync.Mutex
 	challenges map[string]token.Challenge // 主机 → 它的 Bearer 质询（只用 realm、service）
+	quota      atomic.Pointer[Quota]
 }
 
 // NewPool 由配置创建所有启用的上游。
@@ -299,6 +301,7 @@ func (u *Upstream) Fetch(ctx context.Context, r Request) (*Response, error) {
 	if err != nil {
 		return nil, err
 	}
+	u.observeQuota(resp.Header)
 	var hops []string
 	method := r.Method
 	probed := false

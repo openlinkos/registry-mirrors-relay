@@ -57,6 +57,8 @@ func ParsePrefixes(items []string) ([]netip.Prefix, error) {
 }
 
 var (
+	// accountRe 是账号、令牌名的写法（客户端账号、后台管理员、API 令牌共用）
+	accountRe      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 	upstreamNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:[0-9]{1,5})?$`)
 	hostRe         = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$`)
 )
@@ -321,6 +323,8 @@ func validate(c *Config, res *Result) []error {
 		u, err := url.Parse(c.Admin.PublicURL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || (u.Path != "" && u.Path != "/") {
 			bad("admin.public_url 应写成 https://admin.example.com 这样，不带路径")
+		} else if u.Scheme == "http" && !isLoopbackListen(net.JoinHostPort(u.Hostname(), "80")) {
+			warn("admin.public_url 用的是 http：后台的口令和会话会明文经过网络，建议放在 https 反向代理之后")
 		}
 	} else if c.Listen.Admin != "" && !isLoopbackListen(c.Listen.Admin) {
 		warn("listen.admin 不只监听本机，但没有写 admin.public_url：后台只接受用 127.0.0.1 或 localhost 访问")
@@ -344,6 +348,9 @@ func validate(c *Config, res *Result) []error {
 	}
 	if c.Admin.InitialAdmin.Username != "" && !c.Admin.InitialAdmin.Password.IsSet() {
 		bad("admin.initial_admin 写了 username，也要写 password")
+	}
+	if c.Admin.InitialAdmin.Username != "" && !accountRe.MatchString(c.Admin.InitialAdmin.Username) {
+		bad("admin.initial_admin.username 只能用字母、数字和 . _ -，最长 64 个字符")
 	}
 
 	// 日志

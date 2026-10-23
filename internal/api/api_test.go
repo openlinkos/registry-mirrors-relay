@@ -15,6 +15,7 @@ import (
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/app"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/ops"
 	"github.com/openlinkos/registry-mirrors-relay/internal/store"
 )
 
@@ -54,7 +55,7 @@ admin:
 		t.Fatal(err)
 	}
 	t.Cleanup(a.Close)
-	e := &env{app: a, srv: httptest.NewServer(New(a))}
+	e := &env{app: a, srv: httptest.NewServer(New(a, ops.New(a), Options{}))}
 	t.Cleanup(e.srv.Close)
 	return e
 }
@@ -259,5 +260,42 @@ func TestReadOnlyStoreAndMisc(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnsupportedMediaType {
 		t.Fatalf("非 JSON 应返回 415：%d", resp.StatusCode)
+	}
+}
+
+func TestAdminsAndSite(t *testing.T) {
+	e := newEnv(t, nil)
+	if code, _, raw := e.call(t, "POST", "/admins", adminTok, map[string]string{"name": "alice", "password": "alice-password-1", "role": "admin"}); code != 201 {
+		t.Fatalf("创建管理员：%d %s", code, raw)
+	}
+	if code, _, _ := e.call(t, "POST", "/admins", adminTok, map[string]string{"name": "alice", "password": "alice-password-1", "role": "admin"}); code != 409 {
+		t.Fatal("重名应返回 409")
+	}
+	if code, _, _ := e.call(t, "POST", "/admins", adminTok, map[string]string{"name": "bob", "password": "short", "role": "admin"}); code != 400 {
+		t.Fatal("口令太短应返回 400")
+	}
+	if code, m, _ := e.call(t, "PATCH", "/admins/alice", adminTok, map[string]any{"role": "viewer"}); code != 409 || !strings.Contains(m["error"].(string), "至少要留一个") {
+		t.Fatalf("不能去掉最后一个 admin：%d %v", code, m)
+	}
+	_, _, raw := e.call(t, "GET", "/admins", viewerTok, nil)
+	if strings.Contains(string(raw), "$2a$") || !strings.Contains(string(raw), `"alice"`) {
+		t.Fatalf("列表不含哈希：%s", raw)
+	}
+	if code, _, _ := e.call(t, "DELETE", "/admins/alice", adminTok, nil); code != 409 {
+		t.Fatal("不能删掉最后一个 admin")
+	}
+
+	code, m, raw := e.call(t, "PUT", "/site", adminTok, map[string]any{"name": "Test Mirrors", "operator": "Test Org", "links": map[string]string{"status": "https://status.example.org"}})
+	if code != 200 || m["source"] != "store" || e.app.Runtime().Site.Name != "Test Mirrors" {
+		t.Fatalf("站点信息：%d %s", code, raw)
+	}
+	if code, _, _ := e.call(t, "PUT", "/site", adminTok, map[string]any{"name": "x", "links": map[string]string{"status": "javascript:alert(1)"}}); code != 400 {
+		t.Fatal("链接只接受 http(s)")
+	}
+	if code, m, _ := e.call(t, "DELETE", "/site", adminTok, nil); code != 200 || m["source"] != "config" {
+		t.Fatalf("改回配置文件：%d %v", code, m)
+	}
+	if code, _, _ := e.call(t, "POST", "/upstreams/nope.example/check", adminTok, nil); code != 404 {
+		t.Fatalf("探测不存在的上游：%d", code)
 	}
 }

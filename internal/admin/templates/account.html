@@ -1,0 +1,16 @@
+{{define "content"}}
+{{template "header" (dict "Title" (.T "nav.account") "Desc" (.T "account.description" "name" .Sess.Admin "role" (.T (print "role." .Sess.Role))))}}
+{{template "notices" .}}
+{{if and .Data (eq .Data.Source "store") .Writable}}
+<section class="ol-section">
+  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "account.password"}}</h2><p class="ol-section-description">{{.T "account.passwordHelp"}}</p></div>
+  <form method="post" action="/admin/account/password" class="ol-form">
+    {{template "csrf" .}}
+    <input type="text" name="username" value="{{.Sess.Admin}}" autocomplete="username" hidden>
+    <div class="ol-field"><label class="ol-label" for="password">{{.T "user.newPassword"}}</label><input class="ol-input" id="password" type="password" name="password" required minlength="12" maxlength="72" autocomplete="new-password"></div>
+    <div class="ol-field"><label class="ol-label" for="confirm">{{.T "account.confirm"}}</label><input class="ol-input" id="confirm" type="password" name="confirm" required minlength="12" maxlength="72" autocomplete="new-password"></div>
+    <div class="ol-form-actions"><button type="submit" class="ol-btn ol-btn-primary">{{icon "check" "sm"}}{{.T "account.change"}}</button></div>
+  </form>
+</section>
+{{else}}{{template "alert" (dict "Tone" "info" "Text" (.T "account.fromConfig"))}}{{end}}
+{{end}}

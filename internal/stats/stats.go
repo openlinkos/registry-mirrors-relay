@@ -83,7 +83,9 @@ type Collector struct {
 	repeats *TopK
 	recent  []Request
 	pos     int
-	unlist  map[string]int // "上游 主机" → 白名单外的重定向次数
+	unlist  map[string]int       // "上游 主机" → 白名单外的重定向次数
+	seen    map[string]time.Time // 客户端账号 → 最后一次请求的时间（自启动以来）
+	hits    map[string]uint64    // 镜像规则 → 拒绝的次数（自启动以来）
 	store   store.Store
 	now     func() time.Time
 }
@@ -91,7 +93,8 @@ type Collector struct {
 // New 创建 Collector。store 可以为 nil（不落盘）。
 func New(s store.Store) *Collector {
 	c := &Collector{images: NewTopK(topSize), clients: NewTopK(topSize), repeats: NewTopK(topSize),
-		recent: make([]Request, 0, recentSize), unlist: map[string]int{}, store: s, now: time.Now}
+		recent: make([]Request, 0, recentSize), unlist: map[string]int{}, seen: map[string]time.Time{}, hits: map[string]uint64{},
+		store: s, now: time.Now}
 	c.hour = c.now().Truncate(time.Hour).Unix()
 	return c
 }
@@ -131,6 +134,11 @@ func (c *Collector) Log(e *accesslog.Entry) {
 	if e.ClientIP != "" {
 		c.clients.Add(e.ClientIP, 1, max(e.Size, 0))
 	}
+	if e.UserID != "" {
+		if _, ok := c.seen[e.UserID]; ok || len(c.seen) < maxTracked {
+			c.seen[e.UserID] = t
+		}
+	}
 	// 完整下载了一个层（实际字节数等于 Content-Length）
 	if e.Kind == "blob" && e.Status == 200 && e.Size > 0 && e.RespContentLength == strconv.FormatInt(e.Size, 10) {
 		c.repeats.Add(e.ClientIP+" "+e.Image+"@"+e.Ref, 1, e.Size)
@@ -163,6 +171,40 @@ func (c *Collector) UnlistedRedirect(upstream, host string) {
 	if _, ok := c.unlist[k]; ok || len(c.unlist) < 1000 {
 		c.unlist[k]++
 	}
+}
+
+// maxTracked 是账号最后使用时间、规则命中次数各自最多记多少项。
+const maxTracked = 10000
+
+// RuleHit 记一次镜像规则的拒绝。
+func (c *Collector) RuleHit(rule string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.hits[rule]; ok || len(c.hits) < maxTracked {
+		c.hits[rule]++
+	}
+}
+
+// RuleHits 返回各镜像规则拒绝的次数（自启动以来）。
+func (c *Collector) RuleHits() map[string]uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[string]uint64, len(c.hits))
+	for k, v := range c.hits {
+		out[k] = v
+	}
+	return out
+}
+
+// LastSeen 返回各客户端账号最后一次请求的时间（自启动以来）。
+func (c *Collector) LastSeen() map[string]time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[string]time.Time, len(c.seen))
+	for k, v := range c.seen {
+		out[k] = v
+	}
+	return out
 }
 
 // Unlisted 返回白名单外的重定向主机：上游 → 主机 → 次数。
@@ -236,6 +278,9 @@ func (c *Collector) Series(since time.Time) []Minute {
 	defer c.mu.Unlock()
 	now := c.now().Unix() / 60 * 60
 	from := max(since.Unix()/60*60, now-(minutes-1)*60)
+	if from > now {
+		return nil // since 在将来（时钟回拨）
+	}
 	out := make([]Minute, 0, (now-from)/60+1)
 	for s := from; s <= now; s += 60 {
 		m := c.ring[(s/60)%minutes]
@@ -291,8 +336,9 @@ func (c *Collector) Summarize(d time.Duration, n int) Summary {
 
 // Filter 是查询最近请求的条件，空字段不过滤。
 type Filter struct {
-	ClientIP, Upstream, Image, Query string
-	Status                           int // 0 表示不限；4 表示 4xx，5 表示 5xx
+	ClientIP, Upstream, Image string
+	Query                     string // 在 URI、User-Agent、客户端 IP、镜像里找，或等于账号名
+	Status                    int    // 0 表示不限；4 表示 4xx，5 表示 5xx
 }
 
 func (f Filter) match(r *Request) bool {
@@ -303,7 +349,8 @@ func (f Filter) match(r *Request) bool {
 		return false
 	case f.Image != "" && !strings.Contains(r.Image, f.Image):
 		return false
-	case f.Query != "" && !strings.Contains(r.URI, f.Query) && !strings.Contains(r.Agent, f.Query):
+	case f.Query != "" && !strings.Contains(r.URI, f.Query) && !strings.Contains(r.Agent, f.Query) &&
+		!strings.Contains(r.ClientIP, f.Query) && r.User != f.Query && !strings.Contains(r.Image, f.Query):
 		return false
 	case f.Status >= 100 && r.Status != f.Status:
 		return false

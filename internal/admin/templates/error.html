@@ -1,0 +1,10 @@
+{{define "content"}}{{if .Sess}}{{template "header" (dict "Title" .Title "Desc" (.T "error.status" "status" .Data.Status))}}
+<div class="ol-stack">
+  {{template "alert" (dict "Tone" (or (and (ge .Data.Status 500) "danger") "warning") "Text" .Data.Message)}}
+  <div><a class="ol-btn ol-btn-secondary" href="/admin/">{{icon "layout-dashboard"}}{{.T "nav.backToOverview"}}</a></div>
+</div>{{else}}<a class="ol-brand" href="/admin/">{{template "logo" (dict "V" . "Size" 22)}}<span>{{.SiteName}}</span></a>
+<h1 class="ol-auth-title">{{.Title}}</h1>
+<p>{{.T "error.status" "status" .Data.Status}}</p>
+{{template "alert" (dict "Tone" (or (and (ge .Data.Status 500) "danger") "warning") "Text" .Data.Message)}}
+<a class="ol-btn ol-btn-secondary ol-btn-block" href="/admin/">{{icon "log-in"}}{{.T "auth.signIn"}}</a>{{end}}
+{{end}}

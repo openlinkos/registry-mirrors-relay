@@ -1,0 +1,50 @@
+{{define "content"}}{{$v := .}}{{$d := .Data}}
+{{template "header" (dict "Title" (.T "nav.usage") "Desc" (.T "usage.description"))}}
+{{template "notices" .}}
+
+<section class="ol-section">
+  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "usage.entrances"}}</h2><p class="ol-section-description">{{.T "usage.entrancesHelp"}}</p></div>
+  <div class="ol-table-wrap"><table class="ol-table">
+    <thead><tr><th>{{.T "usage.entrance"}}</th><th>{{.T "usage.hosts"}}</th><th>{{.T "usage.listen"}}</th><th>{{.T "usage.mode"}}</th><th>{{.T "usage.auth"}}</th></tr></thead>
+    <tbody>{{range $d.Entrances}}<tr>
+      <td>{{if .Name}}{{.Name}}{{else}}—{{end}}</td>
+      <td class="ol-mono admin-wrap">{{if .Hosts}}{{.Hosts}}{{else}}—{{end}}</td>
+      <td class="ol-mono">{{.Listen}}</td>
+      <td>{{if .Upstream}}{{$v.T "usage.fixed" "upstream" .Upstream}}{{else}}{{$v.T "usage.single"}}{{end}}</td>
+      <td>{{if eq .Auth "basic"}}{{template "badge" (dict "Text" ($v.T "usage.basic") "Tone" "warning")}}{{else}}{{$v.T "usage.open"}}{{end}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>
+</section>
+
+<section class="ol-section">
+  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "usage.snippets"}}</h2><p class="ol-section-description">{{.T "usage.snippetsHelp"}}</p></div>
+  <form method="get" action="/admin/usage" class="ol-toolbar">
+    <div class="ol-field">
+      <label class="ol-label" for="host">{{.T "usage.host"}}</label>
+      <input class="ol-input ol-input-sm ol-input-mono" id="host" name="host" value="{{$d.Host}}" list="hosts" maxlength="253" autocomplete="off" spellcheck="false">
+      <datalist id="hosts">{{range $d.Hosts}}<option value="{{.}}">{{end}}</datalist>
+    </div>
+    <div class="ol-field">
+      <label class="ol-label" for="scheme">{{.T "usage.scheme"}}</label>
+      <select class="ol-select ol-input-sm" id="scheme" name="scheme"><option value="https"{{if eq $d.Scheme "https"}} selected{{end}}>https</option><option value="http"{{if eq $d.Scheme "http"}} selected{{end}}>http</option></select>
+    </div>
+    <button type="submit" class="ol-btn ol-btn-secondary ol-btn-sm">{{icon "refresh-cw" "sm"}}{{.T "usage.generate"}}</button>
+  </form>
+  {{if not $d.Hosts}}<div class="admin-after">{{template "alert" (dict "Tone" "info" "Text" (.T "usage.noHost"))}}</div>{{end}}
+  {{if $d.Basic}}<div class="admin-after">{{template "alert" (dict "Tone" "warning" "Text" (.T "usage.basicHelp"))}}</div>{{end}}
+  <div class="ol-stack admin-after">
+  {{range $d.Snippets}}<div>
+    {{template "snippet" (dict "ID" .ID "Label" .Label "Code" .Code "V" $v)}}
+    <p class="ol-hint">{{.Help}}</p>
+  </div>{{end}}
+  </div>
+</section>
+
+{{with $d.Fixed}}<section class="ol-section">
+  <div class="ol-section-header"><h2 class="ol-section-title">{{$v.T "usage.subdomains"}}</h2><p class="ol-section-description">{{$v.T "usage.subdomainsHelp"}}</p></div>
+  <div class="ol-table-wrap"><table class="ol-table ol-table-compact">
+    <thead><tr><th>{{$v.T "upstreams.name"}}</th><th>{{$v.T "usage.host"}}</th><th>{{$v.T "usage.example"}}</th></tr></thead>
+    <tbody>{{range .}}<tr><td>{{.Upstream}}</td><td class="ol-mono">{{.Hosts}}</td><td class="ol-mono">docker pull {{.Hosts}}/&lt;owner&gt;/&lt;image&gt;</td></tr>{{end}}</tbody>
+  </table></div>
+</section>{{end}}
+{{end}}
