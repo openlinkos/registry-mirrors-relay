@@ -206,6 +206,16 @@ func (p *Pool) newClient(cfg *config.Config, opt Options, ua string, allow func(
 // Get 返回上游，没有时返回 nil。
 func (p *Pool) Get(name string) *Upstream { return p.ups[name] }
 
+// Names 返回所有上游的名字，按字母排序。
+func (p *Pool) Names() []string {
+	out := make([]string, 0, len(p.ups))
+	for n := range p.ups {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Close 关闭空闲连接。
 func (p *Pool) Close() {
 	for _, tr := range p.transports {

@@ -44,7 +44,7 @@ Docker Hub, gcr.io, ghcr.io, registry.k8s.io and quay.io are built in; more upst
 - [x] M0 Project skeleton: configuration, CLI, CI
 - [x] M1 Proxy core: per-host, per-port and single-domain (prefix, `ns`, root path) entrances, tokens, redirects, access log, usage page
 - [x] M2 Manifest cache, circuit breaker, benchmarks (results in [docs/benchmark.md](docs/benchmark.md), Chinese)
-- [ ] M3 Access control and operational data: accounts, IP and image rules, rate limits, metrics, hot reload
+- [x] M3 Access control and operational data: accounts, IP and image rules, rate limits, metrics, hot reload, [admin API](docs/api.md) (Chinese)
 - [ ] M4 Admin console
 - [ ] M5 Packaging and release: image, Compose, Kubernetes, signed v0.1.0
 - [ ] M6 Helm chart

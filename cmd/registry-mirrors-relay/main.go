@@ -17,6 +17,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -26,16 +27,12 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
 
-	"github.com/openlinkos/registry-mirrors-relay/internal/accesslog"
-	"github.com/openlinkos/registry-mirrors-relay/internal/clientip"
+	"github.com/openlinkos/registry-mirrors-relay/internal/api"
+	"github.com/openlinkos/registry-mirrors-relay/internal/app"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
-	"github.com/openlinkos/registry-mirrors-relay/internal/manifest"
 	"github.com/openlinkos/registry-mirrors-relay/internal/relay"
-	"github.com/openlinkos/registry-mirrors-relay/internal/route"
 	"github.com/openlinkos/registry-mirrors-relay/internal/server"
-	"github.com/openlinkos/registry-mirrors-relay/internal/upstream"
 	"github.com/openlinkos/registry-mirrors-relay/internal/version"
-	"github.com/openlinkos/registry-mirrors-relay/internal/web"
 )
 
 // defaultConfigPath 是没有 -config 和 RELAY_CONFIG 时读取的配置文件。不存在时只用默认值启动。
@@ -132,16 +129,28 @@ func cmdServe(args []string, stderr io.Writer) int {
 	log.Info("启动", "version", version.Version)
 	server.SetMemoryLimit(log)
 
-	h, closeFn, err := buildHandler(res.Config, log)
+	var raw []byte
+	if path != "" {
+		raw, _ = os.ReadFile(path) //nolint:gosec // 配置文件路径由运维指定
+	}
+	a, err := app.New(res, raw, app.Options{ConfigPath: path, Log: log})
 	if err != nil {
 		log.Error("启动失败", "err", err)
 		return 1
 	}
-	defer closeFn()
+	defer a.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	srv := server.New(res.Config, log, h)
+	go a.Watch(ctx)     // 配置文件变化时自动重载
+	go a.Stats.Run(ctx) // 每小时把统计存进运营数据库
+	watchSignals(ctx, a, log)
+
+	cfg := res.Config
+	srv := server.New(cfg, log, relay.New(relay.Deps{App: a, Log: log}),
+		server.Listener{Name: "管理后台", Addr: cfg.Listen.Admin, Handler: adminHandler(a)},
+		server.Listener{Name: "指标", Addr: cfg.Listen.Metrics, Handler: metricsHandler(a, cfg.Metrics.Pprof)},
+	)
 	if err := srv.Run(ctx); err != nil {
 		log.Error("退出", "err", err)
 		return 1
@@ -150,42 +159,25 @@ func cmdServe(args []string, stderr io.Writer) int {
 	return 0
 }
 
-// buildHandler 由配置组装拉取入口的处理器。返回的 close 函数在退出时写完访问日志、关闭上游连接。
-func buildHandler(cfg *config.Config, log *slog.Logger) (http.Handler, func(), error) {
-	trusted, err := config.ParsePrefixes(cfg.ClientIP.TrustedProxies)
-	if err != nil {
-		return nil, nil, err
+// adminHandler 是管理后台的监听：/admin/api/v1/ 是 JSON API。网页后台在后续版本提供。
+func adminHandler(a *app.App) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle(api.Prefix+"/", api.New(a))
+	return mux
+}
+
+// metricsHandler 是指标的监听：/metrics，开了 metrics.pprof 时还有 /debug/pprof/。
+func metricsHandler(a *app.App, withPprof bool) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", a.Metrics)
+	if withPprof {
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	}
-	pool, err := upstream.NewPool(cfg, upstream.Options{Log: log})
-	if err != nil {
-		return nil, nil, err
-	}
-	wh, err := web.New(cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-	al, err := accesslog.New(cfg.Log.Access)
-	if err != nil {
-		return nil, nil, fmt.Errorf("访问日志：%w", err)
-	}
-	h := relay.New(relay.Deps{
-		Config: cfg,
-		Router: route.New(cfg),
-		Pool:   pool,
-		IPs:    clientip.New(trusted, cfg.ClientIP.UseXRealIP),
-		Web:    wh,
-		Access: al,
-		Log:    log,
-		// manifest 正文很小，取一次最多等 2 倍的响应头超时
-		Manifests: manifest.New(cfg.Cache, cfg.Limits.MaxManifestBuffers, 2*cfg.Timeouts.ResponseHeader.D()),
-	})
-	return h, func() {
-		if n := al.Dropped(); n > 0 {
-			log.Warn("访问日志队列满时丢弃过记录", "count", n)
-		}
-		_ = al.Close()
-		pool.Close()
-	}, nil
+	return mux
 }
 
 func cmdCheck(args []string, stdout, stderr io.Writer) int {

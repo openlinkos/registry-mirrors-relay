@@ -16,20 +16,34 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/route"
 )
 
-// Server 管理拉取入口的各个监听。
+// Listener 是拉取入口以外的监听（管理后台、指标）。
+type Listener struct {
+	Name    string
+	Addr    string
+	Handler http.Handler
+}
+
+// Server 管理拉取入口和其他监听。
 type Server struct {
 	cfg     *config.Config
 	log     *slog.Logger
 	handler http.Handler
+	extras  []Listener
 	ready   atomic.Bool
 
 	mu    sync.Mutex
 	bound []string // 实际监听的地址，监听 :0 时能拿到端口
 }
 
-// New 创建 Server。handler 处理 /healthz、/readyz 以外的所有请求。
-func New(cfg *config.Config, log *slog.Logger, handler http.Handler) *Server {
-	return &Server{cfg: cfg, log: log, handler: handler}
+// New 创建 Server。handler 处理拉取入口上 /healthz、/readyz 以外的所有请求；extras 是其他监听，地址为空的忽略。
+func New(cfg *config.Config, log *slog.Logger, handler http.Handler, extras ...Listener) *Server {
+	s := &Server{cfg: cfg, log: log, handler: handler}
+	for _, l := range extras {
+		if l.Addr != "" {
+			s.extras = append(s.extras, l)
+		}
+	}
+	return s
 }
 
 // ServeHTTP 先处理探活，其余交给 handler。
@@ -86,7 +100,24 @@ func (s *Server) Run(ctx context.Context) error {
 	t := s.cfg.Timeouts
 	var servers []*http.Server
 	var listeners []net.Listener
+	var names []string
+	type plan struct {
+		name, addr, key string
+		h               http.Handler
+	}
+	var plans []plan
 	for _, addr := range s.Addrs() {
+		key := route.MainListener
+		if addr != s.cfg.Listen.HTTP && addr != s.cfg.Listen.HTTPS {
+			key = addr // 按端口区分的入口
+		}
+		plans = append(plans, plan{name: "拉取入口", addr: addr, key: key, h: s})
+	}
+	for _, l := range s.extras {
+		plans = append(plans, plan{name: l.Name, addr: l.Addr, h: l.Handler})
+	}
+	for _, pl := range plans {
+		addr := pl.addr
 		ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
 		if err != nil {
 			for _, l := range listeners {
@@ -98,12 +129,10 @@ func (s *Server) Run(ctx context.Context) error {
 		s.mu.Lock()
 		s.bound = append(s.bound, ln.Addr().String())
 		s.mu.Unlock()
-		key := route.MainListener
-		if addr != s.cfg.Listen.HTTP && addr != s.cfg.Listen.HTTPS {
-			key = addr // 按端口区分的入口
-		}
+		key := pl.key
+		names = append(names, pl.name)
 		servers = append(servers, &http.Server{
-			Handler:           s,
+			Handler:           pl.h,
 			BaseContext:       func(net.Listener) context.Context { return route.WithListener(context.Background(), key) },
 			ReadHeaderTimeout: t.ReadHeader.D(),
 			IdleTimeout:       t.Idle.D(),
@@ -117,13 +146,13 @@ func (s *Server) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
 	for i, srv := range servers {
 		wg.Add(1)
-		go func(srv *http.Server, ln net.Listener) {
+		go func(srv *http.Server, ln net.Listener, name string) {
 			defer wg.Done()
-			s.log.Info("拉取入口开始监听", "addr", ln.Addr().String())
+			s.log.Info(name+"开始监听", "addr", ln.Addr().String())
 			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				errc <- fmt.Errorf("%s：%w", ln.Addr(), err)
 			}
-		}(srv, listeners[i])
+		}(srv, listeners[i], names[i])
 	}
 	s.ready.Store(true)
 

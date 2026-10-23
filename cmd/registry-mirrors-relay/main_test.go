@@ -20,6 +20,7 @@ func runCmd(t *testing.T, stdin string, args ...string) (int, string, string) {
 }
 
 func TestCheckExampleConfig(t *testing.T) {
+	t.Setenv("RELAY_ADMIN_TOKEN", "0123456789abcdef0123456789abcdef")
 	code, out, errs := runCmd(t, "", "check", "-config", filepath.Join("..", "..", "config.example.yaml"))
 	if code != 0 || !strings.Contains(out, "没有问题") {
 		t.Fatalf("示例配置应通过：%d %s %s", code, out, errs)

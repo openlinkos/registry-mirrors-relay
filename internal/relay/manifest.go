@@ -5,14 +5,15 @@ import (
 	"strconv"
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/accesslog"
+	"github.com/openlinkos/registry-mirrors-relay/internal/app"
 	"github.com/openlinkos/registry-mirrors-relay/internal/manifest"
 	"github.com/openlinkos/registry-mirrors-relay/internal/route"
 	"github.com/openlinkos/registry-mirrors-relay/internal/upstream"
 )
 
 // serveManifest 经缓存回答 manifest 请求。缓存处理不了时返回 false，由调用方按普通请求转发。
-func (h *Handler) serveManifest(w http.ResponseWriter, r *http.Request, e *accesslog.Entry, up *upstream.Upstream, t route.Target) bool {
-	out := h.Manifests.Resolve(r.Context(), up, manifest.Request{
+func (h *Handler) serveManifest(w http.ResponseWriter, r *http.Request, e *accesslog.Entry, rt *app.Runtime, up *upstream.Upstream, t route.Target) bool {
+	out := rt.Manifests.Resolve(r.Context(), up, manifest.Request{
 		Upstream: t.Upstream, Repo: t.Repo, Ref: t.Ref,
 		Head: r.Method == http.MethodHead, Accept: r.Header.Values("Accept"),
 	})
@@ -37,19 +38,19 @@ func (h *Handler) serveManifest(w http.ResponseWriter, r *http.Request, e *acces
 		writeUpstreamError(w, r, out.Status, out.RetryAfter, out.BodyType, out.Body, t.Kind)
 	case out.Manifest != nil:
 		m := out.Manifest
-		h.manifestHeaders(w.Header(), t, m.MediaType, m.Digest, int64(len(m.Body)))
+		manifestHeaders(w.Header(), t, m.MediaType, m.Digest, int64(len(m.Body)), rt.Config.Proxy.CDNCacheDigests)
 		w.WriteHeader(http.StatusOK)
 		if r.Method != http.MethodHead {
 			_, _ = w.Write(m.Body)
 		}
 	case out.Head != nil:
-		h.manifestHeaders(w.Header(), t, out.Head.MediaType, out.Head.Digest, out.Head.Size)
+		manifestHeaders(w.Header(), t, out.Head.MediaType, out.Head.Digest, out.Head.Size, rt.Config.Proxy.CDNCacheDigests)
 		w.WriteHeader(http.StatusOK)
 	}
 	return true
 }
 
-func (h *Handler) manifestHeaders(hd http.Header, t route.Target, mediaType, digest string, size int64) {
+func manifestHeaders(hd http.Header, t route.Target, mediaType, digest string, size int64, cdnCacheDigests bool) {
 	if mediaType != "" {
 		hd.Set("Content-Type", mediaType)
 	}
@@ -61,7 +62,7 @@ func (h *Handler) manifestHeaders(hd http.Header, t route.Target, mediaType, dig
 	switch {
 	case t.Ref != digest:
 		hd.Set("Cache-Control", "no-store") // 按 tag 请求：tag 会变
-	case h.Config.Proxy.CDNCacheDigests:
+	case cdnCacheDigests:
 		hd.Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
 }

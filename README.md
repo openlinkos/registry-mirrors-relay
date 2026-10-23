@@ -44,7 +44,7 @@
 - [x] M0 工程骨架：配置、命令行、CI
 - [x] M1 代理核心：按域名、端口和单域名（前缀、`ns`、根路径）的入口，令牌、重定向、访问日志、用法页
 - [x] M2 manifest 缓存、熔断、性能压测（结果见 [docs/benchmark.md](docs/benchmark.md)）
-- [ ] M3 访问控制与运营数据：账号、IP 和镜像规则、限流、指标、热重载
+- [x] M3 访问控制与运营数据：账号、IP 和镜像规则、限流、指标、热重载、[管理 API](docs/api.md)
 - [ ] M4 管理后台
 - [ ] M5 部署与发布：镜像、Compose、Kubernetes、签名的 v0.1.0
 - [ ] M6 Helm chart

@@ -186,6 +186,15 @@ type Admin struct {
 	PublicURL    string       `yaml:"public_url"`
 	Store        Store        `yaml:"store"`
 	InitialAdmin InitialAdmin `yaml:"initial_admin"`
+	// APITokens 是写在配置里的管理 API 令牌（适合自动化和 k8s Secret）。也可以在后台创建，存进运营数据库。
+	APITokens []APIToken `yaml:"api_tokens"`
+}
+
+// APIToken 是一个管理 API 令牌。请求时放在 Authorization: Bearer 里。
+type APIToken struct {
+	Name  string `yaml:"name"`
+	Token Secret `yaml:"token"` // 至少 32 个字符
+	Role  string `yaml:"role"`  // admin（可读写）| viewer（只读）
 }
 
 // Store 是运营数据的存放方式。

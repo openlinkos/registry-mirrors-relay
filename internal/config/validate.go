@@ -325,6 +325,23 @@ func validate(c *Config, res *Result) []error {
 	} else if c.Listen.Admin != "" && !isLoopbackListen(c.Listen.Admin) {
 		warn("listen.admin 不只监听本机，但没有写 admin.public_url：后台只接受用 127.0.0.1 或 localhost 访问")
 	}
+	seenTok := map[string]bool{}
+	for i := range c.Admin.APITokens {
+		tk := &c.Admin.APITokens[i]
+		if tk.Name == "" || seenTok[tk.Name] {
+			bad("admin.api_tokens 第 %d 个：name 不能为空，也不能重复", i+1)
+		}
+		seenTok[tk.Name] = true
+		if tk.Role == "" {
+			tk.Role = "viewer"
+		}
+		if tk.Role != "admin" && tk.Role != "viewer" {
+			bad("admin.api_tokens 里 %s 的 role 只能是 admin 或 viewer", tk.Name)
+		}
+		if !tk.Token.IsSet() {
+			bad("admin.api_tokens 里 %s 没有写 token", tk.Name)
+		}
+	}
 	if c.Admin.InitialAdmin.Username != "" && !c.Admin.InitialAdmin.Password.IsSet() {
 		bad("admin.initial_admin 写了 username，也要写 password")
 	}

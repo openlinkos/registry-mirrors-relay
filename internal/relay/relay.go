@@ -9,36 +9,25 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/openlinkos/registry-mirrors-relay/internal/access"
 	"github.com/openlinkos/registry-mirrors-relay/internal/accesslog"
-	"github.com/openlinkos/registry-mirrors-relay/internal/clientip"
-	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/app"
+	"github.com/openlinkos/registry-mirrors-relay/internal/limit"
 	"github.com/openlinkos/registry-mirrors-relay/internal/manifest"
 	"github.com/openlinkos/registry-mirrors-relay/internal/route"
 	"github.com/openlinkos/registry-mirrors-relay/internal/upstream"
-	"github.com/openlinkos/registry-mirrors-relay/internal/web"
 )
 
-// AccessLogger 是访问日志的写入方。*accesslog.Logger 实现了它；测试里可以换成收集器。
-type AccessLogger interface {
-	Log(*accesslog.Entry)
-}
-
-// Deps 是 Handler 用到的组件。
+// Deps 是 Handler 用到的组件。设置每个请求都从 App 的当前 Runtime 读，热重载后立即生效。
 type Deps struct {
-	Config *config.Config
-	Router *route.Router
-	Pool   *upstream.Pool
-	IPs    *clientip.Resolver
-	Web    *web.Handler
-	// Manifests 是 manifest 缓存；为 nil 时 manifest 也直接转发
-	Manifests *manifest.Cache
-	Access    AccessLogger
-	Log       *slog.Logger
+	App *app.App
+	Log *slog.Logger
 }
 
 // Handler 处理拉取入口上的所有请求（/healthz、/readyz 由 server 包处理）。
@@ -47,9 +36,9 @@ type Handler struct {
 	bufs sync.Pool
 }
 
-// New 创建 Handler。
+// New 创建 Handler。转发缓冲的大小取启动时的配置（改了要重启）。
 func New(d Deps) *Handler {
-	size := int(d.Config.Proxy.BufferSize)
+	size := int(d.App.Runtime().Config.Proxy.BufferSize)
 	return &Handler{Deps: d, bufs: sync.Pool{New: func() any { b := make([]byte, size); return &b }}}
 }
 
@@ -58,8 +47,9 @@ const manifestAccept = manifest.DefaultAccept
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	rt := h.App.Runtime()
 	rec := &recorder{ResponseWriter: w}
-	client, remote := h.IPs.ClientIP(r)
+	client, remote := rt.IPs.ClientIP(r)
 	_, port, _ := net.SplitHostPort(r.RemoteAddr)
 	e := &accesslog.Entry{
 		Time: start, RemoteIP: remote.String(), RemotePort: port, ClientIP: client.String(),
@@ -74,15 +64,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		e.RespContentLength = rec.Header().Get("Content-Length")
 		e.RespContentType = rec.Header().Get("Content-Type")
-		h.Access.Log(e)
+		h.App.Log(e)
 		if p != nil {
 			panic(p) // http.ErrAbortHandler：让客户端看到连接中断，而不是一个被截断却看似完整的响应
 		}
 	}()
-	h.serve(rec, r, e)
+	release, ok := h.App.Limiter.AcquireInflight()
+	if !ok {
+		e.Limited = true
+		rec.Header().Set("Retry-After", "1")
+		writeError(rec, r, http.StatusServiceUnavailable, "TOOMANYREQUESTS", "服务繁忙，稍后再试")
+		return
+	}
+	defer release()
+	h.serve(rec, r, e, rt, client)
 }
 
-func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Entry) {
+func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Entry, rt *app.Runtime, client netip.Addr) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		writeError(w, r, http.StatusMethodNotAllowed, "UNSUPPORTED", "只支持拉取（GET、HEAD）")
@@ -92,7 +90,7 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 		writeError(w, r, http.StatusRequestEntityTooLarge, "SIZE_INVALID", "请求体太大")
 		return
 	}
-	ent := h.Router.Entrance(route.ListenerFrom(r.Context()), r.Host)
+	ent := rt.Router.Entrance(route.ListenerFrom(r.Context()), r.Host)
 	isV2 := r.URL.Path == "/v2" || strings.HasPrefix(r.URL.Path, "/v2/")
 	if ent == nil {
 		if isV2 {
@@ -103,22 +101,30 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 		return
 	}
 	e.Entrance = ent.Name
+	if ok, reason := rt.IPRules.Decide(client, time.Now()); !ok {
+		e.Error = reason
+		writeError(w, r, http.StatusForbidden, "DENIED", "拒绝访问")
+		return
+	}
 	if !isV2 {
-		if !h.Web.Serve(w, r) {
+		if !rt.Web.Serve(w, r) {
 			http.NotFound(w, r)
 		}
 		return
 	}
+	var user *access.User
 	if ent.Auth == "basic" {
-		// 登录在 M3 实现，在此之前要求登录的入口一律拒绝，避免误开成公开入口
-		writeError(w, r, http.StatusNotImplemented, "UNSUPPORTED", "这个入口要求登录，当前版本还不支持")
-		return
+		if user = h.basicAuth(w, r, e, rt, client); user == nil {
+			return
+		}
+		e.UserID = user.Name
 	}
-	t, perr := h.Router.Parse(ent, r.URL)
+	t, perr := rt.Router.Parse(ent, r.URL)
 	if perr != nil {
 		writeError(w, r, perr.Status, perr.Code, perr.Message)
 		return
 	}
+	e.Kind = t.Kind.String()
 	if t.Kind == route.KindPing {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
@@ -129,16 +135,85 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 		}
 		return
 	}
-	up := h.Pool.Get(t.Upstream)
+	up := rt.Pool.Get(t.Upstream)
 	if up == nil {
 		writeError(w, r, http.StatusNotFound, "NAME_UNKNOWN", "没有配置上游 "+t.Upstream)
 		return
 	}
-	e.Upstream = t.Upstream
-	if t.Kind == route.KindManifest && h.Manifests != nil && h.serveManifest(w, r, e, up, t) {
+	e.Upstream, e.Image, e.Kind, e.Ref = t.Upstream, t.Upstream+"/"+t.Repo, t.Kind.String(), t.Ref
+	if ok, status, msg, rule := rt.Images.Decide(e.Image); !ok {
+		e.Error = "image rule " + rule
+		writeError(w, r, status, "DENIED", msg)
+		return
+	}
+
+	// 限流：镜像层按并发流数，其余按令牌桶
+	var ov limit.Override
+	name := ""
+	if user != nil {
+		ov = limit.Override{ManifestRate: user.ManifestRPS, BlobStreams: user.BlobStreams}
+		name = user.Name
+	}
+	key := limit.Key(name, client)
+	if t.Kind == route.KindBlob {
+		rel, ok, reason := h.App.Limiter.AcquireBlob(key, client, ov)
+		if !ok {
+			e.Limited = true
+			w.Header().Set("Retry-After", "5")
+			if reason == "global" {
+				writeError(w, r, http.StatusServiceUnavailable, "TOOMANYREQUESTS", "服务繁忙，稍后再试")
+			} else {
+				writeError(w, r, http.StatusTooManyRequests, "TOOMANYREQUESTS", "同时下载的镜像层太多")
+			}
+			return
+		}
+		defer rel()
+	} else if ok, wait := h.App.Limiter.AllowManifest(key, client, r.Method == http.MethodHead, ov); !ok {
+		e.Limited = true
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds()+0.999)))
+		writeError(w, r, http.StatusTooManyRequests, "TOOMANYREQUESTS", "请求太频繁，稍后再试")
+		return
+	}
+
+	if t.Kind == route.KindManifest && rt.Manifests != nil && h.serveManifest(w, r, e, rt, up, t) {
 		return
 	}
 	h.proxy(w, r, e, up, t)
+}
+
+// basicAuth 校验入口要求的登录，失败时写好响应并返回 nil。
+func (h *Handler) basicAuth(w http.ResponseWriter, r *http.Request, e *accesslog.Entry, rt *app.Runtime, client netip.Addr) *access.User {
+	if ok, wait := h.App.Limiter.AuthAllowed(client); !ok {
+		e.Limited = true
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds()+0.999)))
+		writeError(w, r, http.StatusTooManyRequests, "TOOMANYREQUESTS", "登录失败次数太多，稍后再试")
+		return nil
+	}
+	name, pass, ok := r.BasicAuth()
+	if !ok {
+		challenge(w, r)
+		return nil
+	}
+	u := rt.Users[name]
+	good, err := h.App.Auth.Verify(u, pass)
+	if errors.Is(err, access.ErrBusy) {
+		w.Header().Set("Retry-After", "1")
+		writeError(w, r, http.StatusServiceUnavailable, "UNAVAILABLE", "服务繁忙，稍后再试")
+		return nil
+	}
+	if !good {
+		h.App.Limiter.AuthFailed(client)
+		e.Error = "login failed: " + name
+		challenge(w, r)
+		return nil
+	}
+	return u
+}
+
+// challenge 要求客户端用 Basic 登录（docker login 会据此发送账号）。
+func challenge(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Www-Authenticate", `Basic realm="registry-mirrors-relay", charset="UTF-8"`)
+	writeError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "需要登录")
 }
 
 // requestHeaders 是转发给上游的请求头：只有 Accept，blob 再加 Range、If-Range。
@@ -181,6 +256,7 @@ func (h *Handler) proxy(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 	if resp.PassLocation != "" {
 		// 白名单外的重定向：原样交给客户端，客户端会直连这个地址
 		h.Log.Info("重定向不在白名单内，交给客户端", "upstream", up.Name, "location_host", hostOf(resp.PassLocation))
+		h.App.Stats.UnlistedRedirect(up.Name, hostOf(resp.PassLocation))
 		w.Header().Set("Location", resp.PassLocation)
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusTemporaryRedirect)
@@ -202,7 +278,7 @@ func (h *Handler) proxy(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 	}
 
 	hd := w.Header()
-	copyHeaders(hd, resp.Header, h.Config.Proxy.ExposeUpstreamRatelimit)
+	copyHeaders(hd, resp.Header, h.App.Runtime().Config.Proxy.ExposeUpstreamRatelimit)
 	setSecurityHeaders(hd)
 	isDigest := strings.Contains(t.Ref, ":")
 	switch t.Kind {
@@ -222,7 +298,7 @@ func (h *Handler) proxy(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 	switch {
 	case !isDigest || t.Kind == route.KindTags:
 		hd.Set("Cache-Control", "no-store") // tag 会变
-	case h.Config.Proxy.CDNCacheDigests:
+	case h.App.Runtime().Config.Proxy.CDNCacheDigests:
 		hd.Set("Cache-Control", "public, max-age=31536000, immutable")
 	default:
 		if cc := resp.Header.Get("Cache-Control"); cc != "" {
@@ -297,8 +373,8 @@ func (h *Handler) stream(w http.ResponseWriter, body io.Reader, cancel context.C
 	defer h.bufs.Put(bp)
 	buf := *bp
 
-	readIdle := h.Config.Timeouts.UpstreamReadIdle.D()
-	writeIdle := h.Config.Timeouts.WriteIdle.D()
+	readIdle := h.App.Runtime().Config.Timeouts.UpstreamReadIdle.D()
+	writeIdle := h.App.Runtime().Config.Timeouts.WriteIdle.D()
 	var idle sync.Mutex
 	timedOut := false
 	timer := time.AfterFunc(readIdle, func() {

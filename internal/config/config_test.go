@@ -240,6 +240,7 @@ func TestExampleConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("DOCKERHUB_TOKEN", "x")
+	t.Setenv("RELAY_ADMIN_TOKEN", "0123456789abcdef0123456789abcdef")
 	if _, err := Parse(b); err != nil {
 		t.Fatalf("示例配置应能通过校验：%v", err)
 	}

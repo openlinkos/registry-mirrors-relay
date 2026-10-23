@@ -8,20 +8,23 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/openlinkos/registry-mirrors-relay/internal/accesslog"
-	"github.com/openlinkos/registry-mirrors-relay/internal/clientip"
+	"github.com/openlinkos/registry-mirrors-relay/internal/app"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
-	"github.com/openlinkos/registry-mirrors-relay/internal/manifest"
-	"github.com/openlinkos/registry-mirrors-relay/internal/route"
+	"github.com/openlinkos/registry-mirrors-relay/internal/limit"
+	"github.com/openlinkos/registry-mirrors-relay/internal/store"
 	"github.com/openlinkos/registry-mirrors-relay/internal/testutil"
 	"github.com/openlinkos/registry-mirrors-relay/internal/upstream"
-	"github.com/openlinkos/registry-mirrors-relay/internal/web"
 )
 
 type collector struct {
@@ -49,6 +52,8 @@ type env struct {
 	alp  *testutil.Image
 	logs *collector
 	cfg  *config.Config
+	app  *app.App
+	net  *testutil.Net
 }
 
 const testConfig = `
@@ -59,6 +64,9 @@ entrances:
     default_upstream: hub.test
   - hosts: [reg.local]
     upstream: registry.test
+  - hosts: [private.local]
+    upstream: registry.test
+    auth: basic
 upstreams:
   registry.test:
     registry: registry.test
@@ -72,12 +80,17 @@ upstreams:
 timeouts:
   upstream_read_idle: 2s
   write_idle: 2s
+log:
+  access: {output: "off"}
 `
 
-func newEnv(t *testing.T, extra string) *env {
+func newEnv(t *testing.T, extra string) *env { return newEnvStore(t, extra, store.NewReadOnly()) }
+
+// newEnvStore 用给定的运营数据存储建测试环境。
+func newEnvStore(t *testing.T, extra string, st store.Store) *env {
 	t.Helper()
 	n := testutil.NewNet(t)
-	e := &env{logs: &collector{}}
+	e := &env{logs: &collector{}, net: n}
 	e.reg = testutil.NewRegistry(t, n, "registry.test", "auth.test", "cdn.test")
 	e.hub = testutil.NewRegistry(t, n, "hubreg.test", "hubauth.test", "hubcdn.test")
 	e.img = testutil.NewImage(t, "team/app", "v1", 256<<10)
@@ -90,18 +103,15 @@ func newEnv(t *testing.T, extra string) *env {
 	}
 	e.cfg = res.Config
 	log := slog.New(slog.DiscardHandler)
-	pool, err := upstream.NewPool(e.cfg, upstream.Options{DialContext: n.DialContext, RootCAs: n.CA.Pool, Log: log})
+	e.app, err = app.New(res, nil, app.Options{
+		Upstream: upstream.Options{DialContext: n.DialContext, RootCAs: n.CA.Pool, Log: log},
+		Log:      log, Store: st, Hook: e.logs.Log,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	trusted, _ := config.ParsePrefixes(e.cfg.ClientIP.TrustedProxies)
-	wh, err := web.New(e.cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := New(Deps{Config: e.cfg, Router: route.New(e.cfg), Pool: pool, IPs: clientip.New(trusted, false), Web: wh, Access: e.logs, Log: log,
-		Manifests: manifest.New(e.cfg.Cache, e.cfg.Limits.MaxManifestBuffers, 10*time.Second)})
-	e.srv = httptest.NewServer(h)
+	t.Cleanup(e.app.Close)
+	e.srv = httptest.NewServer(New(Deps{App: e.app, Log: log}))
 	t.Cleanup(e.srv.Close)
 	return e
 }
@@ -113,7 +123,8 @@ func (e *env) do(t *testing.T, method, host, path string, hdr http.Header) (*htt
 	for k, v := range hdr {
 		req.Header[k] = v
 	}
-	resp, err := http.DefaultClient.Do(req)
+	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := noFollow.Do(req)
 	if err != nil {
 		t.Fatalf("%s %s：%v", method, path, err)
 	}
@@ -273,22 +284,18 @@ func TestEntranceRules(t *testing.T) {
 }
 
 func TestUnlistedRedirectPassedToClient(t *testing.T) {
+	// 白名单里去掉 cdn.test
 	e := newEnv(t, "")
-	// 另建一个白名单不含 cdn.test 的环境
-	n := testutil.NewNet(t)
-	reg := testutil.NewRegistry(t, n, "registry.test", "auth.test", "cdn.test")
-	reg.Add(e.img)
-	res, _ := config.Parse([]byte(strings.Replace(testConfig, `['cdn\.test', 'pkg\.test']`, `['pkg\.test']`, 1)))
-	p, _ := upstream.NewPool(res.Config, upstream.Options{DialContext: n.DialContext, RootCAs: n.CA.Pool, Log: slog.New(slog.DiscardHandler)})
-	wh, _ := web.New(res.Config)
-	logs := &collector{}
-	h := New(Deps{Config: res.Config, Router: route.New(res.Config), Pool: p, IPs: clientip.New(nil, false), Web: wh, Access: logs, Log: slog.New(slog.DiscardHandler)})
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v2/team/app/blobs/"+e.layer(), nil)
-	req.Host = "reg.local"
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusTemporaryRedirect || !strings.HasPrefix(rec.Header().Get("Location"), "https://cdn.test/") {
-		t.Fatalf("白名单外的重定向应交给客户端：%d %v", rec.Code, rec.Header())
+	e.cfg.Upstreams["registry.test"].RedirectHosts = []string{`pkg\.test`}
+	if err := e.app.Rebuild(); err != nil {
+		t.Fatal(err)
+	}
+	resp, _ := e.do(t, http.MethodGet, "reg.local", "/v2/team/app/blobs/"+e.layer(), nil)
+	if resp.StatusCode != http.StatusTemporaryRedirect || !strings.HasPrefix(resp.Header.Get("Location"), "https://cdn.test/") {
+		t.Fatalf("白名单外的重定向应交给客户端：%d %v", resp.StatusCode, resp.Header)
+	}
+	if e.app.Stats.Unlisted()["registry.test"]["cdn.test"] != 1 {
+		t.Fatalf("应记下白名单外的主机：%v", e.app.Stats.Unlisted())
 	}
 }
 
@@ -334,7 +341,7 @@ func (s *stallReader) Read(p []byte) (int, error) {
 func TestStreamUpstreamIdle(t *testing.T) {
 	e := newEnv(t, "")
 	e.cfg.Timeouts.UpstreamReadIdle = config.Duration(200 * time.Millisecond)
-	h := &Handler{Deps: Deps{Config: e.cfg}}
+	h := &Handler{Deps: Deps{App: e.app}}
 	h.bufs.New = func() any { b := make([]byte, 1024); return &b }
 	ctx, cancel := context.WithCancel(context.Background())
 	rec := httptest.NewRecorder()
@@ -385,3 +392,145 @@ func TestStaleManifestWhenUpstreamFails(t *testing.T) {
 		t.Fatalf("上游 503 时应返回旧的 manifest：%d %q", resp.StatusCode, e.logs.last().Cache)
 	}
 }
+
+func boltEnv(t *testing.T, extra string) (*env, *store.Bolt) {
+	t.Helper()
+	st, err := store.OpenBolt(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return newEnvStore(t, extra, st), st
+}
+
+func (e *env) update(t *testing.T, fn func(*store.Data)) {
+	t.Helper()
+	if err := e.app.Store.Update(func(d *store.Data) error { fn(d); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.app.Rebuild(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func basic(user, pw string) http.Header {
+	r, _ := http.NewRequest(http.MethodGet, "/", nil)
+	r.SetBasicAuth(user, pw)
+	return http.Header{"Authorization": r.Header["Authorization"]}
+}
+
+func TestBasicAuthEntrance(t *testing.T) {
+	e, _ := boltEnv(t, "")
+	h, _ := bcrypt.GenerateFromPassword([]byte("correct horse"), bcrypt.MinCost)
+	e.update(t, func(d *store.Data) { d.Users = append(d.Users, store.ClientUser{Name: "alice", Hash: string(h)}) })
+
+	resp, _ := e.do(t, http.MethodGet, "private.local", "/v2/", nil)
+	if resp.StatusCode != 401 || !strings.HasPrefix(resp.Header.Get("Www-Authenticate"), "Basic ") {
+		t.Fatalf("没带口令应返回 Basic 质询：%d %v", resp.StatusCode, resp.Header)
+	}
+	if resp, _ := e.do(t, http.MethodGet, "private.local", "/v2/", basic("alice", "wrong")); resp.StatusCode != 401 {
+		t.Fatalf("口令错误应返回 401：%d", resp.StatusCode)
+	}
+	if resp, _ := e.do(t, http.MethodGet, "private.local", "/v2/", basic("alice", "correct horse")); resp.StatusCode != 200 {
+		t.Fatalf("口令正确应返回 200：%d", resp.StatusCode)
+	}
+	p := &testutil.Puller{Base: e.srv.URL, Host: "private.local", Header: basic("alice", "correct horse")}
+	if _, _, err := p.Pull("team/app", "v1"); err != nil {
+		t.Fatalf("登录后应能拉取：%v", err)
+	}
+	if e.logs.last().UserID != "alice" {
+		t.Fatalf("访问日志应记下用户：%+v", e.logs.last())
+	}
+	// 公开入口不受影响
+	if resp, _ := e.do(t, http.MethodGet, "reg.local", "/v2/", nil); resp.StatusCode != 200 {
+		t.Fatal("公开入口不需要登录")
+	}
+	// 停用账号
+	e.update(t, func(d *store.Data) { d.Users[0].Disabled = true })
+	if resp, _ := e.do(t, http.MethodGet, "private.local", "/v2/", basic("alice", "correct horse")); resp.StatusCode != 401 {
+		t.Fatalf("停用的账号应返回 401：%d", resp.StatusCode)
+	}
+	// 失败次数限制（默认每分钟 10 次）
+	var last int
+	for i := 0; i < 12; i++ {
+		resp, _ := e.do(t, http.MethodGet, "private.local", "/v2/", basic("bob", "x"))
+		last = resp.StatusCode
+	}
+	if last != 429 {
+		t.Fatalf("登录失败太多次应返回 429：%d", last)
+	}
+}
+
+func TestIPBan(t *testing.T) {
+	e, _ := boltEnv(t, "")
+	e.update(t, func(d *store.Data) {
+		d.Bans = append(d.Bans, store.Ban{CIDR: "127.0.0.1/32", Until: time.Now().Add(time.Hour), Reason: "test"})
+	})
+	for _, path := range []string{"/v2/", "/"} {
+		if resp, _ := e.do(t, http.MethodGet, "reg.local", path, nil); resp.StatusCode != 403 {
+			t.Fatalf("被封禁的 IP 访问 %s 应返回 403：%d", path, resp.StatusCode)
+		}
+	}
+	if e.logs.last().Error != "banned" {
+		t.Fatalf("日志应记下原因：%+v", e.logs.last())
+	}
+	e.update(t, func(d *store.Data) { d.Bans = nil })
+	if resp, _ := e.do(t, http.MethodGet, "reg.local", "/v2/", nil); resp.StatusCode != 200 {
+		t.Fatal("解除封禁后应恢复")
+	}
+}
+
+func TestImageDenyRule(t *testing.T) {
+	e := newEnv(t, `access:
+  images:
+    deny: [{pattern: 'registry.test/team/**', status: 451, message: blocked}]
+`)
+	resp, body := e.do(t, http.MethodGet, "reg.local", "/v2/team/app/manifests/v1", nil)
+	if resp.StatusCode != 451 || !strings.Contains(string(body), "blocked") || !strings.Contains(string(body), "DENIED") {
+		t.Fatalf("黑名单里的镜像应返回 451：%d %s", resp.StatusCode, body)
+	}
+	if e.reg.Count("GET registry.test manifest") != 0 {
+		t.Fatal("被拒绝的请求不应发给上游")
+	}
+	if resp, _ := e.do(t, http.MethodGet, "mirror.local", "/v2/alpine/manifests/3.22", nil); resp.StatusCode != 200 {
+		t.Fatalf("别的镜像不受影响：%d", resp.StatusCode)
+	}
+}
+
+func TestManifestRateLimit(t *testing.T) {
+	e := newEnv(t, `limits:
+  manifest_rate: 0.5
+  manifest_burst: 2
+`)
+	codes := []int{}
+	for i := 0; i < 3; i++ {
+		resp, _ := e.do(t, http.MethodGet, "reg.local", "/v2/team/app/manifests/v1", nil)
+		codes = append(codes, resp.StatusCode)
+		if i == 2 && resp.Header.Get("Retry-After") == "" {
+			t.Fatal("429 应带 Retry-After")
+		}
+	}
+	if codes[0] != 200 || codes[1] != 200 || codes[2] != 429 || !e.logs.last().Limited {
+		t.Fatalf("突发 2 次之后应返回 429：%v", codes)
+	}
+}
+
+func TestBlobStreamLimit(t *testing.T) {
+	e := newEnv(t, `limits:
+  blob_streams_per_client: 1
+`)
+	// 先占住这个客户端唯一的名额，模拟一个还在下载的层
+	rel, ok, _ := e.app.Limiter.AcquireBlob("ip:127.0.0.1", netip.MustParseAddr("127.0.0.1"), limitOverrideNone)
+	if !ok {
+		t.Fatal("应能占到名额")
+	}
+	resp, _ := e.do(t, http.MethodGet, "reg.local", "/v2/team/app/blobs/"+e.layer(), nil)
+	if resp.StatusCode != 429 {
+		t.Fatalf("超过每个客户端的并发流数应返回 429：%d", resp.StatusCode)
+	}
+	rel()
+	if resp, _ := e.do(t, http.MethodGet, "reg.local", "/v2/team/app/blobs/"+e.layer(), nil); resp.StatusCode != 200 {
+		t.Fatalf("释放后应能下载：%d", resp.StatusCode)
+	}
+}
+
+var limitOverrideNone = limit.Override{}

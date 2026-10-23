@@ -37,6 +37,9 @@ type Entry struct {
 
 	Entrance string
 	Upstream string
+	Image    string   // 完整的镜像名，如 docker.io/library/nginx
+	Kind     string   // manifest、blob、tags、referrers、ping
+	Ref      string   // tag 或 digest
 	Hops     []string // 服务端跟随的每一跳，写成 redirect1..3
 	Cache    string
 	Limited  bool
@@ -68,6 +71,8 @@ type lineJSON struct {
 	RespHeaders map[string][]string `json:"resp_headers"`
 	Entrance    string              `json:"entrance,omitempty"`
 	Upstream    string              `json:"upstream,omitempty"`
+	Image       string              `json:"image,omitempty"`
+	Kind        string              `json:"kind,omitempty"`
 	Redirect1   string              `json:"redirect1,omitempty"`
 	Redirect2   string              `json:"redirect2,omitempty"`
 	Redirect3   string              `json:"redirect3,omitempty"`
@@ -87,7 +92,7 @@ func Marshal(e *Entry) []byte {
 		},
 		UserID: e.UserID, Duration: e.Duration.Seconds(), Size: e.Size, Status: e.Status,
 		RespHeaders: map[string][]string{},
-		Entrance:    e.Entrance, Upstream: e.Upstream, Cache: e.Cache, Limited: e.Limited, Error: e.Error,
+		Entrance:    e.Entrance, Upstream: e.Upstream, Image: e.Image, Kind: e.Kind, Cache: e.Cache, Limited: e.Limited, Error: e.Error,
 	}
 	if e.UserAgent != "" {
 		l.Request.Headers["User-Agent"] = []string{e.UserAgent}

@@ -211,6 +211,14 @@ func resolveSecrets(c *Config) []error {
 			errs = append(errs, fmt.Errorf("上游 %s 的账号口令：%w", n, err))
 		}
 	}
+	for i := range c.Admin.APITokens {
+		tk := &c.Admin.APITokens[i]
+		if err := tk.Token.resolve(); err != nil {
+			errs = append(errs, fmt.Errorf("admin.api_tokens 里 %s 的 token：%w", tk.Name, err))
+		} else if len(tk.Token.Reveal()) < 32 {
+			errs = append(errs, fmt.Errorf("admin.api_tokens 里 %s 的 token 太短：至少 32 个字符（可以用 openssl rand -hex 32 生成）", tk.Name))
+		}
+	}
 	if c.Admin.InitialAdmin.Password.IsSet() {
 		if err := c.Admin.InitialAdmin.Password.resolve(); err != nil {
 			errs = append(errs, fmt.Errorf("admin.initial_admin.password：%w", err))
