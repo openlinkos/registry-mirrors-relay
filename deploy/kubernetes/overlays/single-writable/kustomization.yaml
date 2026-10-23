@@ -2,6 +2,12 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# base 的标签只作用于 base 里的资源，这里新加的 StatefulSet 也要带上（含 selector）
+labels:
+  - pairs:
+      app.kubernetes.io/name: registry-mirrors-relay
+    includeSelectors: true
+
 resources:
   - ../../base
   - statefulset.yaml

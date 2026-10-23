@@ -1,6 +1,6 @@
-# 放在 CDN 或反向代理之后：它们负责 HTTPS，回源到这台机器的 8080。说明见 deploy/compose/README.md。
+# 放在 CDN 或反向代理之后：它们负责 HTTPS，回源到这台机器的 8080。说明见 docs/deploy.md。
 #
-#   openssl rand -base64 18 > admin-password && sudo chown 65532 admin-password && chmod 400 admin-password
+#   openssl rand -base64 18 > admin-password && chmod 400 admin-password && sudo chown 65532 admin-password
 #   docker compose up -d
 name: registry-mirrors-relay
 

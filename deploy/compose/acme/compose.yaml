@@ -1,7 +1,7 @@
-# 直接对外：relay 自己用 ACME（Let's Encrypt）申请证书，监听宿主机的 80 和 443。说明见 deploy/compose/README.md。
+# 直接对外：relay 自己用 ACME（Let's Encrypt）申请证书，监听宿主机的 80 和 443。说明见 docs/deploy.md。
 # 域名要先解析到这台机器，80 和 443 端口要能从公网访问（HTTP-01、TLS-ALPN-01 验证）。
 #
-#   openssl rand -base64 18 > admin-password && sudo chown 65532 admin-password && chmod 400 admin-password
+#   openssl rand -base64 18 > admin-password && chmod 400 admin-password && sudo chown 65532 admin-password
 #   docker compose up -d
 name: registry-mirrors-relay
 

@@ -1,5 +1,7 @@
 # 管理后台
 
+简体中文 | [English](admin.en.md)
+
 管理后台和[管理 API](api.md) 在同一个监听上（`listen.admin`，默认 `127.0.0.1:9090`），打开 `http://127.0.0.1:9090/admin/`。页面全部在服务端渲染，不加载任何第三方资源，没有脚本也能用；样式来自 OpenLinkOS 的设计系统 [`@openlinkos/ui`](https://www.npmjs.com/package/@openlinkos/ui)，打包在程序里。支持中英文和深浅色。
 
 ## 页面
@@ -54,8 +56,8 @@
 后台默认只监听本机。几种访问方式：
 
 - **SSH 转发**：`ssh -L 9090:127.0.0.1:9090 服务器`，然后在本机打开 `http://127.0.0.1:9090/admin/`。
-- **Kubernetes**：`kubectl port-forward deploy/registry-mirrors-relay 9090`。
-- **Docker**：`-p 127.0.0.1:9090:9090`，并把 `listen.admin` 改成 `:9090`（容器里要监听所有地址）。
+- **Kubernetes**：`kubectl port-forward svc/registry-mirrors-relay-admin 9090`（见[部署](deploy.md#kubernetes)）。
+- **Docker**：`-p 127.0.0.1:9090:9090`。镜像自带的配置已经让后台在容器里监听 `:9090`；挂载自己的配置时也要这样写。
 - **反向代理**：放在 https 的反向代理之后，并配置 `admin.public_url: https://admin.example.com`。代理的地址要写进 `client_ip.trusted_proxies`，登录限速才能按真实的客户端计数。
 
 没有配置 `public_url` 时，后台只接受用 `127.0.0.1`、`localhost`、`[::1]` 访问（其他 Host 返回 421，防 DNS 重绑定）。

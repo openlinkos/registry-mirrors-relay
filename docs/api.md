@@ -1,5 +1,7 @@
 # 管理 API
 
+简体中文 | [English](api.en.md)
+
 管理后台监听在 `listen.admin`（默认 `127.0.0.1:9090`），JSON API 在 `/admin/api/v1/` 下，网页后台见 [admin.md](admin.md)。两边的校验和写入是同一套代码，网页能做的事 API 都能做。
 
 ## 认证
@@ -17,7 +19,7 @@
 
 - `POST /tokens` 创建，存进运营数据库；明文只在创建时返回一次，数据库里只存 SHA-256。
 
-也可以用网页后台的会话（Cookie）：读操作直接用，写操作要带 `X-CSRF-Token` 并且 `Origin` 正确，否则返回 403。
+也可以用网页后台的会话（Cookie）：读操作直接用，写操作要带 `X-CSRF-Token` 并且 `Origin` 正确，否则返回 403。必须先改口令的管理员，改之前会话不能用于 API。
 
 `viewer` 只能读，写操作要 `admin`。所有写操作都记审计。认证失败按 IP 限次数（`limits.auth_failures_per_min`），超过返回 429。
 
@@ -47,7 +49,7 @@ Host 只接受 `admin.public_url` 的主机和回环地址（`127.0.0.1`、`loca
 | `POST /rules/image` `{"pattern", "kind", "status": 403\|451, "message", "note"}`；`DELETE /rules/image?pattern=&kind=` | 镜像规则，写全上游：`ghcr.io/owner/**`、`*/library/nginx` |
 | `POST /rules/image/test` `{"image": "nginx:1.27"}` | 这个镜像能不能拉（没写上游时按 Docker Hub） |
 | `GET /tokens`；`POST /tokens` `{"name", "role"}`；`DELETE /tokens/{name}` | API 令牌 |
-| `GET /admins`；`POST /admins` `{"name", "password", "role"}`；`PATCH /admins/{name}` `{"password", "role", "disabled"}`；`DELETE /admins/{name}` | 后台管理员；至少要留一个能用的 admin 角色，不能停用或删除自己；改动会结束那个管理员的会话 |
+| `GET /admins`；`POST /admins` `{"name", "password", "role"}`；`PATCH /admins/{name}` `{"password", "role", "disabled"}`；`DELETE /admins/{name}` | 后台管理员；至少要留一个能用的 admin 角色，不能停用或删除自己；改动会结束那个管理员的会话。新建或重设别人的口令后，对方第一次登录必须先改口令（`must_change`） |
 | `GET /site`；`PUT /site` `{"name", "operator", "links"}`；`DELETE /site` | 用法页的站点信息；设置后整体覆盖配置文件的 `site`，删除后改回配置文件的 |
 | `GET /audit?limit=100` | 审计记录，最新的在前 |
 | `GET /config` | 生效的配置（YAML，密钥只显示来源） |

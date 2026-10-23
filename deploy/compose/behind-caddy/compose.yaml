@@ -1,7 +1,7 @@
-# Caddy 在前面负责 HTTPS（自动申请证书），relay 只在 Compose 的内部网络里。说明见 deploy/compose/README.md。
+# Caddy 在前面负责 HTTPS（自动申请证书），relay 只在 Compose 的内部网络里。说明见 docs/deploy.md。
 # 已经有 Caddy 或 Nginx 时，照着 Caddyfile 把反向代理配到 relay 的 8080 即可。
 #
-#   openssl rand -base64 18 > admin-password && sudo chown 65532 admin-password && chmod 400 admin-password
+#   openssl rand -base64 18 > admin-password && chmod 400 admin-password && sudo chown 65532 admin-password
 #   docker compose up -d
 name: registry-mirrors-relay
 
