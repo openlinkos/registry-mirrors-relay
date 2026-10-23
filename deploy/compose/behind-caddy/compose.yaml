@@ -1,0 +1,47 @@
+# Caddy 在前面负责 HTTPS（自动申请证书），relay 只在 Compose 的内部网络里。说明见 deploy/compose/README.md。
+# 已经有 Caddy 或 Nginx 时，照着 Caddyfile 把反向代理配到 relay 的 8080 即可。
+#
+#   openssl rand -base64 18 > admin-password && sudo chown 65532 admin-password && chmod 400 admin-password
+#   docker compose up -d
+name: registry-mirrors-relay
+
+services:
+  caddy:
+    image: docker.io/library/caddy:2.11.7@sha256:504a44d7d74bd2bc28a66afc4774912fc21223ca8a67734af1c54ab2f999b489
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [relay]
+
+  relay:
+    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.1.0
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    expose: ["8080"]            # 只给 Caddy 用，不映射到宿主机
+    ports:
+      - "127.0.0.1:9090:9090"   # 管理后台：只在本机，远程用 SSH 转发
+      - "127.0.0.1:9180:9180"   # Prometheus 指标
+    volumes:
+      - ./config.yaml:/etc/registry-mirrors-relay/config.yaml:ro
+      - data:/var/lib/registry-mirrors-relay
+    environment:
+      RELAY_ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+    secrets: [admin_password]
+    stop_grace_period: 40s
+    logging:
+      driver: json-file
+      options: {max-size: 50m, max-file: "5"}
+
+secrets:
+  admin_password:
+    file: ./admin-password
+
+volumes:
+  data:
+  caddy-data:

@@ -6,11 +6,15 @@
 # 覆盖的写法：每个上游一个端口的入口；单域名入口的根路径（daemon.json 的 registry-mirrors）、路径前缀、ns（ctr + hosts.toml）。
 #
 # 用法：scripts/isolated-test.sh <relay 的 linux 二进制>
+#       IMAGE=<镜像> scripts/isolated-test.sh     # 测试发布的镜像本身：用镜像的入口、默认配置路径和 HEALTHCHECK
 # 需要 docker（能跑 --privileged 容器）和 jq。会拉几个测试镜像，测完删除所有容器、网络、卷和新拉的镜像。
 # 注意：会消耗这台机器出口 IP 的 Docker Hub 匿名额度。
 set -euo pipefail
 
-BIN="$(realpath "$1")"
+IMAGE="${IMAGE:-}"
+if [ -z "$IMAGE" ]; then
+  BIN="$(realpath "$1")"
+fi
 CFG="$(realpath "$(dirname "$0")/../deploy/test/config.yaml")"
 P=relaytest
 NET="$P-int"
@@ -38,18 +42,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for img in "$SK" "$CR" "$DIND" "$BASE"; do docker pull -q "$img" >/dev/null; done
+for img in "$SK" "$CR" "$DIND"; do docker pull -q "$img" >/dev/null; done
+[ -z "$IMAGE" ] && docker pull -q "$BASE" >/dev/null
 
 echo "启动 relay（只读根文件系统、去掉全部能力、非 root）"
 docker network create --internal "$NET" >/dev/null
 mkdir -p "$work/logs" && chmod 777 "$work/logs"
-cp "$BIN" "$work/relay" && chmod 755 "$work/relay"
-docker run -d --name "$RELAY" --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp \
-  -v "$work/relay:/relay:ro" -v "$CFG:/config.yaml:ro" -v "$work/logs:/logs" \
-  "$BASE" /relay serve -config /config.yaml >/dev/null
+if [ -n "$IMAGE" ]; then
+  RBIN=/usr/local/bin/registry-mirrors-relay
+  docker run -d --name "$RELAY" --read-only --cap-drop ALL --security-opt no-new-privileges \
+    -v "$CFG:/etc/registry-mirrors-relay/config.yaml:ro" -v "$work/logs:/logs" "$IMAGE" >/dev/null
+else
+  RBIN=/relay
+  cp "$BIN" "$work/relay" && chmod 755 "$work/relay"
+  docker run -d --name "$RELAY" --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp \
+    -v "$work/relay:/relay:ro" -v "$CFG:/config.yaml:ro" -v "$work/logs:/logs" \
+    "$BASE" /relay serve -config /config.yaml >/dev/null
+fi
 docker network connect --alias "$RELAY" "$NET" "$RELAY"
 for _ in $(seq 1 30); do
-  docker exec "$RELAY" /relay probe -url http://127.0.0.1:5000/healthz 2>/dev/null && break
+  docker exec "$RELAY" "$RBIN" probe -url http://127.0.0.1:5000/healthz 2>/dev/null && break
   sleep 1
 done
 
@@ -135,6 +147,19 @@ hops="$(jq -r '[.redirect1, .redirect2, .redirect3] | map(select(. != null)) | j
 [ "$ns" -gt 0 ] && ok "收到 $ns 个带 ns=ghcr.io 的请求" || bad "没有收到带 ns 的请求"
 echo "  服务端跟随的跳转："
 printf '%s\n' "$hops" | sed 's/^/    /'
+
+if [ -n "$IMAGE" ]; then
+  echo "镜像"
+  # HEALTHCHECK 不带参数运行 probe：按镜像里的配置路径找端口
+  for _ in $(seq 1 40); do
+    st="$(docker inspect -f '{{.State.Health.Status}}' "$RELAY")"
+    [ "$st" = starting ] || break
+    sleep 1
+  done
+  if [ "$st" = healthy ]; then ok "HEALTHCHECK：$st"; else bad "HEALTHCHECK：$st"; fi
+  uid="$(docker exec "$RELAY" "$RBIN" version >/dev/null && docker inspect -f '{{.Config.User}}' "$RELAY")"
+  if [ "$uid" = 65532:65532 ]; then ok "以 nonroot（$uid）运行"; else bad "运行用户：$uid"; fi
+fi
 
 if [ "$fail" = 0 ]; then echo "全部通过"; else echo "有检查失败"; fi
 exit "$fail"

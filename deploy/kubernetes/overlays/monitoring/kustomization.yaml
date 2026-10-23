@@ -1,0 +1,17 @@
+# Prometheus Operator 的 ServiceMonitor，以及一个 Grafana 面板（带 grafana_dashboard 标签的 ConfigMap，
+# kube-prometheus-stack 的 Grafana sidecar 会自动导入）。需要集群里装了 Prometheus Operator 的 CRD。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - servicemonitor.yaml
+
+configMapGenerator:
+  - name: registry-mirrors-relay-dashboard
+    files:
+      - registry-mirrors-relay.json=dashboard.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"

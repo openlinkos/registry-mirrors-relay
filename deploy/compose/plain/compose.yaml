@@ -1,0 +1,35 @@
+# 放在 CDN 或反向代理之后：它们负责 HTTPS，回源到这台机器的 8080。说明见 deploy/compose/README.md。
+#
+#   openssl rand -base64 18 > admin-password && sudo chown 65532 admin-password && chmod 400 admin-password
+#   docker compose up -d
+name: registry-mirrors-relay
+
+services:
+  relay:
+    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.1.0
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ports:
+      - "8080:8080"             # 拉取入口，CDN 或反向代理回源到这里
+      - "127.0.0.1:9090:9090"   # 管理后台：只在本机，远程用 SSH 转发
+      - "127.0.0.1:9180:9180"   # Prometheus 指标
+    volumes:
+      - ./config.yaml:/etc/registry-mirrors-relay/config.yaml:ro
+      - data:/var/lib/registry-mirrors-relay
+    # 第一个管理员：口令来自 secret 文件，第一次登录后必须改口令；之后可以删掉这两段和 admin-password
+    environment:
+      RELAY_ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+    secrets: [admin_password]
+    stop_grace_period: 40s      # 比 timeouts.shutdown_grace（30 秒）长一点，让进行中的下载有时间结束
+    logging:
+      driver: json-file
+      options: {max-size: 50m, max-file: "5"}
+
+secrets:
+  admin_password:
+    file: ./admin-password
+
+volumes:
+  data:

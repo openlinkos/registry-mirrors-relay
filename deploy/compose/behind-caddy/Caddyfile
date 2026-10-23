@@ -1,0 +1,7 @@
+# Caddy 负责 HTTPS，把拉取请求转给 relay。改成你的域名。
+mirror.example.com {
+	reverse_proxy relay:8080 {
+		# 边收边转：镜像层可能有几个 GB，不要缓冲
+		flush_interval -1
+	}
+}

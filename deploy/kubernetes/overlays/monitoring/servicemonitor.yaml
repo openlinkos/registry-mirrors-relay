@@ -1,0 +1,12 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: registry-mirrors-relay
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: registry-mirrors-relay
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s

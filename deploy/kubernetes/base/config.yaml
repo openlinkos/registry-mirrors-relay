@@ -1,0 +1,16 @@
+# 挂载到 /etc/registry-mirrors-relay/config.yaml，代替镜像自带的配置。全部选项见仓库的 config.example.yaml。
+data_dir: /var/lib/registry-mirrors-relay
+
+listen:
+  http: ":8080"
+  admin: ":9090"     # 只通过 kubectl port-forward 访问
+  metrics: ":9180"
+
+admin:
+  # 多副本时运营数据只读：账号、规则、封禁都写在这个文件里，后台只能查看
+  store: {driver: none}
+
+# 默认一个单域名入口，匹配任意 Host。对外的域名写在这里，用法页会用到它：
+# entrances:
+#   - name: mirror
+#     hosts: [mirror.example.com]

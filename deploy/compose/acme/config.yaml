@@ -1,0 +1,22 @@
+# 直接对外，用 ACME 自动申请证书。全部选项见仓库的 config.example.yaml。
+data_dir: /var/lib/registry-mirrors-relay
+
+listen:
+  http: ":8080"
+  https: ":8443"
+  admin: ":9090"
+  metrics: ":9180"
+
+tls:
+  mode: acme
+  acme:
+    email: admin@example.com          # Let's Encrypt 的到期提醒发到这里，可以不写
+    # hosts 默认取下面入口里写明的域名；证书存在 data_dir/acme
+
+site:
+  name: My Registry Mirror
+  operator: Example Org
+
+entrances:
+  - name: mirror
+    hosts: [mirror.example.com]

@@ -76,3 +76,60 @@ jobs:
           export GOOS GOARCH CGO_ENABLED=0
           [ -n "$GOARM" ] && export GOARM="${GOARM#v}"
           go build -trimpath -o /dev/null ./cmd/registry-mirrors-relay
+
+  e2e:
+    name: kind e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: install kind and kubectl
+        run: |
+          curl -fsSLo kind https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64
+          echo "aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  kind" | sha256sum -c -
+          curl -fsSLo kubectl https://dl.k8s.io/release/v1.37.0/bin/linux/amd64/kubectl
+          echo "6129359f4e1f3848a5572ccb0b26cf28b8ca08cef38c95a765b2f64a2c961a2f  kubectl" | sha256sum -c -
+          sudo install -m 0755 kind kubectl /usr/local/bin/
+      - name: kustomize build every overlay
+        run: |
+          for d in deploy/kubernetes/base deploy/kubernetes/overlays/* deploy/test/kind; do
+            echo "$d"
+            kubectl kustomize "$d" >/dev/null
+          done
+      - name: kind e2e
+        run: scripts/kind-e2e.sh
+
+  release-snapshot:
+    name: release (snapshot)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: v2.18.3
+          args: release --snapshot --clean --skip=sign
+      - name: check the images
+        run: |
+          docker images ghcr.io/openlinkos/registry-mirrors-relay
+          for arch in amd64 arm64 armv7; do
+            ref="$(docker images ghcr.io/openlinkos/registry-mirrors-relay --format '{{.Repository}}:{{.Tag}}' | grep -- "-$arch\$" | head -n 1)"
+            [ -n "$ref" ] || { echo "没有 $arch 的镜像"; exit 1; }
+            docker image inspect "$ref" --format "$arch {{.Os}}/{{.Architecture}}{{with .Variant}}/{{.}}{{end}} user={{.Config.User}}"
+          done
+          docker run --rm "$(docker images ghcr.io/openlinkos/registry-mirrors-relay --format '{{.Repository}}:{{.Tag}}' | grep -- '-amd64$' | head -n 1)" version

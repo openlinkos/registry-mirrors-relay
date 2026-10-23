@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry-mirrors-relay
+spec:
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: metrics
+      port: 9180
+      targetPort: metrics
+---
+# 管理后台单独一个 Service，不要通过 Ingress 或 LoadBalancer 暴露。用法：
+#   kubectl port-forward svc/registry-mirrors-relay-admin 9090
+# 然后打开 http://127.0.0.1:9090/admin/
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry-mirrors-relay-admin
+spec:
+  ports:
+    - name: admin
+      port: 9090
+      targetPort: admin

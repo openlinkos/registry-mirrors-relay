@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry-mirrors-relay
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    spec:
+      serviceAccountName: registry-mirrors-relay
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # 退出时先让 /readyz 返回 503，等进行中的下载最多 30 秒（timeouts.shutdown_grace）
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: registry-mirrors-relay
+      containers:
+        - name: relay
+          image: ghcr.io/openlinkos/registry-mirrors-relay
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: admin
+              containerPort: 9090
+            - name: metrics
+              containerPort: 9180
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 2
+          # /healthz 不检查上游：上游故障时不应该重启 relay
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 6
+          lifecycle:
+            # 等 Service 把这个 Pod 摘掉再开始退出（Kubernetes 1.30+）
+            preStop:
+              sleep:
+                seconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            # 按这个上限自动设置 GOMEMLIMIT（90%）
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/registry-mirrors-relay
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/registry-mirrors-relay
+      volumes:
+        # 整个目录挂载（不用 subPath）：直接修改 ConfigMap 时 relay 会自动重新加载；
+        # 用 kustomize 改 config.yaml 时会生成新的 ConfigMap，Deployment 滚动更新
+        - name: config
+          configMap:
+            name: registry-mirrors-relay-config
+        # 只读模式下这里几乎不写东西
+        - name: data
+          emptyDir:
+            sizeLimit: 64Mi

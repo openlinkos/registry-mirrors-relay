@@ -266,6 +266,12 @@ func TestInitialAdminFromEnvFile(t *testing.T) {
 	if res := mustParse(t, "admin: {initial_admin: {username: root, password: {env: T_PW}}}\n"); res.Config.Admin.InitialAdmin.Username != "root" {
 		t.Fatal("配置优先")
 	}
+	// 口令文件已经删了：只提醒，照常启动
+	t.Setenv("RELAY_ADMIN_PASSWORD_FILE", filepath.Join(t.TempDir(), "gone"))
+	res = mustParse(t, "")
+	if res.Config.Admin.InitialAdmin.Username != "" || !strings.Contains(strings.Join(res.Warnings, "\n"), "读不到") {
+		t.Fatalf("口令文件不存在时忽略并提醒：%+v %v", res.Config.Admin.InitialAdmin, res.Warnings)
+	}
 	t.Setenv("RELAY_ADMIN_PASSWORD_FILE", "")
 	// 口令直接写在配置里要提醒；口令等于用户名不行
 	res = mustParse(t, "admin: {initial_admin: {username: root, password: {value: inline-password-1}}}\n")

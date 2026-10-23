@@ -1,0 +1,22 @@
+# 放在 CDN 或反向代理之后。挂载后它代替镜像自带的配置文件（没写的项用程序的默认值）；
+# 容器里管理后台和指标要监听所有地址，所以 listen 要写上。全部选项见仓库的 config.example.yaml。
+data_dir: /var/lib/registry-mirrors-relay
+
+listen:
+  http: ":8080"
+  admin: ":9090"     # 宿主机上只映射到 127.0.0.1
+  metrics: ":9180"
+
+client_ip:
+  # 只信任 CDN 或反向代理的回源地址发来的 X-Forwarded-For。改成你自己的地址段。
+  trusted_proxies:
+    - 203.0.113.0/24
+
+site:
+  name: My Registry Mirror
+  operator: Example Org
+
+entrances:
+  # 一个域名覆盖所有标准用法：根路径（Docker 的 registry-mirrors）、路径前缀、containerd 的 ns
+  - name: mirror
+    hosts: [mirror.example.com]

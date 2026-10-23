@@ -1,0 +1,18 @@
+# 经 Gateway 对外。全部选项见仓库的 config.example.yaml。
+data_dir: /var/lib/registry-mirrors-relay
+
+listen:
+  http: ":8080"
+  admin: ":9090"
+  metrics: ":9180"
+
+client_ip:
+  # 信任集群内（Gateway 的 Pod）发来的 X-Forwarded-For。集群的 Pod 网段不在私有地址段里时，改成实际的网段。
+  trusted_proxies: [private_ranges]
+
+admin:
+  store: {driver: none}
+
+entrances:
+  - name: mirror
+    hosts: [mirror.example.com]

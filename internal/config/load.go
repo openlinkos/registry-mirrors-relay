@@ -81,9 +81,12 @@ func Parse(b []byte) (*Result, error) {
 	}
 	cfg.Upstreams = ups
 
-	applyEnv(cfg)
+	envWarn := applyEnv(cfg)
 	normalize(cfg)
 	res := &Result{Config: cfg}
+	if envWarn != "" {
+		res.Warnings = append(res.Warnings, envWarn)
+	}
 	if errs := validate(cfg, res); len(errs) > 0 {
 		return nil, joinErrors(errs)
 	}
@@ -96,10 +99,19 @@ func Parse(b []byte) (*Result, error) {
 // applyEnv：容器里不改配置文件也能指定第一个管理员（RELAY_ADMIN_PASSWORD_FILE，用户名默认 admin，
 // 可用 RELAY_ADMIN_USERNAME 改）。只接受口令文件，也就是 Docker、Compose、k8s 的 secret；不提供直接写口令的
 // 环境变量：那样口令会出现在 docker inspect、进程环境和编排文件里。配置里写了 initial_admin 时以配置为准。
-func applyEnv(c *Config) {
-	if f := os.Getenv("RELAY_ADMIN_PASSWORD_FILE"); f != "" && c.Admin.InitialAdmin.Username == "" {
-		c.Admin.InitialAdmin = InitialAdmin{Username: cmp.Or(os.Getenv("RELAY_ADMIN_USERNAME"), "admin"), Password: Secret{File: f}}
+//
+// 口令文件只在创建第一个管理员时用一次，用完应该删掉；所以文件不存在时只提醒、不报错，免得删了文件以后
+// 因为环境变量还在而起不来。
+func applyEnv(c *Config) (warning string) {
+	f := os.Getenv("RELAY_ADMIN_PASSWORD_FILE")
+	if f == "" || c.Admin.InitialAdmin.Username != "" {
+		return ""
 	}
+	if _, err := os.Stat(f); err != nil {
+		return "RELAY_ADMIN_PASSWORD_FILE 指向的 " + f + " 读不到，忽略（第一个管理员建好后可以把这个环境变量也删掉）"
+	}
+	c.Admin.InitialAdmin = InitialAdmin{Username: cmp.Or(os.Getenv("RELAY_ADMIN_USERNAME"), "admin"), Password: Secret{File: f}}
+	return ""
 }
 
 // strictDecode 不认识的字段直接报错，避免拼错的配置项被悄悄忽略。

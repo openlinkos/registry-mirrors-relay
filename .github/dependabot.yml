@@ -1,0 +1,28 @@
+# 依赖更新：Go 模块、GitHub Actions（按提交 SHA 固定）、镜像的基础镜像（按 digest 固定）、Compose 示例里的镜像。
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      golang-x:
+        patterns: ["golang.org/x/*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker-compose
+    directories: ["/deploy/compose/*"]
+    schedule:
+      interval: weekly
+    ignore:
+      # 我们自己的镜像跟着发布更新
+      - dependency-name: ghcr.io/openlinkos/registry-mirrors-relay

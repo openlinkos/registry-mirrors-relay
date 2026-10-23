@@ -327,7 +327,7 @@ func validate(c *Config, res *Result) []error {
 			warn("admin.public_url 用的是 http：后台的口令和会话会明文经过网络，建议放在 https 反向代理之后")
 		}
 	} else if c.Listen.Admin != "" && !isLoopbackListen(c.Listen.Admin) {
-		warn("listen.admin 不只监听本机，但没有写 admin.public_url：后台只接受用 127.0.0.1 或 localhost 访问")
+		warn("listen.admin 不只监听本机，也没有写 admin.public_url：后台只接受用 127.0.0.1 或 localhost 访问。在容器里这是正常的，请只把这个端口映射到宿主机的 127.0.0.1")
 	}
 	seenTok := map[string]bool{}
 	for i := range c.Admin.APITokens {

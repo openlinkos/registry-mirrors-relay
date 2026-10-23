@@ -1,0 +1,14 @@
+# 镜像自带的配置。要改就把自己的配置挂载到 /etc/registry-mirrors-relay/config.yaml 盖掉它，
+# 写法见仓库里的 config.example.yaml。只需要写和默认值不同的部分。
+#
+# 第一个管理员：设置环境变量 RELAY_ADMIN_PASSWORD_FILE 指向一个口令文件（Docker、Compose、k8s 的 secret），
+# 第一次登录后必须改口令。见 docs/admin.md。
+
+# 运营数据库（state.db）和 ACME 证书放在这里，挂一个卷。不存放任何镜像数据。
+data_dir: /var/lib/registry-mirrors-relay
+
+listen:
+  http: ":8080"
+  # 容器里监听所有地址，在宿主机上只映射到本机：-p 127.0.0.1:9090:9090
+  admin: ":9090"
+  metrics: ":9180"

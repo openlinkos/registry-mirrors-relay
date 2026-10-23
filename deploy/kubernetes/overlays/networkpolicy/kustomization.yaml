@@ -1,0 +1,7 @@
+# 网络策略：入站只放行拉取入口和指标，出站只放行 DNS 和公网的 443。需要集群的网络插件支持 NetworkPolicy。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - networkpolicy.yaml

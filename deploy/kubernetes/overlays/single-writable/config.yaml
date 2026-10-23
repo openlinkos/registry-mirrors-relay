@@ -1,0 +1,10 @@
+# 单副本，运营数据存在 PVC 里的 state.db，后台可写。全部选项见仓库的 config.example.yaml。
+data_dir: /var/lib/registry-mirrors-relay
+
+listen:
+  http: ":8080"
+  admin: ":9090"     # 只通过 kubectl port-forward 访问
+  metrics: ":9180"
+
+admin:
+  store: {driver: bolt}

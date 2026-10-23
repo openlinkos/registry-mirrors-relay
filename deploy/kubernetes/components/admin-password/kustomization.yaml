@@ -1,0 +1,36 @@
+# 用 Secret 里的口令文件创建第一个管理员（RELAY_ADMIN_PASSWORD_FILE）。没有默认口令；先建好 Secret：
+#
+#   openssl rand -base64 18 > admin-password
+#   kubectl create secret generic registry-mirrors-relay-admin --from-file=password=admin-password -n <命名空间>
+#   rm admin-password
+#
+# 然后在自己的 kustomization.yaml 里写：components: [<仓库>/deploy/kubernetes/components/admin-password]
+#
+# 运营数据可写（single-writable）时，这个管理员第一次登录后必须改口令，之后可以删掉 Secret 和这个组件。
+# 运营数据只读（base，多副本）时，它就是唯一的管理员，口令一直有效：请用足够长的随机口令，后台只用 port-forward 访问。
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - target:
+      kind: (Deployment|StatefulSet)
+      name: registry-mirrors-relay
+    patch: |-
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: admin-password
+          secret:
+            secretName: registry-mirrors-relay-admin
+            defaultMode: 0440
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value:
+          name: admin-password
+          mountPath: /run/secrets/relay-admin
+          readOnly: true
+      - op: add
+        path: /spec/template/spec/containers/0/env
+        value:
+          - name: RELAY_ADMIN_PASSWORD_FILE
+            value: /run/secrets/relay-admin/password

@@ -1,0 +1,128 @@
+# 发布流程（.github/workflows/release.yml 在推送 v* 标签时运行）：
+#   - linux/amd64、arm64、arm/v7 的二进制和压缩包，可复现构建（-trimpath，时间取提交时间）；
+#   - SHA256SUMS，用 cosign keyless 签名（Sigstore，签名包 SHA256SUMS.sigstore.json）；
+#   - 每个压缩包一份 SPDX 格式的 SBOM（syft）；
+#   - 多平台镜像 ghcr.io/openlinkos/registry-mirrors-relay：只复制编好的二进制，带 BuildKit 生成的 SBOM，
+#     用 cosign keyless 签名；构建来源证明由工作流里的 attest-build-provenance 生成。
+version: 2
+project_name: registry-mirrors-relay
+
+before:
+  hooks:
+    - go mod tidy -diff
+
+builds:
+  - id: relay
+    main: ./cmd/registry-mirrors-relay
+    binary: registry-mirrors-relay
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64, arm]
+    goarm: ["7"]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/openlinkos/registry-mirrors-relay/internal/version.Version={{ .Version }}
+      - -X github.com/openlinkos/registry-mirrors-relay/internal/version.Commit={{ .FullCommit }}
+      - -X github.com/openlinkos/registry-mirrors-relay/internal/version.Date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: relay
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}"
+    files:
+      - LICENSE
+      - README.md
+      - README.en.md
+      - config.example.yaml
+      - deploy/systemd/registry-mirrors-relay.service
+
+checksum:
+  name_template: SHA256SUMS
+  algorithm: sha256
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - id: checksums
+    cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    args: ["sign-blob", "--bundle=${signature}", "${artifact}", "--yes"]
+    output: true
+
+dockers_v2:
+  - id: relay
+    ids: [relay]
+    images:
+      - ghcr.io/openlinkos/registry-mirrors-relay
+    # 预发布版本只打自己的标签，不更新 v0.1、latest
+    tags:
+      - "{{ .Tag }}"
+      - "{{ if not .Prerelease }}v{{ .Major }}.{{ .Minor }}{{ end }}"
+      - "{{ if not .Prerelease }}latest{{ end }}"
+    dockerfile: Dockerfile
+    extra_files:
+      - deploy/docker/config.yaml
+    platforms:
+      - linux/amd64
+      - linux/arm64
+      - linux/arm/v7
+    labels:
+      org.opencontainers.image.title: registry-mirrors-relay
+      org.opencontainers.image.description: A container registry mirror that relays and never stores.
+      org.opencontainers.image.url: https://github.com/openlinkos/registry-mirrors-relay
+      org.opencontainers.image.source: https://github.com/openlinkos/registry-mirrors-relay
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.created: "{{ .CommitDate }}"
+      org.opencontainers.image.licenses: Apache-2.0
+    annotations:
+      org.opencontainers.image.title: registry-mirrors-relay
+      org.opencontainers.image.description: A container registry mirror that relays and never stores.
+      org.opencontainers.image.source: https://github.com/openlinkos/registry-mirrors-relay
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.licenses: Apache-2.0
+    sbom: true
+
+docker_signs:
+  - cmd: cosign
+    args: ["sign", "${artifact}@${digest}", "--yes"]
+    output: true
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs"
+      - "^test"
+      - "^ci"
+      - "^chore"
+
+release:
+  github:
+    owner: openlinkos
+    name: registry-mirrors-relay
+  prerelease: auto
+  footer: |
+    ## Verify
+
+    ```bash
+    # Binaries: check the signature of SHA256SUMS, then the archive against it
+    cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
+      --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
+    sha256sum --ignore-missing -c SHA256SUMS
+
+    # Image
+    cosign verify ghcr.io/openlinkos/registry-mirrors-relay:{{ .Tag }} \
+      --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
+    gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:{{ .Tag }} -R openlinkos/registry-mirrors-relay
+    ```

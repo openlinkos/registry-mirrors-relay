@@ -1,0 +1,28 @@
+# 单副本、运营数据可写：StatefulSet + PVC，后台可以建账号、加规则、封禁。代替 base 里的 Deployment 和 PDB。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - statefulset.yaml
+
+patches:
+  - patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: registry-mirrors-relay
+  # 只有一个副本时 minAvailable: 1 会挡住节点维护
+  - patch: |-
+      $patch: delete
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: registry-mirrors-relay
+
+configMapGenerator:
+  - name: registry-mirrors-relay-config
+    behavior: replace
+    files:
+      - config.yaml
