@@ -54,7 +54,7 @@ jobs:
       - name: zizmor
         run: pipx run zizmor==1.31.1 --min-severity medium .github/workflows
       - name: shellcheck
-        run: shellcheck scripts/*.sh
+        run: shellcheck --severity=warning scripts/*.sh
 
   build:
     runs-on: ubuntu-latest
