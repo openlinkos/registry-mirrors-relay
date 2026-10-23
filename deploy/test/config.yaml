@@ -1,0 +1,24 @@
+# 测试用配置（scripts/smoke.sh、scripts/isolated-test.sh）：每个上游一个端口，另有一个单域名入口。
+# 只给本机或测试网络用，不要直接对公网开放。
+data_dir: /tmp/relay-data
+listen:
+  http: ":5000"   # 单域名入口：根路径默认 Docker Hub，另支持 /v2/<上游>/... 前缀和 ?ns=
+  admin: ""
+  metrics: ""
+client_ip:
+  trusted_proxies: [private_ranges]
+entrances:
+  - name: all-in-one
+    hosts: ["*"]
+  - {listen: ":5001", upstream: docker.io}
+  - {listen: ":5002", upstream: gcr.io}
+  - {listen: ":5003", upstream: ghcr.io}
+  - {listen: ":5004", upstream: registry.k8s.io}
+  - {listen: ":5005", upstream: quay.io}
+admin:
+  store: {driver: none}
+log:
+  level: info
+  access:
+    output: file
+    path: /logs/access.log

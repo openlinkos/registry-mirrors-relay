@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/route"
 )
 
 // Server 管理拉取入口的各个监听。
@@ -97,8 +98,13 @@ func (s *Server) Run(ctx context.Context) error {
 		s.mu.Lock()
 		s.bound = append(s.bound, ln.Addr().String())
 		s.mu.Unlock()
+		key := route.MainListener
+		if addr != s.cfg.Listen.HTTP && addr != s.cfg.Listen.HTTPS {
+			key = addr // 按端口区分的入口
+		}
 		servers = append(servers, &http.Server{
 			Handler:           s,
+			BaseContext:       func(net.Listener) context.Context { return route.WithListener(context.Background(), key) },
 			ReadHeaderTimeout: t.ReadHeader.D(),
 			IdleTimeout:       t.Idle.D(),
 			MaxHeaderBytes:    32 << 10,

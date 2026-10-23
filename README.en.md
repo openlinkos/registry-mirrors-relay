@@ -42,8 +42,8 @@ Docker Hub, gcr.io, ghcr.io, registry.k8s.io and quay.io are built in; more upst
 ## Roadmap
 
 - [x] M0 Project skeleton: configuration, CLI, CI
-- [ ] M1 Proxy core: per-host and per-port entrances, tokens, redirects, access log, usage page
-- [ ] M2 Single-domain entrance (root path, `ns`, path prefix), manifest cache, benchmarks
+- [x] M1 Proxy core: per-host, per-port and single-domain (prefix, `ns`, root path) entrances, tokens, redirects, access log, usage page
+- [ ] M2 Manifest cache, circuit breaker, benchmarks
 - [ ] M3 Access control and operational data: accounts, IP and image rules, rate limits, metrics, hot reload
 - [ ] M4 Admin console
 - [ ] M5 Packaging and release: image, Compose, Kubernetes, signed v0.1.0

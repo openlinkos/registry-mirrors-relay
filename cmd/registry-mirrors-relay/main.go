@@ -26,9 +26,15 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
 
+	"github.com/openlinkos/registry-mirrors-relay/internal/accesslog"
+	"github.com/openlinkos/registry-mirrors-relay/internal/clientip"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/relay"
+	"github.com/openlinkos/registry-mirrors-relay/internal/route"
 	"github.com/openlinkos/registry-mirrors-relay/internal/server"
+	"github.com/openlinkos/registry-mirrors-relay/internal/upstream"
 	"github.com/openlinkos/registry-mirrors-relay/internal/version"
+	"github.com/openlinkos/registry-mirrors-relay/internal/web"
 )
 
 // defaultConfigPath 是没有 -config 和 RELAY_CONFIG 时读取的配置文件。不存在时只用默认值启动。
@@ -124,9 +130,16 @@ func cmdServe(args []string, stderr io.Writer) int {
 	}
 	log.Info("启动", "version", version.Version)
 
+	h, closeFn, err := buildHandler(res.Config, log)
+	if err != nil {
+		log.Error("启动失败", "err", err)
+		return 1
+	}
+	defer closeFn()
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	srv := server.New(res.Config, log, notImplemented())
+	srv := server.New(res.Config, log, h)
 	if err := srv.Run(ctx); err != nil {
 		log.Error("退出", "err", err)
 		return 1
@@ -135,13 +148,40 @@ func cmdServe(args []string, stderr io.Writer) int {
 	return 0
 }
 
-// notImplemented 是 M0 的占位：代理逻辑在 M1 实现。
-func notImplemented() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotImplemented)
-		_, _ = io.WriteString(w, `{"errors":[{"code":"UNSUPPORTED","message":"not implemented yet"}]}`+"\n")
+// buildHandler 由配置组装拉取入口的处理器。返回的 close 函数在退出时写完访问日志、关闭上游连接。
+func buildHandler(cfg *config.Config, log *slog.Logger) (http.Handler, func(), error) {
+	trusted, err := config.ParsePrefixes(cfg.ClientIP.TrustedProxies)
+	if err != nil {
+		return nil, nil, err
+	}
+	pool, err := upstream.NewPool(cfg, upstream.Options{Log: log})
+	if err != nil {
+		return nil, nil, err
+	}
+	wh, err := web.New(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	al, err := accesslog.New(cfg.Log.Access)
+	if err != nil {
+		return nil, nil, fmt.Errorf("访问日志：%w", err)
+	}
+	h := relay.New(relay.Deps{
+		Config: cfg,
+		Router: route.New(cfg),
+		Pool:   pool,
+		IPs:    clientip.New(trusted, cfg.ClientIP.UseXRealIP),
+		Web:    wh,
+		Access: al,
+		Log:    log,
 	})
+	return h, func() {
+		if n := al.Dropped(); n > 0 {
+			log.Warn("访问日志队列满时丢弃过记录", "count", n)
+		}
+		_ = al.Close()
+		pool.Close()
+	}, nil
 }
 
 func cmdCheck(args []string, stdout, stderr io.Writer) int {

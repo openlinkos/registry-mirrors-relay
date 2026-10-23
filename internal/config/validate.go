@@ -195,6 +195,9 @@ func validate(c *Config, res *Result) []error {
 			if _, _, err := net.SplitHostPort(e.Listen); err != nil {
 				bad("%s 的 listen %q 写法不对", where, e.Listen)
 			}
+			if e.Listen == c.Listen.HTTP || e.Listen == c.Listen.HTTPS {
+				bad("%s 的 listen %q 和 listen.http/https 相同：按端口区分的入口要用单独的端口", where, e.Listen)
+			}
 		}
 		hosts := e.Hosts
 		if len(hosts) == 0 {
