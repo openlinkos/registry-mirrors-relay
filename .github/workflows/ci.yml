@@ -47,7 +47,8 @@ jobs:
         with:
           version: v2.15.0
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+        # v1.1.4 自带的 x/tools 太旧，分析 Go 1.27 的标准库时会 panic；先固定到已升级 x/tools 的主干提交，下个版本发布后换回 tag
+        run: go run golang.org/x/vuln/cmd/govulncheck@e672cbe8fbc8c76e28fcb6db0efd9ce354e0dac5 ./...
       - name: actionlint
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - name: zizmor
