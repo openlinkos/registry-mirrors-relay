@@ -17,6 +17,7 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/accesslog"
 	"github.com/openlinkos/registry-mirrors-relay/internal/clientip"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/manifest"
 	"github.com/openlinkos/registry-mirrors-relay/internal/route"
 	"github.com/openlinkos/registry-mirrors-relay/internal/testutil"
 	"github.com/openlinkos/registry-mirrors-relay/internal/upstream"
@@ -98,7 +99,8 @@ func newEnv(t *testing.T, extra string) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := New(Deps{Config: e.cfg, Router: route.New(e.cfg), Pool: pool, IPs: clientip.New(trusted, false), Web: wh, Access: e.logs, Log: log})
+	h := New(Deps{Config: e.cfg, Router: route.New(e.cfg), Pool: pool, IPs: clientip.New(trusted, false), Web: wh, Access: e.logs, Log: log,
+		Manifests: manifest.New(e.cfg.Cache, e.cfg.Limits.MaxManifestBuffers, 10*time.Second)})
 	e.srv = httptest.NewServer(h)
 	t.Cleanup(e.srv.Close)
 	return e
@@ -190,8 +192,8 @@ func TestResponseHeaders(t *testing.T) {
 	if resp.Header.Get("Content-Type") != "application/octet-stream" || resp.Header.Get("Docker-Content-Digest") != l {
 		t.Errorf("blob 头：%v", resp.Header)
 	}
-	// 上游的 Ratelimit 头可以按配置转发
-	e2 := newEnv(t, "proxy:\n  expose_upstream_ratelimit: true\n")
+	// 上游的 Ratelimit 头可以按配置转发（只有直接转发的响应才有，这里关掉 manifest 缓存）
+	e2 := newEnv(t, "proxy:\n  expose_upstream_ratelimit: true\ncache:\n  max_bytes: 0\n")
 	resp, _ = e2.do(t, http.MethodHead, "reg.local", "/v2/team/app/manifests/v1", nil)
 	if resp.Header.Get("Ratelimit-Remaining") == "" || resp.Header.Get("Docker-Ratelimit-Source") != "" {
 		t.Errorf("expose_upstream_ratelimit：%v", resp.Header)
@@ -215,14 +217,14 @@ func TestRangeAndBlobHead(t *testing.T) {
 func TestErrors(t *testing.T) {
 	e := newEnv(t, "")
 	resp, body := e.do(t, http.MethodGet, "reg.local", "/v2/team/missing/manifests/v1", nil)
-	if resp.StatusCode != 404 || !strings.Contains(string(body), "NAME_UNKNOWN") {
+	if resp.StatusCode != 404 || !strings.Contains(string(body), "MANIFEST_UNKNOWN") {
 		t.Fatalf("不存在的仓库：%d %s", resp.StatusCode, body)
 	}
 	e.reg.Fail["registry.test /v2/team/app/manifests/busy"] = testutil.FailWith{Status: 429,
 		Header: http.Header{"Content-Type": {"application/json"}, "Retry-After": {"30"}}, Body: `{"errors":[{"code":"TOOMANYREQUESTS","message":"slow down"}]}`}
 	resp, body = e.do(t, http.MethodGet, "reg.local", "/v2/team/app/manifests/busy", nil)
-	if resp.StatusCode != 429 || resp.Header.Get("Retry-After") != "30" || !strings.Contains(string(body), "slow down") {
-		t.Fatalf("429 应原样转：%d %v %s", resp.StatusCode, resp.Header, body)
+	if resp.StatusCode != 429 || resp.Header.Get("Retry-After") != "30" || !strings.Contains(string(body), "TOOMANYREQUESTS") {
+		t.Fatalf("429 和 Retry-After 应转给客户端：%d %v %s", resp.StatusCode, resp.Header, body)
 	}
 	e.reg.Fail["registry.test /v2/team/app/manifests/html"] = testutil.FailWith{Status: 503,
 		Header: http.Header{"Content-Type": {"text/html"}}, Body: "<html>cloudflare</html>"}
@@ -340,5 +342,46 @@ func TestStreamUpstreamIdle(t *testing.T) {
 	err := h.stream(rec, &stallReader{ctx: ctx}, cancel)
 	if !errors.Is(err, errUpstreamIdle) || time.Since(start) > 2*time.Second || rec.Body.String() != "partial" {
 		t.Fatalf("应在空闲超时后放弃：%v %v %q", err, time.Since(start), rec.Body.String())
+	}
+}
+
+func TestManifestCacheEndToEnd(t *testing.T) {
+	e := newEnv(t, "")
+	p := &testutil.Puller{Base: e.srv.URL, Host: "reg.local"}
+	if _, _, err := p.Pull("team/app", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	gets := e.reg.Count("GET registry.test manifest")
+	if _, _, err := p.Pull("team/app", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.reg.Count("GET registry.test manifest"); got != gets {
+		t.Fatalf("第二次拉取不应再向上游 GET manifest：之前 %d，之后 %d", gets, got)
+	}
+	hits := 0
+	e.logs.mu.Lock()
+	for _, l := range e.logs.entries {
+		if l.Cache == "hit" {
+			hits++
+		}
+	}
+	e.logs.mu.Unlock()
+	if hits < 3 {
+		t.Fatalf("第二次拉取的 index 和两个平台的 manifest 都应命中缓存：%d", hits)
+	}
+}
+
+func TestStaleManifestWhenUpstreamFails(t *testing.T) {
+	e := newEnv(t, "cache:\n  tag_ttl: 1ms\n")
+	p := &testutil.Puller{Base: e.srv.URL, Host: "reg.local"}
+	if _, _, err := p.Pull("team/app", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	e.reg.Fail["registry.test /v2/team/app/manifests/v1"] = testutil.FailWith{Status: 503}
+	// Accept 和拉取客户端用的一样：tag 缓存的键里带 Accept
+	resp, body := e.do(t, http.MethodGet, "reg.local", "/v2/team/app/manifests/v1", http.Header{"Accept": {testutil.MediaIndex + ", " + testutil.MediaManifest}})
+	if resp.StatusCode != 200 || string(body) != string(e.img.Index) || e.logs.last().Cache != "stale" {
+		t.Fatalf("上游 503 时应返回旧的 manifest：%d %q", resp.StatusCode, e.logs.last().Cache)
 	}
 }

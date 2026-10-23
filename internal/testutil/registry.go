@@ -94,6 +94,7 @@ type Registry struct {
 	images    map[string]*Image // repo → 镜像
 	Calls     map[string]int    // "方法 主机 路径种类" → 次数
 	AuthSeen  map[string]int    // 主机 → 收到带 Authorization 的请求次数
+	Protos    map[string]string // "主机 路径种类" → 最近一次请求的协议（HTTP/1.1、HTTP/2.0）
 	TokenReqs []url.Values
 	// Fail 可以让某个路径返回指定状态（测试错误映射），键是 "主机 路径"
 	Fail map[string]FailWith
@@ -109,7 +110,7 @@ type FailWith struct {
 // NewRegistry 在测试网络里启动一个假上游。
 func NewRegistry(t testing.TB, n *Net, host, authHost, cdnHost string) *Registry {
 	r := &Registry{Host: host, AuthHost: authHost, CDNHost: cdnHost, Service: host,
-		images: map[string]*Image{}, Calls: map[string]int{}, AuthSeen: map[string]int{}, Fail: map[string]FailWith{}}
+		images: map[string]*Image{}, Calls: map[string]int{}, AuthSeen: map[string]int{}, Protos: map[string]string{}, Fail: map[string]FailWith{}}
 	names := []string{host}
 	for _, h := range []string{authHost, cdnHost} {
 		if h != "" {
@@ -138,6 +139,13 @@ func (r *Registry) Count(key string) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.Calls[key]
+}
+
+// Proto 返回某台主机上某类请求最近一次用的协议。
+func (r *Registry) Proto(key string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.Protos[key]
 }
 
 // AuthCount 返回某台主机收到带 Authorization 的请求次数。
@@ -175,6 +183,7 @@ func (r *Registry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	r.mu.Lock()
 	r.Calls[req.Method+" "+host+" "+kind]++
+	r.Protos[host+" "+kind] = req.Proto
 	if req.Header.Get("Authorization") != "" {
 		r.AuthSeen[host]++
 	}

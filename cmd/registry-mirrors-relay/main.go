@@ -29,6 +29,7 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/accesslog"
 	"github.com/openlinkos/registry-mirrors-relay/internal/clientip"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/manifest"
 	"github.com/openlinkos/registry-mirrors-relay/internal/relay"
 	"github.com/openlinkos/registry-mirrors-relay/internal/route"
 	"github.com/openlinkos/registry-mirrors-relay/internal/server"
@@ -129,6 +130,7 @@ func cmdServe(args []string, stderr io.Writer) int {
 		log.Warn(w)
 	}
 	log.Info("启动", "version", version.Version)
+	server.SetMemoryLimit(log)
 
 	h, closeFn, err := buildHandler(res.Config, log)
 	if err != nil {
@@ -174,6 +176,8 @@ func buildHandler(cfg *config.Config, log *slog.Logger) (http.Handler, func(), e
 		Web:    wh,
 		Access: al,
 		Log:    log,
+		// manifest 正文很小，取一次最多等 2 倍的响应头超时
+		Manifests: manifest.New(cfg.Cache, cfg.Limits.MaxManifestBuffers, 2*cfg.Timeouts.ResponseHeader.D()),
 	})
 	return h, func() {
 		if n := al.Dropped(); n > 0 {

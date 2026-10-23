@@ -26,7 +26,7 @@ linters:
         - G115 # 整数转换：这里的转换都有上下界，逐处标注反而降低可读性
   exclusions:
     rules:
-      - path: (_test\.go|internal/testutil/)
+      - path: (_test\.go|internal/testutil/|tools/)
         linters: [gosec, noctx, bodyclose, usestdlibvars, errcheck]
 
 formatters:

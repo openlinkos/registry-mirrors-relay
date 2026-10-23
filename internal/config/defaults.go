@@ -110,7 +110,9 @@ func Defaults() *Config {
 		Proxy: Proxy{
 			MaxIdleConnsPerHost: 64,
 			MaxRedirects:        3,
-			BufferSize:          32 << 10,
+			BufferSize:          16 << 10, // 压测里 16 KiB 比 32 KiB 省内存，吞吐也略高，见 docs/benchmark.md
+			BreakerFailures:     5,
+			BreakerCooldown:     Duration(10 * time.Second),
 		},
 		Admin: Admin{Store: Store{Driver: "bolt"}},
 		Log: Log{

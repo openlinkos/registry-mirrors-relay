@@ -17,6 +17,7 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/accesslog"
 	"github.com/openlinkos/registry-mirrors-relay/internal/clientip"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/manifest"
 	"github.com/openlinkos/registry-mirrors-relay/internal/route"
 	"github.com/openlinkos/registry-mirrors-relay/internal/upstream"
 	"github.com/openlinkos/registry-mirrors-relay/internal/web"
@@ -34,8 +35,10 @@ type Deps struct {
 	Pool   *upstream.Pool
 	IPs    *clientip.Resolver
 	Web    *web.Handler
-	Access AccessLogger
-	Log    *slog.Logger
+	// Manifests 是 manifest 缓存；为 nil 时 manifest 也直接转发
+	Manifests *manifest.Cache
+	Access    AccessLogger
+	Log       *slog.Logger
 }
 
 // Handler 处理拉取入口上的所有请求（/healthz、/readyz 由 server 包处理）。
@@ -51,8 +54,7 @@ func New(d Deps) *Handler {
 }
 
 // manifestAccept 是客户端没带 Accept 时，向上游要 manifest 用的默认值。
-const manifestAccept = "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, " +
-	"application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
+const manifestAccept = manifest.DefaultAccept
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
@@ -133,6 +135,9 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 		return
 	}
 	e.Upstream = t.Upstream
+	if t.Kind == route.KindManifest && h.Manifests != nil && h.serveManifest(w, r, e, up, t) {
+		return
+	}
 	h.proxy(w, r, e, up, t)
 }
 
@@ -165,7 +170,7 @@ func (h *Handler) proxy(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 	defer cancel()
 	resp, err := up.Fetch(ctx, upstream.Request{
 		Method: r.Method, Path: t.UpstreamPath(), Query: t.Query,
-		Header: requestHeaders(r, t.Kind), Repo: t.Repo,
+		Header: requestHeaders(r, t.Kind), Repo: t.Repo, Blob: t.Kind == route.KindBlob,
 	})
 	if err != nil {
 		h.upstreamError(w, r, e, err)
@@ -335,8 +340,12 @@ func (h *Handler) upstreamError(w http.ResponseWriter, r *http.Request, e *acces
 	}
 	var re *upstream.RedirectError
 	var be *upstream.BlockedError
+	var co *upstream.CircuitOpenError
 	var ne net.Error
 	switch {
+	case errors.As(err, &co):
+		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(co.RetryAfter.Seconds()+0.5))))
+		writeError(w, r, http.StatusServiceUnavailable, "UNAVAILABLE", "上游暂时不可用，稍后再试")
 	case errors.As(err, &re):
 		writeError(w, r, http.StatusBadGateway, "UNKNOWN", "上游重定向到了不允许的地址")
 	case errors.As(err, &be):

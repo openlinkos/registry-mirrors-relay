@@ -79,6 +79,19 @@ limits:
   manifest_burst: 120
   blob_streams_per_client: 16
 
+# manifest 内存缓存（只放 manifest，不放镜像层）。按 tag 拉取时先 HEAD（Docker Hub 不计次数），
+# 同一个 tag 反复拉只有第一次消耗上游额度。max_bytes 为 0 时关闭。
+# cache:
+#   max_bytes: 64MiB
+#   tag_ttl: 30s          # tag → digest 的映射多久后重新确认
+#   stale_if_error: 6h    # 上游出错时还能用旧的映射多久
+
+# proxy:
+#   buffer_size: 16KiB    # 每个流的转发缓冲
+#   blob_http2: false     # 镜像层默认走 HTTP/1.1，见 docs/benchmark.md
+#   breaker_failures: 5   # 连续 5 次连不上上游就熔断
+#   breaker_cooldown: 10s
+
 log:
   access:
     output: stdout       # 容器里写 stdout；也可以写 file，按大小轮转

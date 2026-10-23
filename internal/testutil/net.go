@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"math/big"
 	"net"
@@ -62,7 +63,8 @@ func (ca *CA) Leaf(t testing.TB, names ...string) tls.Certificate {
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
 		Subject:      pkix.Name{CommonName: names[0]},
-		DNSNames:     names,
+		DNSNames:     dnsNames(names),
+		IPAddresses:  ipAddrs(names),
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(24 * time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
@@ -73,6 +75,31 @@ func (ca *CA) Leaf(t testing.TB, names ...string) tls.Certificate {
 		t.Fatal(err)
 	}
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
+}
+
+func dnsNames(names []string) []string {
+	var out []string
+	for _, n := range names {
+		if net.ParseIP(n) == nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func ipAddrs(names []string) []net.IP {
+	var out []net.IP
+	for _, n := range names {
+		if ip := net.ParseIP(n); ip != nil {
+			out = append(out, ip)
+		}
+	}
+	return out
+}
+
+// PEM 返回 CA 证书（PEM 格式），给需要文件的配置项（如 tls_ca_file）用。
+func (ca *CA) PEM() []byte {
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ca.cert.Raw})
 }
 
 // Net 把 "主机名:443" 映射到本地的测试服务器，代替 DNS。

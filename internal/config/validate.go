@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -162,6 +163,14 @@ func validate(c *Config, res *Result) []error {
 		if u.UnlistedRedirect != "pass" && u.UnlistedRedirect != "deny" {
 			bad("上游 %s 的 unlisted_redirect 只能是 pass 或 deny", n)
 		}
+		if u.AllowPrivateNetwork {
+			warn("上游 %s 允许连接内网地址：只在代理内网 registry 或测试时这样配置", n)
+		}
+		if u.TLSCAFile != "" {
+			if _, err := os.Stat(u.TLSCAFile); err != nil {
+				bad("上游 %s 的 tls_ca_file：%v", n, err)
+			}
+		}
 		if cr := u.Credentials; cr != nil && !u.Disabled {
 			if cr.Username == "" || !cr.Password.IsSet() {
 				bad("上游 %s 的 credentials 要写 username 和 password", n)
@@ -288,6 +297,9 @@ func validate(c *Config, res *Result) []error {
 	}
 	if c.Cache.MaxBytes > 0 && c.Cache.TagTTL > c.Cache.DigestTTL {
 		bad("cache.tag_ttl 不能比 cache.digest_ttl 长")
+	}
+	if c.Proxy.BreakerFailures < 0 || (c.Proxy.BreakerFailures > 0 && c.Proxy.BreakerCooldown.D() <= 0) {
+		bad("proxy.breaker_failures 不能是负数；大于 0 时 proxy.breaker_cooldown 也要大于 0")
 	}
 	if c.Proxy.MaxRedirects < 0 || c.Proxy.MaxRedirects > 10 {
 		bad("proxy.max_redirects 应在 0 到 10 之间")

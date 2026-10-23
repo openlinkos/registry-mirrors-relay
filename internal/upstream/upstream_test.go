@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -263,5 +265,118 @@ func TestDialGuardBlocksLoopback(t *testing.T) {
 	var be *BlockedError
 	if !errors.As(err, &be) {
 		t.Fatalf("连本机应被拦下：%v", err)
+	}
+}
+
+func TestBreakerOpensAndRelayFailsFast(t *testing.T) {
+	n := testutil.NewNet(t) // 网络里没有 down.test：每次拨号都失败
+	res, err := config.Parse([]byte(`
+proxy:
+  breaker_failures: 3
+  breaker_cooldown: 1h
+upstreams:
+  down.test:
+    registry: down.test
+    token_realm_hosts: ['down\.test']
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := NewPool(res.Config, Options{DialContext: n.DialContext, RootCAs: n.CA.Pool, Log: slog.New(slog.DiscardHandler)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := pool.Get("down.test")
+	req := Request{Method: http.MethodGet, Path: "/v2/x/manifests/latest", Header: http.Header{}, Repo: "x"}
+	for i := 0; i < 3; i++ {
+		if _, err := up.Fetch(context.Background(), req); err == nil {
+			t.Fatal("连不上的上游应报错")
+		}
+	}
+	_, err = up.Fetch(context.Background(), req)
+	var co *CircuitOpenError
+	if !errors.As(err, &co) || co.RetryAfter <= 0 || !up.BreakerOpen() {
+		t.Fatalf("连续失败 3 次后应熔断：%v", err)
+	}
+	// 客户端自己取消的请求不计入失败
+	other := pool.Get("docker.io")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for i := 0; i < 10; i++ {
+		_, _ = other.Fetch(ctx, req)
+	}
+	if other.BreakerOpen() {
+		t.Fatal("客户端取消的请求不应触发熔断")
+	}
+}
+
+func TestPrivateNetworkUpstreamWithCAFile(t *testing.T) {
+	n := testutil.NewNet(t)
+	reg := testutil.NewRegistry(t, n, "127.0.0.1", "", "")
+	img := testutil.NewImage(t, "team/app", "v1", 1024)
+	reg.Add(img)
+	srv := n.Serve(t, reg, "127.0.0.1")
+	caFile := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(caFile, n.CA.PEM(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	yaml := "upstreams:\n  lab.example:\n    registry: \"" + srv.Listener.Addr().String() + "\"\n    tls_ca_file: \"" + filepath.ToSlash(caFile) + "\"\n"
+	// 不允许内网：拨号被拦下
+	res, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, _ := NewPool(res.Config, Options{Log: slog.New(slog.DiscardHandler)})
+	_, err = pool.Get("lab.example").Fetch(context.Background(), Request{Method: http.MethodHead, Path: "/v2/team/app/manifests/v1", Header: http.Header{}, Repo: "team/app"})
+	var be *BlockedError
+	if !errors.As(err, &be) {
+		t.Fatalf("默认应拒绝连内网：%v", err)
+	}
+	// 允许内网，并信任 tls_ca_file 里的 CA
+	res, err = config.Parse([]byte(yaml + "    allow_private_network: true\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, _ = NewPool(res.Config, Options{Log: slog.New(slog.DiscardHandler)})
+	resp, err := pool.Get("lab.example").Fetch(context.Background(), Request{Method: http.MethodHead, Path: "/v2/team/app/manifests/v1", Header: http.Header{}, Repo: "team/app"})
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("allow_private_network 后应能拉：%v %v", resp, err)
+	}
+	resp.Body.Close()
+	// 其他上游仍然拒绝内网
+	if pool.Get("docker.io").client == pool.Get("lab.example").client {
+		t.Fatal("放开内网的上游应使用单独的连接池")
+	}
+}
+
+func TestBlobsUseHTTP1(t *testing.T) {
+	for _, h2 := range []bool{false, true} {
+		extra := ""
+		if h2 {
+			extra = "proxy:\n  blob_http2: true\n"
+		}
+		e := newEnv(t, extra)
+		e.fetch(t, http.MethodGet, "/v2/team/app/manifests/v1", nil)
+		var layer string
+		for d := range e.img.Blobs {
+			layer = d
+			break
+		}
+		resp, err := e.up.Fetch(context.Background(), Request{Method: http.MethodGet, Path: "/v2/team/app/blobs/" + layer, Header: http.Header{}, Repo: "team/app", Blob: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if got := e.reg.Proto("registry.test manifest"); got != "HTTP/2.0" {
+			t.Errorf("manifest 应走 HTTP/2：%s", got)
+		}
+		want := "HTTP/1.1"
+		if h2 {
+			want = "HTTP/2.0"
+		}
+		if got := e.reg.Proto("cdn.test blob"); got != want {
+			t.Errorf("blob_http2=%v 时镜像层应走 %s：%s", h2, want, got)
+		}
 	}
 }

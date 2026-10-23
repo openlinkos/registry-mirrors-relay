@@ -90,6 +90,10 @@ type Upstream struct {
 	UnlistedRedirect string       `yaml:"unlisted_redirect"` // 白名单外的重定向：pass（原样交给客户端）| deny（返回 502）
 	Credentials      *Credentials `yaml:"credentials"`
 	Disabled         bool         `yaml:"disabled"`
+	// TLSCAFile 额外信任这个 CA（PEM），代理用私有 CA 的 registry 时用。系统自带的 CA 仍然信任。
+	TLSCAFile string `yaml:"tls_ca_file"`
+	// AllowPrivateNetwork 允许这个上游连接内网地址（默认拒绝）。只在代理内网 registry 或压测时打开。
+	AllowPrivateNetwork bool `yaml:"allow_private_network"`
 }
 
 // Credentials 是取令牌时使用的上游账号，用来提高 Docker Hub 等上游的额度。
@@ -164,9 +168,16 @@ type Proxy struct {
 	UserAgent               string `yaml:"user_agent"` // 发往上游的 User-Agent，默认 registry-mirrors-relay/<版本>
 	MaxIdleConnsPerHost     int    `yaml:"max_idle_conns_per_host"`
 	MaxRedirects            int    `yaml:"max_redirects"`
-	BufferSize              Size   `yaml:"buffer_size"`               // 每个流的转发缓冲
+	BufferSize              Size   `yaml:"buffer_size"`               // 每个流的转发缓冲，默认 16KiB
 	ExposeUpstreamRatelimit bool   `yaml:"expose_upstream_ratelimit"` // 把上游的 Ratelimit-* 头转给客户端
 	CDNCacheDigests         bool   `yaml:"cdn_cache_digests"`         // 按 digest 的响应允许 CDN 长期缓存
+	// BlobHTTP2 让镜像层也走 HTTP/2。默认走 HTTP/1.1：HTTP/2 会替每个流先收下最多几 MB 还没被读走的数据，
+	// 客户端慢时内存随并发线性增长；HTTP/1.1 由 TCP 做背压，进程里每个流只占一块转发缓冲。manifest、令牌仍走 HTTP/2。
+	BlobHTTP2 bool `yaml:"blob_http2"`
+	// 熔断：连续 BreakerFailures 次连不上或超时，就在 BreakerCooldown 内直接失败，之后放一个请求试探。
+	// 试探仍失败时冷却时间加倍，最长 1 分钟。BreakerFailures 为 0 表示不熔断。
+	BreakerFailures int      `yaml:"breaker_failures"`
+	BreakerCooldown Duration `yaml:"breaker_cooldown"`
 }
 
 // Admin 是管理后台。

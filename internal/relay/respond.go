@@ -69,17 +69,19 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code, msg st
 // maxErrorBody 是转给客户端的上游错误正文的上限。
 const maxErrorBody = 64 << 10
 
-// passError 把上游的 4xx、5xx 交给客户端：状态码不变；正文是 OCI 错误 JSON 就原样转，
-// 否则（例如 CDN 的 HTML 错误页）换成我们生成的 OCI 错误。429、503 带上 Retry-After。
+// passError 把上游的 4xx、5xx 交给客户端，见 writeUpstreamError。
 func (h *Handler) passError(w http.ResponseWriter, r *http.Request, resp *upstream.Response, t route.Target) {
-	status := resp.StatusCode
-	if ra := resp.Header.Get("Retry-After"); ra != "" && (status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable) {
-		if _, err := strconv.Atoi(ra); err == nil || len(ra) <= 64 {
-			w.Header().Set("Retry-After", ra)
-		}
-	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody+1))
-	if len(body) <= maxErrorBody && strings.Contains(resp.Header.Get("Content-Type"), "json") {
+	writeUpstreamError(w, r, resp.StatusCode, resp.Header.Get("Retry-After"), resp.Header.Get("Content-Type"), body, t.Kind)
+}
+
+// writeUpstreamError：状态码不变；正文是 OCI 错误 JSON 就原样转，否则（例如 CDN 的 HTML 错误页）
+// 换成我们生成的 OCI 错误。429、503 带上 Retry-After。
+func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, retryAfter, ctype string, body []byte, kind route.Kind) {
+	if retryAfter != "" && len(retryAfter) <= 64 && (status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable) {
+		w.Header().Set("Retry-After", retryAfter)
+	}
+	if len(body) > 0 && len(body) <= maxErrorBody && strings.Contains(ctype, "json") {
 		var oe ociErrors
 		if json.Unmarshal(body, &oe) == nil && len(oe.Errors) > 0 {
 			hd := w.Header()
@@ -98,7 +100,7 @@ func (h *Handler) passError(w http.ResponseWriter, r *http.Request, resp *upstre
 	code := "UNKNOWN"
 	switch status {
 	case http.StatusNotFound:
-		code = notFoundCode(t.Kind)
+		code = notFoundCode(kind)
 	case http.StatusForbidden:
 		code = "DENIED"
 	case http.StatusTooManyRequests:
