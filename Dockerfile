@@ -7,7 +7,7 @@
 # 配置和数据目录在这一阶段准备好，权限和属主一并定下来，再整个复制过去（COPY --from 保留属主和权限）。
 # 数据目录属于 nonroot（65532）：挂一个新的命名卷时，Docker 按镜像里这个目录的属主初始化卷。
 # 这一阶段在构建机本身的平台上运行，产物只是几个文件和目录。
-FROM --platform=$BUILDPLATFORM docker.io/library/busybox:1.37@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e AS files
+FROM --platform=$BUILDPLATFORM docker.io/library/busybox:1.38@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e AS files
 COPY deploy/docker/config.yaml /out/etc/registry-mirrors-relay/config.yaml
 RUN mkdir -p /out/var/lib/registry-mirrors-relay \
  && chmod 0755 /out/etc/registry-mirrors-relay \
