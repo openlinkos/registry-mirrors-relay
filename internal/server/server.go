@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -98,20 +99,33 @@ func (s *Server) Addrs() []string {
 // 先让 /readyz 返回 503，停止接受新连接，已有的请求最多等 timeouts.shutdown_grace。
 func (s *Server) Run(ctx context.Context) error {
 	t := s.cfg.Timeouts
+	tlsConf, acmeWrap, err := tlsSetup(s.cfg, s.log)
+	if err != nil {
+		return err
+	}
 	var servers []*http.Server
 	var listeners []net.Listener
 	var names []string
+	var tlsOn []bool
 	type plan struct {
 		name, addr, key string
 		h               http.Handler
+		tls             bool
 	}
 	var plans []plan
 	for _, addr := range s.Addrs() {
-		key := route.MainListener
-		if addr != s.cfg.Listen.HTTP && addr != s.cfg.Listen.HTTPS {
-			key = addr // 按端口区分的入口
+		p := plan{name: "拉取入口", addr: addr, key: route.MainListener, h: s}
+		switch {
+		case addr == s.cfg.Listen.HTTPS && tlsConf != nil:
+			p.name, p.tls = "拉取入口（HTTPS）", true
+		case addr == s.cfg.Listen.HTTP:
+			if acmeWrap != nil {
+				p.h = acmeWrap(s) // ACME 的 HTTP-01 验证，其余请求照常处理
+			}
+		case addr != s.cfg.Listen.HTTPS:
+			p.key = addr // 按端口区分的入口
 		}
-		plans = append(plans, plan{name: "拉取入口", addr: addr, key: key, h: s})
+		plans = append(plans, p)
 	}
 	for _, l := range s.extras {
 		plans = append(plans, plan{name: l.Name, addr: l.Addr, h: l.Handler})
@@ -131,8 +145,14 @@ func (s *Server) Run(ctx context.Context) error {
 		s.mu.Unlock()
 		key := pl.key
 		names = append(names, pl.name)
+		tlsOn = append(tlsOn, pl.tls)
+		var sc *tls.Config
+		if pl.tls {
+			sc = tlsConf.Clone()
+		}
 		servers = append(servers, &http.Server{
 			Handler:           pl.h,
+			TLSConfig:         sc,
 			BaseContext:       func(net.Listener) context.Context { return route.WithListener(context.Background(), key) },
 			ReadHeaderTimeout: t.ReadHeader.D(),
 			IdleTimeout:       t.Idle.D(),
@@ -146,13 +166,19 @@ func (s *Server) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
 	for i, srv := range servers {
 		wg.Add(1)
-		go func(srv *http.Server, ln net.Listener, name string) {
+		go func(srv *http.Server, ln net.Listener, name string, withTLS bool) {
 			defer wg.Done()
 			s.log.Info(name+"开始监听", "addr", ln.Addr().String())
-			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			var err error
+			if withTLS {
+				err = srv.ServeTLS(ln, "", "") // 证书来自 TLSConfig；会自动启用 HTTP/2
+			} else {
+				err = srv.Serve(ln)
+			}
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
 				errc <- fmt.Errorf("%s：%w", ln.Addr(), err)
 			}
-		}(srv, listeners[i], names[i])
+		}(srv, listeners[i], names[i], tlsOn[i])
 	}
 	s.ready.Store(true)
 

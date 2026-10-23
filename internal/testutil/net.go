@@ -15,6 +15,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -95,6 +97,24 @@ func ipAddrs(names []string) []net.IP {
 		}
 	}
 	return out
+}
+
+// LeafFiles 签发一张服务器证书，把证书和私钥（PEM）写进 dir，返回两个文件的路径。
+func (ca *CA) LeafFiles(t testing.TB, dir string, names ...string) (certFile, keyFile string) {
+	t.Helper()
+	c := ca.Leaf(t, names...)
+	keyDER, err := x509.MarshalPKCS8PrivateKey(c.PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certFile, keyFile = filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
+	if err := os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Certificate[0]}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return certFile, keyFile
 }
 
 // PEM 返回 CA 证书（PEM 格式），给需要文件的配置项（如 tls_ca_file）用。

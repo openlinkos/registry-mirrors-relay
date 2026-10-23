@@ -2,14 +2,20 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/testutil"
 )
 
 func testConfig(t *testing.T) *config.Config {
@@ -87,4 +93,116 @@ func TestRunAndGracefulShutdown(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("Run 应正常返回：%v", err)
 	}
+}
+
+// startTLS 用给定的配置启动 Server，返回 HTTPS 入口的地址和停止函数。
+func startTLS(t *testing.T, yaml string) (*Server, func()) {
+	t.Helper()
+	res, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(res.Config, slog.New(slog.DiscardHandler), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "proto="+r.Proto)
+	}))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { _ = s.Run(ctx); close(done) }()
+	if !s.waitReady(5 * time.Second) {
+		t.Fatal("没有开始监听")
+	}
+	return s, func() { cancel(); <-done }
+}
+
+func TestTLSFilesAndReload(t *testing.T) {
+	ca := testutil.NewCA(t)
+	dir := t.TempDir()
+	certFile, keyFile := ca.LeafFiles(t, dir, "127.0.0.1", "mirror.test")
+	old := reloadEvery
+	reloadEvery = 0
+	t.Cleanup(func() { reloadEvery = old })
+	s, stop := startTLS(t, "listen: {http: \"\", https: \"127.0.0.1:0\"}\ntls: {mode: files, cert_file: \""+filepath.ToSlash(certFile)+"\", key_file: \""+filepath.ToSlash(keyFile)+"\"}\n")
+	defer stop()
+	addr := s.Bound()[0]
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: ca.Pool}, ForceAttemptHTTP2: true}}
+	get := func() (*http.Response, string) {
+		t.Helper()
+		resp, err := client.Get("https://" + addr + "/v2/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp, string(b)
+	}
+	resp, body := get()
+	if body != "proto=HTTP/2.0" {
+		t.Fatalf("HTTPS 入口应支持 HTTP/2：%s", body)
+	}
+	first := resp.TLS.PeerCertificates[0].SerialNumber
+	// 证书续期：换掉文件，新的连接拿到新证书
+	time.Sleep(10 * time.Millisecond)
+	ca.LeafFiles(t, dir, "127.0.0.1", "mirror.test")
+	client.CloseIdleConnections()
+	resp, _ = get()
+	if resp.TLS.PeerCertificates[0].SerialNumber.Cmp(first) == 0 {
+		t.Fatal("证书文件变了应重新加载")
+	}
+	// 坏文件：继续用原来的证书
+	if err := os.WriteFile(certFile, []byte("broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client.CloseIdleConnections()
+	if resp, _ := get(); resp.StatusCode != 200 {
+		t.Fatal("证书文件坏了应继续用旧证书")
+	}
+}
+
+func TestTLSFilesMissing(t *testing.T) {
+	res, err := config.Parse([]byte("listen: {https: \"127.0.0.1:0\"}\ntls: {mode: files, cert_file: /nonexistent/c.pem, key_file: /nonexistent/k.pem}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := New(res.Config, slog.New(slog.DiscardHandler), http.NotFoundHandler()).Run(context.Background()); err == nil || !strings.Contains(err.Error(), "证书") {
+		t.Fatalf("证书文件不存在时应启动失败：%v", err)
+	}
+}
+
+func TestACMEWiring(t *testing.T) {
+	dir := t.TempDir()
+	conf, wrap, err := tlsSetup(mustConfig(t, "data_dir: \""+filepath.ToSlash(dir)+"\"\nlisten: {http: \"127.0.0.1:0\", https: \"127.0.0.1:0\"}\ntls: {mode: acme, acme: {hosts: [mirror.example.com], directory_url: \"https://acme.invalid/directory\"}}\n"), slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(conf.NextProtos, "acme-tls/1") || conf.MinVersion != tls.VersionTLS12 {
+		t.Fatalf("要支持 TLS-ALPN-01：%v", conf.NextProtos)
+	}
+	if fi, err := os.Stat(filepath.Join(dir, "acme")); err != nil || !fi.IsDir() {
+		t.Fatal("要建好证书缓存目录")
+	}
+	// 明文入口：HTTP-01 的验证路径由 autocert 处理，其他请求照常交给 handler
+	h := wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "relay") }))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://mirror.example.com/v2/", nil))
+	if rec.Body.String() != "relay" {
+		t.Fatalf("普通请求照常处理：%d %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://mirror.example.com/.well-known/acme-challenge/unknown-token", nil))
+	if rec.Body.String() == "relay" {
+		t.Fatal("验证路径应由 autocert 处理")
+	}
+	// 不在名单里的域名不申请证书
+	if _, err := conf.GetCertificate(&tls.ClientHelloInfo{ServerName: "evil.example.com"}); err == nil {
+		t.Fatal("不在 tls.acme.hosts 里的域名不能申请证书")
+	}
+}
+
+func mustConfig(t *testing.T, y string) *config.Config {
+	t.Helper()
+	res, err := config.Parse([]byte(y))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res.Config
 }
