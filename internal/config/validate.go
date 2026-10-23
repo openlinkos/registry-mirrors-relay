@@ -349,6 +349,9 @@ func validate(c *Config, res *Result) []error {
 	if c.Admin.InitialAdmin.Username != "" && !c.Admin.InitialAdmin.Password.IsSet() {
 		bad("admin.initial_admin 写了 username，也要写 password")
 	}
+	if c.Admin.InitialAdmin.Password.Value != "" {
+		warn("admin.initial_admin 的口令直接写在配置里：配置文件常被复制、提交或打印，建议改用 file（Docker、k8s 的 secret）。第一次登录后会要求改口令，之后请把 initial_admin 删掉")
+	}
 	if c.Admin.InitialAdmin.Username != "" && !accountRe.MatchString(c.Admin.InitialAdmin.Username) {
 		bad("admin.initial_admin.username 只能用字母、数字和 . _ -，最长 64 个字符")
 	}

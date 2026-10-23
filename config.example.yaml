@@ -95,10 +95,12 @@ limits:
 
 # 管理后台和 API（见 docs/admin.md、docs/api.md）。运营数据（后台建的账号、规则、封禁）存在 data_dir/state.db。
 admin:
-  # 第一个管理员：运营数据库里还没有管理员时按它创建。也可以停止服务后运行 registry-mirrors-relay admin create。
-  initial_admin:
-    username: admin
-    password: {env: RELAY_ADMIN_PASSWORD}   # 12 到 72 个字节
+  # 第一个管理员：没有默认口令。运营数据库里还没有管理员时按它创建，第一次登录后必须改口令，之后请删掉这一段。
+  # 容器里更简单的做法是设置环境变量 RELAY_ADMIN_PASSWORD_FILE 指向口令文件（secret）。
+  # 也可以停止服务后运行 registry-mirrors-relay admin create。见 docs/admin.md。
+  # initial_admin:
+  #   username: admin
+  #   password: {file: /run/secrets/relay_admin_password}   # 12 到 72 个字节，不要直接写在配置里
   # 放在 https 反向代理之后远程访问时写上；不写时后台只接受用 127.0.0.1、localhost 访问
   # public_url: https://admin.example.com
   api_tokens:

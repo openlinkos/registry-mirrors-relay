@@ -36,6 +36,8 @@ var messages = map[string][2]string{
 	"token.in_config":        {"配置文件里已有同名令牌", "The configuration file already has a token with this name."},
 	"token.exists":           {"令牌已存在", "This token already exists."},
 	"token.not_found":        {"没有这个令牌（配置文件里的要改配置文件）", "No such token. Tokens from the configuration file are changed there."},
+	"password.same":          {"新口令不能和原来的一样", "The new password must differ from the current one."},
+	"password.username":      {"口令不能和用户名相同", "The password must not be the username."},
 	"admin.exists":           {"管理员已存在", "This administrator already exists."},
 	"admin.self":             {"不能停用自己，也不能降低自己的角色", "You cannot disable yourself or lower your own role."},
 	"admin.delete_self":      {"不能删除自己", "You cannot delete yourself."},

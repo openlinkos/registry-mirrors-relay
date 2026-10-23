@@ -23,20 +23,29 @@
 
 ## 第一个管理员
 
-没有默认口令。两种办法：
+没有默认口令，也没有"第一个打开网页的人设口令"的初始化页面：那样的页面在服务刚启动、还没人设口令时，谁先访问谁就拿到管理员。还没有管理员时，登录页只说明怎么创建。三种办法：
 
-- 在配置里写 `admin.initial_admin`，口令从环境变量或文件读取。运营数据库里还没有管理员时，启动时按它创建第一个：
+- **口令文件（推荐，适合容器）**：把口令写进一个只有服务能读的文件，用环境变量 `RELAY_ADMIN_PASSWORD_FILE` 指向它（用户名默认 `admin`，可用 `RELAY_ADMIN_USERNAME` 改）。Docker Compose 的 `secrets`、k8s 的 Secret、systemd 的 `LoadCredential` 都是这种形式，见[部署](deploy.md)。不提供直接写口令的环境变量：那样口令会出现在 `docker inspect`、进程环境和编排文件里。
+
+  ```bash
+  openssl rand -base64 18 > admin-password   # 生成一个随机口令
+  chmod 600 admin-password
+  ```
+
+- **配置文件**：写 `admin.initial_admin`，口令同样建议用 `file`；直接写在配置里（`value`）会收到提醒。
 
   ```yaml
   admin:
     initial_admin:
       username: admin
-      password: {file: /run/secrets/relay_admin_password}   # 12 到 72 个字节
+      password: {file: /run/secrets/relay_admin_password}   # 12 到 72 个字节，不能和用户名相同
   ```
 
-  运营数据只读时，后台直接用这个账号登录，口令在配置里改。
+- **命令行**：停止服务，运行 `registry-mirrors-relay admin create -name admin`，按提示输入两次口令（也可以从标准输入读，口令不出现在命令行参数里）。运营数据库同时只能被一个进程打开，服务在运行时命令会在 2 秒后报错。
 
-- 停止服务，运行 `registry-mirrors-relay admin create -name admin`，按提示输入口令（也可以从标准输入读）。运营数据库同时只能被一个进程打开，服务在运行时命令会在 2 秒后报错。
+前两种办法只在运营数据库里还没有管理员时生效，并且**按它创建的管理员第一次登录后必须先改口令**：改之前只能打开「我的账号」，API 也不认这个会话；新口令不能和原来的一样。这样留在配置、环境变量、口令文件、终端历史里的口令只能用一次。改完后服务的日志会提醒把 `initial_admin` 和对应的口令文件删掉。同样，另一个管理员新建的账号、重设过口令的账号，第一次登录后也必须先改口令；自己改的、命令行设的不需要。
+
+运营数据只读（`admin.store.driver: none`，k8s 多副本）时，后台不能改口令，`initial_admin` 就是唯一的管理员，口令一直有效，只能在配置里换。这时请用足够长的随机口令，并且后台只通过 `kubectl port-forward` 访问。
 
 忘记口令时，其他管理员可以在「管理员与令牌」里重设；只有一个管理员时，停止服务后运行 `registry-mirrors-relay admin password -name admin`。`admin list` 列出所有管理员。
 

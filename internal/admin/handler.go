@@ -290,6 +290,10 @@ func (h *Handler) dispatch(c *ctx) error {
 			return fail(http.StatusForbidden, "error.csrf")
 		}
 	}
+	// 口令是别人设的：改口令之前只能打开「我的账号」（和退出、确认身份）
+	if c.sess.MustChange && !mustChangeAllowed[rt.path] {
+		return c.redirect("/admin/account")
+	}
 	if rt.write && c.sess.Role != "admin" {
 		return fail(http.StatusForbidden, "error.viewer")
 	}
@@ -305,6 +309,11 @@ func (h *Handler) dispatch(c *ctx) error {
 
 // checkOrigin 是每个 POST 的跨站检查：拒绝 Sec-Fetch-Site: cross-site，并要求 Origin 是允许的来源之一：
 // public_url 的来源，或者用回环地址访问时的 http://<Host>。
+// mustChangeAllowed 是必须先改口令的会话能打开的页面。
+var mustChangeAllowed = map[string]bool{
+	"/admin/account": true, "/admin/account/password": true, "/admin/logout": true, "/admin/reauth": true,
+}
+
 func (h *Handler) checkOrigin(c *ctx) error {
 	r := c.r
 	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
@@ -440,18 +449,18 @@ func (c *ctx) actor() ops.Actor {
 }
 
 // account 找一个能登录的管理员：运营数据库里的；运营数据只读时，配置文件里的初始管理员。
-func (h *Handler) account(name string) (hash []byte, role string, ok bool) {
+func (h *Handler) account(name string) (hash []byte, role string, mustChange, ok bool) {
 	for _, a := range h.app.Store.Data().Admins {
 		if a.Name == name {
 			if a.Disabled {
-				return nil, "", false
+				return nil, "", false, false
 			}
-			return []byte(a.Hash), a.Role, true
+			return []byte(a.Hash), a.Role, a.MustChange, true
 		}
 	}
 	ia := h.app.Runtime().Config.Admin.InitialAdmin
 	if h.app.Store.Writable() || ia.Username == "" || ia.Username != name {
-		return nil, "", false
+		return nil, "", false, false
 	}
 	// 只读模式：口令在配置里是明文（来自环境变量或文件），第一次用时算一次 bcrypt，口令变了再算
 	pw := ia.Password.Reveal()
@@ -461,11 +470,12 @@ func (h *Handler) account(name string) (hash []byte, role string, ok bool) {
 	if h.cfgKey != key {
 		hh, err := bcrypt.GenerateFromPassword([]byte(pw), h.cost)
 		if err != nil {
-			return nil, "", false
+			return nil, "", false, false
 		}
 		h.cfgKey, h.cfgHash = key, hh
 	}
-	return h.cfgHash, "admin", true
+	// 运营数据只读时口令只能在配置里改，不要求在后台改
+	return h.cfgHash, "admin", false, true
 }
 
 // dummyHash 让"用户不存在"和"口令错误"耗时相近。
@@ -475,11 +485,12 @@ var dummyHash = sync.OnceValue(func() []byte {
 })
 
 type checkResult struct {
-	ok      bool
-	role    string
-	status  int
-	message string // 界面文案的键
-	wait    time.Duration
+	ok         bool
+	role       string
+	mustChange bool
+	status     int
+	message    string // 界面文案的键
+	wait       time.Duration
 }
 
 // checkPassword 校验管理员口令：排队一个一个地跑，受失败次数限制。失败在每个窗口、每个客户端只记两次审计
@@ -495,11 +506,11 @@ func (h *Handler) checkPassword(c *ctx, name, password, mode string) checkResult
 			res = checkResult{status: http.StatusTooManyRequests, message: "auth.tooMany", wait: wait}
 			return
 		}
-		hash, role, found := h.account(name)
+		hash, role, mustChange, found := h.account(name)
 		if !found || len(password) > 72 {
 			_ = bcrypt.CompareHashAndPassword(dummyHash(), []byte(password))
 		} else if bcrypt.CompareHashAndPassword(hash, []byte(password)) == nil {
-			res = checkResult{ok: true, role: role}
+			res = checkResult{ok: true, role: role, mustChange: mustChange}
 			return
 		}
 		if n := h.limiter.fail(client, c.now); n == 1 {
@@ -517,11 +528,11 @@ func (h *Handler) checkPassword(c *ctx, name, password, mode string) checkResult
 }
 
 // startSession 开始一个新会话（从不沿用请求带来的），设置 Cookie。
-func (h *Handler) startSession(c *ctx, name, role string) {
+func (h *Handler) startSession(c *ctx, name, role string, mustChange bool) {
 	if c.sess != nil {
 		h.sessions.end(c.sess.idHash)
 	}
-	id, s := h.sessions.create(name, role, c.ip.String(), c.r.UserAgent(), c.now)
+	id, s := h.sessions.create(name, role, mustChange, c.ip.String(), c.r.UserAgent(), c.now)
 	http.SetCookie(c.w, sessionCookie(id, c.secure, 0))
 	c.sess = s
 }
@@ -544,6 +555,9 @@ func (h *Handler) Session(r *http.Request) (ops.Actor, string, bool, error) {
 	}
 	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
 		return ops.Actor{}, "", false, errors.New("不接受跨站请求")
+	}
+	if s.MustChange {
+		return ops.Actor{}, "", false, errors.New("请先在管理后台修改口令")
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		c := &ctx{h: h, r: r}

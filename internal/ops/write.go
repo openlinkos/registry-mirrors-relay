@@ -483,13 +483,16 @@ func activeAdmins(d *store.Data) int {
 	return n
 }
 
-// CreateAdmin 新建后台管理员。
+// CreateAdmin 新建后台管理员。口令是创建的人设的，所以新管理员第一次登录后必须先改口令。
 func (o *Ops) CreateAdmin(who Actor, name, password, role string) error {
 	if !nameRe.MatchString(name) {
 		return bad("user.name")
 	}
 	if role != "admin" && role != "viewer" {
 		return bad("role.invalid")
+	}
+	if strings.EqualFold(password, name) {
+		return bad("password.username")
 	}
 	h, err := HashPassword(password)
 	if err != nil {
@@ -501,16 +504,20 @@ func (o *Ops) CreateAdmin(who Actor, name, password, role string) error {
 				return conflict("admin.exists")
 			}
 		}
-		d.Admins = append(d.Admins, store.Admin{Name: name, Hash: h, Role: role, Created: time.Now().UTC()})
+		d.Admins = append(d.Admins, store.Admin{Name: name, Hash: h, Role: role, MustChange: true, Created: time.Now().UTC()})
 		return nil
 	})
 }
 
 // UpdateAdmin 修改后台管理员。不能让系统里一个能用的 admin 角色都不剩，也不能停用自己或降低自己的角色。
+// 重设别人的口令后，那个管理员下次登录必须先改口令；改自己的口令则解除这个要求。
 func (o *Ops) UpdateAdmin(who Actor, name string, in AdminInput) error {
 	self := who.Kind == "admin" && who.Name == name
 	h := ""
 	if in.Password != nil {
+		if strings.EqualFold(*in.Password, name) {
+			return bad("password.username")
+		}
 		var err error
 		if h, err = HashPassword(*in.Password); err != nil {
 			return err
@@ -539,7 +546,11 @@ func (o *Ops) UpdateAdmin(who Actor, name string, in AdminInput) error {
 				continue
 			}
 			if h != "" {
-				a.Hash = h
+				// 必须改口令时不能原样再设一遍（那样配置里或别人知道的口令仍然有效）
+				if self && bcrypt.CompareHashAndPassword([]byte(a.Hash), []byte(*in.Password)) == nil {
+					return bad("password.same")
+				}
+				a.Hash, a.MustChange = h, !self
 			}
 			if in.Role != nil {
 				a.Role = *in.Role

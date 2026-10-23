@@ -168,7 +168,11 @@ func (a *App) AccessLogDropped() uint64 { return a.accessLog.Dropped() }
 // bootstrapAdmin：运营数据库里还没有管理员、配置里写了 initial_admin 时，创建第一个管理员。
 func (a *App) bootstrapAdmin(cfg *config.Config) error {
 	ia := cfg.Admin.InitialAdmin
-	if ia.Username == "" || !a.Store.Writable() || len(a.Store.Data().Admins) > 0 {
+	if ia.Username == "" || !a.Store.Writable() {
+		return nil
+	}
+	if len(a.Store.Data().Admins) > 0 {
+		a.log.Warn("配置里还有 admin.initial_admin，但运营数据库里已经有管理员，它不会再被使用；请把它和对应的口令文件或环境变量删掉")
 		return nil
 	}
 	h, err := bcrypt.GenerateFromPassword([]byte(ia.Password.Reveal()), 12)
@@ -176,11 +180,11 @@ func (a *App) bootstrapAdmin(cfg *config.Config) error {
 		return err
 	}
 	err = a.Store.Update(func(d *store.Data) error {
-		d.Admins = append(d.Admins, store.Admin{Name: ia.Username, Hash: string(h), Role: "admin", Created: time.Now().UTC()})
+		d.Admins = append(d.Admins, store.Admin{Name: ia.Username, Hash: string(h), Role: "admin", MustChange: true, Created: time.Now().UTC()})
 		return nil
 	})
 	if err == nil {
-		a.log.Info("已按 admin.initial_admin 创建第一个管理员", "username", ia.Username)
+		a.log.Info("已按 admin.initial_admin 创建第一个管理员；第一次登录后必须改口令，之后请把 initial_admin 从配置里删掉", "username", ia.Username)
 		_ = a.Store.Audit(store.AuditEntry{Actor: "system", Action: "admin.bootstrap", Target: ia.Username})
 	}
 	return err

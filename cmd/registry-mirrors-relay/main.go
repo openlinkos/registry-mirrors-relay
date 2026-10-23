@@ -12,14 +12,17 @@ import (
 	"bufio"
 	"cmp"
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/pprof"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strings"
@@ -84,7 +87,7 @@ func usage(w io.Writer) {
   registry-mirrors-relay admin password -name 名字      重设后台管理员的口令（并启用）
   registry-mirrors-relay admin list                     列出后台管理员
                                                         admin 子命令要先停止服务：运营数据库同时只能被一个进程打开
-  registry-mirrors-relay probe [-url 地址]             健康检查，给容器的 HEALTHCHECK 用
+  registry-mirrors-relay probe [-config 文件] [-url 地址]  健康检查，给容器的 HEALTHCHECK 用；默认按配置的端口
   registry-mirrors-relay version
 
 配置文件依次取 -config、环境变量 RELAY_CONFIG、`+defaultConfigPath+`；都没有时只用默认值。
@@ -309,6 +312,25 @@ func checkPassword(pw string) (string, error) {
 	return pw, nil
 }
 
+// probeURL 由监听地址得到本机的 /healthz 地址：只写了端口（:8080）或监听所有地址时用 127.0.0.1。
+func probeURL(l config.Listen) (url string, insecure bool, err error) {
+	scheme, addr := "http", l.HTTP
+	if addr == "" {
+		scheme, addr, insecure = "https", l.HTTPS, true
+	}
+	if addr == "" {
+		return "", false, errors.New("listen.http 和 listen.https 都没开，请用 -url 指定探测地址")
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", false, fmt.Errorf("监听地址 %q 写法不对", addr)
+	}
+	if ip, perr := netip.ParseAddr(host); host == "" || (perr == nil && ip.IsUnspecified()) {
+		host = "127.0.0.1"
+	}
+	return scheme + "://" + net.JoinHostPort(host, port) + "/healthz", insecure, nil
+}
+
 // cmdAdmin 在服务停止时管理后台管理员：create、password、list。直接打开运营数据库（bbolt 同时只能被一个进程打开，
 // 服务在跑时会在 2 秒后报错）。操作记进审计，操作人是 cli:<系统用户>。
 func cmdAdmin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -385,7 +407,7 @@ func cmdAdmin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			if sub == "create" {
 				return fmt.Errorf("管理员 %s 已存在，要重设口令请用 admin password", *name)
 			}
-			d.Admins[i].Hash, d.Admins[i].Disabled = hash, false
+			d.Admins[i].Hash, d.Admins[i].Disabled, d.Admins[i].MustChange = hash, false, false
 			return nil
 		}
 		if sub == "password" {
@@ -411,13 +433,34 @@ func cmdAdmin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// cmdProbe 是容器的 HEALTHCHECK：请求本机拉取入口的 /healthz。没给 -url 时按配置里的 listen.http（没开时用
+// listen.https，不校验证书）拼出地址，这样改了端口也不用改健康检查。
 func cmdProbe(args []string, stderr io.Writer) int {
 	fl := flag.NewFlagSet("probe", flag.ContinueOnError)
 	fl.SetOutput(stderr)
-	url := fl.String("url", "http://127.0.0.1:8080/healthz", "探测地址")
+	cfgPath := fl.String("config", "", "配置文件（没给 -url 时用来找端口）")
+	url := fl.String("url", "", "探测地址，默认按配置的 listen.http 或 listen.https")
 	timeout := fl.Duration("timeout", 3*time.Second, "超时")
 	if err := fl.Parse(args); err != nil {
 		return 2
+	}
+	client := http.DefaultClient
+	if *url == "" {
+		res, _, err := loadConfig(*cfgPath)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		u, insecure, err := probeURL(res.Config.Listen)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		*url = u
+		if insecure {
+			// 探测的是本机的 127.0.0.1，证书上没有这个地址；只看服务在不在
+			client = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}} //nolint:gosec // 见上
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
@@ -426,7 +469,7 @@ func cmdProbe(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1

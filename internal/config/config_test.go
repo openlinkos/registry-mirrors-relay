@@ -246,3 +246,31 @@ func TestExampleConfig(t *testing.T) {
 		t.Fatalf("示例配置应能通过校验：%v", err)
 	}
 }
+
+func TestInitialAdminFromEnvFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "pw")
+	if err := os.WriteFile(p, []byte("from-secret-file-1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RELAY_ADMIN_PASSWORD_FILE", p)
+	res := mustParse(t, "")
+	if ia := res.Config.Admin.InitialAdmin; ia.Username != "admin" || ia.Password.Reveal() != "from-secret-file-1" {
+		t.Fatalf("RELAY_ADMIN_PASSWORD_FILE：%+v", ia)
+	}
+	t.Setenv("RELAY_ADMIN_USERNAME", "ops")
+	if res := mustParse(t, ""); res.Config.Admin.InitialAdmin.Username != "ops" {
+		t.Fatal("RELAY_ADMIN_USERNAME")
+	}
+	// 配置里写了 initial_admin 时以配置为准
+	t.Setenv("T_PW", "configured-password")
+	if res := mustParse(t, "admin: {initial_admin: {username: root, password: {env: T_PW}}}\n"); res.Config.Admin.InitialAdmin.Username != "root" {
+		t.Fatal("配置优先")
+	}
+	t.Setenv("RELAY_ADMIN_PASSWORD_FILE", "")
+	// 口令直接写在配置里要提醒；口令等于用户名不行
+	res = mustParse(t, "admin: {initial_admin: {username: root, password: {value: inline-password-1}}}\n")
+	if !strings.Contains(strings.Join(res.Warnings, "\n"), "直接写在配置里") {
+		t.Fatalf("应提醒口令写在配置里：%v", res.Warnings)
+	}
+	parseErr(t, "admin: {initial_admin: {username: administrator1, password: {value: Administrator1}}}\n")
+}

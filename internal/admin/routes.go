@@ -110,8 +110,11 @@ func (h *Handler) login(c *ctx) error {
 		return h.render(c, "login", &view{Title: tr(c.lang, "auth.signIn"), Bare: true,
 			Data: loginData{Next: next, Username: name, NoAdmins: h.noAdmins()}})
 	}
-	h.startSession(c, name, res.role)
+	h.startSession(c, name, res.role, res.mustChange)
 	h.ops.Audit(c.actor(), "login", name, "")
+	if res.mustChange {
+		return c.redirect("/admin/account")
+	}
 	return c.redirect(next)
 }
 

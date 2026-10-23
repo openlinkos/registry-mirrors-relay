@@ -22,16 +22,18 @@ const (
 
 // session 是一个登录会话。Cookie 里是随机 ID，这里只存它的 SHA-256；会话只在进程里，重启后要重新登录。
 type session struct {
-	idHash   string
-	Handle   string // 哈希的前 16 位，在页面上标识会话
-	Admin    string
-	Role     string // admin | viewer
-	CSRF     string
-	Created  time.Time
-	LastSeen time.Time
-	FreshAt  time.Time
-	IP       string
-	Agent    string
+	idHash string
+	Handle string // 哈希的前 16 位，在页面上标识会话
+	Admin  string
+	Role   string // admin | viewer
+	// MustChange：口令是别人设的，必须先改口令，改之前只能打开「我的账号」
+	MustChange bool
+	CSRF       string
+	Created    time.Time
+	LastSeen   time.Time
+	FreshAt    time.Time
+	IP         string
+	Agent      string
 }
 
 type sessions struct {
@@ -59,7 +61,7 @@ func (s *sessions) expiredLocked(x *session, now time.Time) bool {
 }
 
 // create 开始一个新会话，返回放进 Cookie 的 ID。会话满了时去掉最久没用的。
-func (s *sessions) create(admin, role, ip, agent string, now time.Time) (string, *session) {
+func (s *sessions) create(admin, role string, mustChange bool, ip, agent string, now time.Time) (string, *session) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for k, x := range s.m {
@@ -81,7 +83,7 @@ func (s *sessions) create(admin, role, ip, agent string, now time.Time) (string,
 	}
 	id := randomToken()
 	h := hashID(id)
-	x := &session{idHash: h, Handle: h[:16], Admin: admin, Role: role, CSRF: randomToken(),
+	x := &session{idHash: h, Handle: h[:16], Admin: admin, Role: role, MustChange: mustChange, CSRF: randomToken(),
 		Created: now, LastSeen: now, FreshAt: now, IP: ip, Agent: agent}
 	s.m[h] = x
 	return id, x

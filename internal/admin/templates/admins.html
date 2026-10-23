@@ -9,7 +9,7 @@
     <tbody>{{range $d.Admins}}<tr>
       <td><span class="ol-cell-title">{{.Name}}</span>{{if eq .Name $v.Sess.Admin}}<span class="ol-cell-sub">{{$v.T "admins.you"}}</span>{{end}}</td>
       <td>{{if eq .Role "admin"}}{{template "badge" (dict "Text" ($v.T "role.admin") "Tone" "accent")}}{{else}}{{template "badge" (dict "Text" ($v.T "role.viewer"))}}{{end}}</td>
-      <td><span class="ol-cluster">{{if .Disabled}}{{template "badge" (dict "Text" ($v.T "users.disabled") "Tone" "warning" "Dot" true)}}{{else}}{{template "badge" (dict "Text" ($v.T "users.active") "Tone" "success" "Dot" true)}}{{end}}{{template "source" (dict "Source" .Source "V" $v)}}</span></td>
+      <td><span class="ol-cluster">{{if .Disabled}}{{template "badge" (dict "Text" ($v.T "users.disabled") "Tone" "warning" "Dot" true)}}{{else}}{{template "badge" (dict "Text" ($v.T "users.active") "Tone" "success" "Dot" true)}}{{end}}{{if .MustChange}}{{template "badge" (dict "Text" ($v.T "admins.mustChange") "Tone" "info")}}{{end}}{{template "source" (dict "Source" .Source "V" $v)}}</span></td>
       <td class="ol-nowrap">{{time .Created}}</td>
       <td>{{if and $v.CanWrite (eq .Source "store") (ne .Name $v.Sess.Admin)}}<span class="ol-cluster"><a class="ol-btn ol-btn-secondary ol-btn-xs" href="/admin/admins/edit?name={{.Name}}">{{icon "pencil" "sm"}}{{$v.T "action.edit"}}</a>{{template "deleteButton" (dict "V" $v "Action" "/admin/admins/delete" "Fields" (dict "name" .Name) "Confirm" ($v.T "admins.deleteConfirm" "name" .Name))}}</span>{{else if eq .Name $v.Sess.Admin}}<a class="ol-btn ol-btn-secondary ol-btn-xs" href="/admin/account">{{icon "key-round" "sm"}}{{$v.T "admins.changeOwn"}}</a>{{end}}</td>
     </tr>{{end}}</tbody>

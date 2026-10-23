@@ -197,6 +197,6 @@ func (h *Handler) passwordChange(c *ctx) error {
 	if err := h.ops.UpdateAdmin(c.actor(), name, ops.AdminInput{Password: &pw}); err != nil {
 		return c.retry(err, h.accountPage)
 	}
-	h.startSession(c, name, c.sess.Role)
+	h.startSession(c, name, c.sess.Role, false)
 	return c.done("/admin/account", "password.changed", "")
 }

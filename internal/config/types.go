@@ -205,7 +205,9 @@ type Store struct {
 	Path   string `yaml:"path"`   // 默认 <data_dir>/state.db
 }
 
-// InitialAdmin 在运营数据库里还没有管理员时，用来创建第一个管理员。
+// InitialAdmin 在运营数据库里还没有管理员时，用来创建第一个管理员。这个管理员第一次登录后必须改口令，
+// 所以配置里的口令只能用一次；之后应把 initial_admin 和对应的密钥删掉。运营数据只读（store: none）时，
+// 它就是后台唯一的管理员，口令只能在配置里改。
 type InitialAdmin struct {
 	Username string `yaml:"username"`
 	Password Secret `yaml:"password"`

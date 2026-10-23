@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/openlinkos/registry-mirrors-relay/internal/config"
 )
 
 func runCmd(t *testing.T, stdin string, args ...string) (int, string, string) {
@@ -124,5 +126,35 @@ func TestAdminCommand(t *testing.T) {
 	_ = os.WriteFile(ro, []byte("admin: {store: {driver: none}}\n"), 0o600)
 	if code, _, errs := runCmd(t, "", "admin", "list", "-config", ro); code != 1 || !strings.Contains(errs, "只读") {
 		t.Fatalf("只读存储：%d %s", code, errs)
+	}
+}
+
+func TestProbeURL(t *testing.T) {
+	for _, c := range []struct {
+		l        config.Listen
+		want     string
+		insecure bool
+	}{
+		{config.Listen{HTTP: ":8080"}, "http://127.0.0.1:8080/healthz", false},
+		{config.Listen{HTTP: "0.0.0.0:80", HTTPS: ":443"}, "http://127.0.0.1:80/healthz", false},
+		{config.Listen{HTTP: "[::]:8080"}, "http://127.0.0.1:8080/healthz", false},
+		{config.Listen{HTTP: "10.0.0.5:8080"}, "http://10.0.0.5:8080/healthz", false},
+		{config.Listen{HTTPS: ":443"}, "https://127.0.0.1:443/healthz", true},
+	} {
+		got, insecure, err := probeURL(c.l)
+		if err != nil || got != c.want || insecure != c.insecure {
+			t.Errorf("%+v：%s %v %v", c.l, got, insecure, err)
+		}
+	}
+	if _, _, err := probeURL(config.Listen{}); err == nil {
+		t.Error("都没开时应报错")
+	}
+	// 按配置文件找端口
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	defer srv.Close()
+	cfg := filepath.Join(t.TempDir(), "c.yaml")
+	_ = os.WriteFile(cfg, []byte("listen: {http: \""+strings.TrimPrefix(srv.URL, "http://")+"\"}\n"), 0o600)
+	if code, _, errs := runCmd(t, "", "probe", "-config", cfg); code != 0 {
+		t.Fatalf("按配置探测：%d %s", code, errs)
 	}
 }

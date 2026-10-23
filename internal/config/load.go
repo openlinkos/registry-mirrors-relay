@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
@@ -80,6 +81,7 @@ func Parse(b []byte) (*Result, error) {
 	}
 	cfg.Upstreams = ups
 
+	applyEnv(cfg)
 	normalize(cfg)
 	res := &Result{Config: cfg}
 	if errs := validate(cfg, res); len(errs) > 0 {
@@ -89,6 +91,15 @@ func Parse(b []byte) (*Result, error) {
 		return nil, joinErrors(errs)
 	}
 	return res, nil
+}
+
+// applyEnv：容器里不改配置文件也能指定第一个管理员（RELAY_ADMIN_PASSWORD_FILE，用户名默认 admin，
+// 可用 RELAY_ADMIN_USERNAME 改）。只接受口令文件，也就是 Docker、Compose、k8s 的 secret；不提供直接写口令的
+// 环境变量：那样口令会出现在 docker inspect、进程环境和编排文件里。配置里写了 initial_admin 时以配置为准。
+func applyEnv(c *Config) {
+	if f := os.Getenv("RELAY_ADMIN_PASSWORD_FILE"); f != "" && c.Admin.InitialAdmin.Username == "" {
+		c.Admin.InitialAdmin = InitialAdmin{Username: cmp.Or(os.Getenv("RELAY_ADMIN_USERNAME"), "admin"), Password: Secret{File: f}}
+	}
 }
 
 // strictDecode 不认识的字段直接报错，避免拼错的配置项被悄悄忽略。
@@ -222,8 +233,10 @@ func resolveSecrets(c *Config) []error {
 	if c.Admin.InitialAdmin.Password.IsSet() {
 		if err := c.Admin.InitialAdmin.Password.resolve(); err != nil {
 			errs = append(errs, fmt.Errorf("admin.initial_admin.password：%w", err))
-		} else if n := len(c.Admin.InitialAdmin.Password.Reveal()); n < 12 || n > 72 {
+		} else if pw := c.Admin.InitialAdmin.Password.Reveal(); len(pw) < 12 || len(pw) > 72 {
 			errs = append(errs, errors.New("admin.initial_admin.password 要 12 到 72 个字节"))
+		} else if strings.EqualFold(pw, c.Admin.InitialAdmin.Username) {
+			errs = append(errs, errors.New("admin.initial_admin.password 不能和用户名相同"))
 		}
 	}
 	return errs

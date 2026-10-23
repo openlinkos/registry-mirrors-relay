@@ -65,11 +65,14 @@ type APIToken struct {
 
 // Admin 是后台管理员。
 type Admin struct {
-	Name     string    `json:"name"`
-	Hash     string    `json:"hash"` // bcrypt
-	Role     string    `json:"role"` // admin | viewer
-	Disabled bool      `json:"disabled,omitempty"`
-	Created  time.Time `json:"created"`
+	Name     string `json:"name"`
+	Hash     string `json:"hash"` // bcrypt
+	Role     string `json:"role"` // admin | viewer
+	Disabled bool   `json:"disabled,omitempty"`
+	// MustChange：口令是别人设的（配置里的 initial_admin，或者另一个管理员新建、重设的），
+	// 第一次登录后必须先改口令，改之前后台和 API 都不能用
+	MustChange bool      `json:"must_change,omitempty"`
+	Created    time.Time `json:"created"`
 }
 
 // Site 是在后台改的站点信息。设置了就整体代替配置文件里的 site（用法页、后台标题都用它）。

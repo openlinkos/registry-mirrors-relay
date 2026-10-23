@@ -215,11 +215,12 @@ func (o *Ops) Tokens() []TokenView {
 
 // AdminView 是一个后台管理员（不含口令哈希）。
 type AdminView struct {
-	Name     string    `json:"name"`
-	Role     string    `json:"role"`
-	Disabled bool      `json:"disabled"`
-	Source   string    `json:"source"` // store | config（运营数据只读时，来自 admin.initial_admin）
-	Created  time.Time `json:"created,omitzero"`
+	Name       string    `json:"name"`
+	Role       string    `json:"role"`
+	Disabled   bool      `json:"disabled"`
+	MustChange bool      `json:"must_change"` // 第一次登录后必须先改口令
+	Source     string    `json:"source"`      // store | config（运营数据只读时，来自 admin.initial_admin）
+	Created    time.Time `json:"created,omitzero"`
 }
 
 // Admins 列出后台管理员。
@@ -227,7 +228,7 @@ func (o *Ops) Admins() []AdminView {
 	out := []AdminView{}
 	data := o.app.Store.Data()
 	for _, a := range data.Admins {
-		out = append(out, AdminView{Name: a.Name, Role: a.Role, Disabled: a.Disabled, Source: "store", Created: a.Created})
+		out = append(out, AdminView{Name: a.Name, Role: a.Role, Disabled: a.Disabled, MustChange: a.MustChange, Source: "store", Created: a.Created})
 	}
 	if ia := o.app.Runtime().Config.Admin.InitialAdmin; len(out) == 0 && !o.app.Store.Writable() && ia.Username != "" {
 		out = append(out, AdminView{Name: ia.Username, Role: "admin", Source: "config"})

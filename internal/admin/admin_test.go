@@ -865,3 +865,85 @@ func TestFmtDur(t *testing.T) {
 		t.Errorf("英文：%q", got)
 	}
 }
+
+func TestInitialAdminMustChangePassword(t *testing.T) {
+	t.Setenv("T_INIT_PW", "initial-admin-password")
+	e := newEnv(t, envOpts{noAdm: true, yaml: "admin:\n  initial_admin: {username: root, password: {env: T_INIT_PW}}\n"})
+	if a := e.app.Store.Data().Admins; len(a) != 1 || !a[0].MustChange {
+		t.Fatalf("按 initial_admin 建的管理员必须先改口令：%+v", a)
+	}
+	r := e.do("POST", "/admin/login", url.Values{"username": {"root"}, "password": {"initial-admin-password"}, "next": {"/admin/rules"}}, nil, nil)
+	if r.StatusCode != 303 || r.Header.Get("Location") != "/admin/account" {
+		t.Fatalf("登录后先去改口令：%d %s", r.StatusCode, r.Header.Get("Location"))
+	}
+	c := plainCookie + "=" + r.cookie(plainCookie).Value
+	for _, p := range []string{"/admin/", "/admin/rules", "/admin/admins", "/admin/live"} {
+		if r := e.get(p, c); r.StatusCode != 303 || r.Header.Get("Location") != "/admin/account" {
+			t.Errorf("%s 在改口令之前不能打开：%d %s", p, r.StatusCode, r.Header.Get("Location"))
+		}
+	}
+	page := e.get("/admin/account", c)
+	if page.StatusCode != 200 || !strings.Contains(page.body, tr("zh", "account.mustChangeTitle")) {
+		t.Fatalf("我的账号页要说明原因：%d", page.StatusCode)
+	}
+	s := testSession{cookie: c, csrf: csrfRe.FindStringSubmatch(page.body)[1]}
+	if r := e.post(s, "/admin/bans/add", url.Values{"cidr": {"198.51.100.7"}, "duration": {"1h"}}); r.StatusCode != 303 || r.Header.Get("Location") != "/admin/account" {
+		t.Fatalf("写操作也不行：%d", r.StatusCode)
+	}
+	if r := e.get(api.Prefix+"/status", c); r.StatusCode != 403 {
+		t.Fatalf("API 也不能用会话访问：%d", r.StatusCode)
+	}
+	// 原样再设一遍不行
+	if r := e.post(s, "/admin/account/password", url.Values{"password": {"initial-admin-password"}, "confirm": {"initial-admin-password"}}); r.StatusCode != 400 || !strings.Contains(r.body, "新口令不能和原来的一样") {
+		t.Fatalf("不能沿用原来的口令：%d", r.StatusCode)
+	}
+	r = e.post(s, "/admin/account/password", url.Values{"password": {"root-own-password-1"}, "confirm": {"root-own-password-1"}})
+	if r.StatusCode != 303 {
+		t.Fatalf("改口令：%d %s", r.StatusCode, r.body)
+	}
+	c = plainCookie + "=" + r.cookie(plainCookie).Value
+	if r := e.get("/admin/rules", c); r.StatusCode != 200 {
+		t.Fatalf("改完口令后可以使用：%d", r.StatusCode)
+	}
+	if e.app.Store.Data().Admins[0].MustChange {
+		t.Fatal("改完口令后不再要求")
+	}
+	// 配置里的旧口令不能再登录
+	if r := e.do("POST", "/admin/login", url.Values{"username": {"root"}, "password": {"initial-admin-password"}}, nil, nil); r.StatusCode != 401 {
+		t.Fatalf("旧口令应失效：%d", r.StatusCode)
+	}
+}
+
+func TestPasswordsSetByOthersMustChange(t *testing.T) {
+	e := newEnv(t, envOpts{})
+	s := e.login("alice", alicePW)
+	if r := e.post(s, "/admin/admins/create", url.Values{"name": {"carol"}, "password": {"carol"}, "role": {"viewer"}}); r.StatusCode != 400 {
+		t.Fatalf("口令不能等于用户名：%d", r.StatusCode)
+	}
+	if r := e.post(s, "/admin/admins/create", url.Values{"name": {"carol"}, "password": {"carol-temp-password"}, "role": {"viewer"}}); r.StatusCode != 303 {
+		t.Fatalf("新建管理员：%d %s", r.StatusCode, r.body)
+	}
+	if r := e.get("/admin/admins", s.cookie); !strings.Contains(r.body, tr("zh", "admins.mustChange")) {
+		t.Fatal("列表里要标出待改口令")
+	}
+	r := e.do("POST", "/admin/login", url.Values{"username": {"carol"}, "password": {"carol-temp-password"}}, nil, nil)
+	if r.Header.Get("Location") != "/admin/account" {
+		t.Fatalf("别人建的账号第一次登录先改口令：%s", r.Header.Get("Location"))
+	}
+	// 重设别人的口令：对方也要先改
+	if r := e.post(s, "/admin/admins/update", url.Values{"name": {"victor"}, "role": {"viewer"}, "password": {"victor-reset-password"}}); r.StatusCode != 303 {
+		t.Fatalf("重设口令：%d", r.StatusCode)
+	}
+	if r := e.do("POST", "/admin/login", url.Values{"username": {"victor"}, "password": {"victor-reset-password"}}, nil, nil); r.Header.Get("Location") != "/admin/account" {
+		t.Fatalf("被重设口令的管理员先改口令：%s", r.Header.Get("Location"))
+	}
+	// 改自己的口令不会触发
+	if r := e.post(s, "/admin/account/password", url.Values{"password": {"alice-second-password"}, "confirm": {"alice-second-password"}}); r.StatusCode != 303 {
+		t.Fatalf("改自己的口令：%d", r.StatusCode)
+	}
+	for _, a := range e.app.Store.Data().Admins {
+		if a.Name == "alice" && a.MustChange {
+			t.Fatal("自己改的口令不需要再改")
+		}
+	}
+}
