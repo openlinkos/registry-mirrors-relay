@@ -107,7 +107,7 @@ func applyEnv(c *Config) (warning string) {
 	if f == "" || c.Admin.InitialAdmin.Username != "" {
 		return ""
 	}
-	if _, err := os.Stat(f); err != nil {
+	if _, err := os.Stat(f); err != nil { //nolint:gosec // 路径由运维在环境变量里指定
 		return "RELAY_ADMIN_PASSWORD_FILE 指向的 " + f + " 读不到，忽略（第一个管理员建好后可以把这个环境变量也删掉）"
 	}
 	c.Admin.InitialAdmin = InitialAdmin{Username: cmp.Or(os.Getenv("RELAY_ADMIN_USERNAME"), "admin"), Password: Secret{File: f}}
