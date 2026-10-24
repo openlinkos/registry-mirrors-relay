@@ -18,7 +18,7 @@ func handler(t *testing.T, y string) *Handler {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := New(res.Config)
+	h, err := New(res.Config, func() any { return map[string]string{"status": "ok"} })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,8 +26,12 @@ func handler(t *testing.T, y string) *Handler {
 }
 
 func get(h *Handler, method, path string) (*httptest.ResponseRecorder, bool) {
+	return getAs(h, method, path, false)
+}
+
+func getAs(h *Handler, method, path string, login bool) (*httptest.ResponseRecorder, bool) {
 	rec := httptest.NewRecorder()
-	ok := h.Serve(rec, httptest.NewRequest(method, path, nil))
+	ok := h.Serve(rec, httptest.NewRequest(method, path, nil), login)
 	return rec, ok
 }
 
@@ -62,17 +66,50 @@ entrances:
     upstream: ghcr.io
   - hosts: [docker.example.com]
     upstream: docker.io
+    auth: basic
+access:
+  users_file: /dev/null
 `)
-	rec, _ := get(h, http.MethodGet, "/site.json")
-	var s struct {
-		Operator string
-		Domains  map[string]string
-		Links    map[string]string
+	type site struct {
+		Operator  string
+		Domains   map[string]string
+		Links     map[string]string
+		Login     bool
+		LoginKeys []string `json:"login_keys"`
+		Status    bool
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &s); err != nil {
-		t.Fatal(err)
+	read := func(login bool) site {
+		rec, _ := getAs(h, http.MethodGet, "/site.json", login)
+		var s site
+		if err := json.Unmarshal(rec.Body.Bytes(), &s); err != nil {
+			t.Fatal(err)
+		}
+		return s
 	}
+	s := read(false)
 	if s.Operator != "OpenLinkOS" || s.Domains["ghcr"] != "ghcr.example.com" || s.Domains["docker"] != "docker.example.com" || len(s.Domains) != 2 || s.Links["home"] != "https://linkos.org" {
 		t.Fatalf("site.json 不对：%+v", s)
+	}
+	if s.Login || len(s.LoginKeys) != 1 || s.LoginKeys[0] != "docker" || !s.Status {
+		t.Fatalf("site.json 的登录和状态标记不对：%+v", s)
+	}
+	if !read(true).Login {
+		t.Fatal("要登录的入口看到的 site.json 应带 login: true")
+	}
+}
+
+func TestStatusJSON(t *testing.T) {
+	h := handler(t, "")
+	rec, ok := get(h, http.MethodGet, "/status.json")
+	if !ok || rec.Code != 200 || rec.Header().Get("Cache-Control") != "no-store" || !strings.Contains(rec.Body.String(), `"status":"ok"`) {
+		t.Fatalf("/status.json：%v %d %q", ok, rec.Code, rec.Body.String())
+	}
+	off := handler(t, "site: {show_status: false}")
+	if _, ok := get(off, http.MethodGet, "/status.json"); ok {
+		t.Fatal("show_status: false 时不应提供 status.json")
+	}
+	rec, _ = get(off, http.MethodGet, "/site.json")
+	if !strings.Contains(rec.Body.String(), `"status": false`) {
+		t.Fatalf("show_status: false 时 site.json 应带 status: false：%s", rec.Body.String())
 	}
 }

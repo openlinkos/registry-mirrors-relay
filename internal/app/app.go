@@ -31,6 +31,7 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/metrics"
 	"github.com/openlinkos/registry-mirrors-relay/internal/route"
 	"github.com/openlinkos/registry-mirrors-relay/internal/stats"
+	"github.com/openlinkos/registry-mirrors-relay/internal/status"
 	"github.com/openlinkos/registry-mirrors-relay/internal/store"
 	"github.com/openlinkos/registry-mirrors-relay/internal/upstream"
 	"github.com/openlinkos/registry-mirrors-relay/internal/version"
@@ -92,6 +93,7 @@ type App struct {
 
 	healthMu sync.Mutex
 	health   map[string]upstream.Health
+	probes   *status.History // 每小时的探测结果，给用法页的服务状态
 }
 
 // ReloadStatus 是最近一次重载的结果。
@@ -107,7 +109,7 @@ func New(res *config.Result, raw []byte, opt Options) (*App, error) {
 		opt.Log = slog.Default()
 	}
 	cfg := res.Config
-	a := &App{log: opt.Log, opt: opt, Started: time.Now(), cfgHash: sha256.Sum256(raw)}
+	a := &App{log: opt.Log, opt: opt, Started: time.Now(), cfgHash: sha256.Sum256(raw), probes: status.NewHistory()}
 	a.Store = opt.Store
 	if a.Store == nil {
 		switch cfg.Admin.Store.Driver {
@@ -359,11 +361,11 @@ func (a *App) build(cfg *config.Config, prev *Runtime) (*Runtime, error) {
 	rt.Router = route.New(cfg)
 	rt.Site = cfg.Site
 	if s := data.Site; s != nil {
-		rt.Site = config.Site{Name: s.Name, Operator: s.Operator, Links: s.Links}
+		rt.Site = config.Site{Name: s.Name, Operator: s.Operator, Links: s.Links, ShowStatus: cfg.Site.ShowStatus}
 	}
 	wcfg := *cfg
 	wcfg.Site = rt.Site
-	if rt.Web, err = web.New(&wcfg); err != nil {
+	if rt.Web, err = web.New(&wcfg, func() any { return a.StatusReport() }); err != nil {
 		return nil, err
 	}
 	a.Limiter.SetConfig(limitConfig(cfg))
@@ -509,7 +511,47 @@ func (a *App) CheckUpstream(ctx context.Context, name string) (h upstream.Health
 	}
 	a.health[name] = h
 	a.healthMu.Unlock()
+	a.probes.Record(name, h.OK, h.Latency, h.Checked)
 	return h, true
+}
+
+// StatusReport 是用法页 /status.json 的内容：各上游的连通性和近 24 小时的可用率，以及本服务的请求成功率。
+func (a *App) StatusReport() status.Report {
+	rt := a.Runtime()
+	now := time.Now()
+	in := status.Input{
+		Version: version.Version, Started: a.Started, Now: now,
+		Interval: rt.Config.Proxy.HealthInterval.D(), Names: rt.Pool.Names(),
+		Probes: map[string]status.Probe{}, Open: map[string]bool{}, History: a.probes,
+	}
+	for name, h := range a.Health() {
+		in.Probes[name] = status.Probe{OK: h.OK, Status: h.Status, Latency: h.Latency, Error: h.Error, Checked: h.Checked}
+	}
+	for _, name := range in.Names {
+		if u := rt.Pool.Get(name); u != nil && u.BreakerOpen() {
+			in.Open[name] = true
+		}
+	}
+	in.Requests = requestHours(a.Stats.Series(now.Add(-status.Hours*time.Hour)), now)
+	return status.Build(in)
+}
+
+// requestHours 把每分钟的计数按小时汇总成 status.Hours 项，旧的在前，最后一项是当前小时。
+func requestHours(minutes []stats.Minute, now time.Time) []status.RequestsHour {
+	cur := now.Truncate(time.Hour).Unix()
+	out := make([]status.RequestsHour, status.Hours)
+	for i := range out {
+		out[i].Start = cur - int64(status.Hours-1-i)*3600
+	}
+	for _, m := range minutes {
+		i := status.Hours - 1 - int((cur-m.Start/3600*3600)/3600)
+		if i < 0 || i >= status.Hours {
+			continue
+		}
+		out[i].Requests += m.Requests
+		out[i].Status5xx += m.Status5xx
+	}
+	return out
 }
 
 // WatchUpstreams 按 proxy.health_interval 探测所有上游，启动时先探测一次。

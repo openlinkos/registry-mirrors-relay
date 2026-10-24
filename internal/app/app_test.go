@@ -8,10 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/stats"
+	"github.com/openlinkos/registry-mirrors-relay/internal/status"
 	"github.com/openlinkos/registry-mirrors-relay/internal/store"
 )
 
@@ -131,5 +134,45 @@ func TestBadStoreRulesIgnored(t *testing.T) {
 	})
 	if err := a.Rebuild(); err != nil {
 		t.Fatalf("写坏的规则应忽略而不是让整个服务失败：%v", err)
+	}
+}
+
+func TestStatusReport(t *testing.T) {
+	a, _ := newApp(t, "")
+	r := a.StatusReport()
+	if r.Status != "unknown" || len(r.Upstreams) != 5 || r.Interval != 60 {
+		t.Fatalf("还没探测时应是 unknown，列出 5 个内置上游：%+v", r)
+	}
+	for _, u := range r.Upstreams {
+		if u.Status != "unknown" || len(u.Hours) != status.Hours {
+			t.Fatalf("%s：%+v", u.Name, u)
+		}
+	}
+	if len(r.Service.Hours) != status.Hours {
+		t.Fatalf("本服务应有 %d 个小时：%d", status.Hours, len(r.Service.Hours))
+	}
+}
+
+func TestRequestHours(t *testing.T) {
+	now := time.Date(2026, 10, 24, 12, 30, 0, 0, time.UTC)
+	cur := now.Truncate(time.Hour).Unix()
+	hs := requestHours([]stats.Minute{
+		{Start: cur + 60, Requests: 10, Status5xx: 1},
+		{Start: cur + 120, Requests: 5},
+		{Start: cur - 3600 + 60, Requests: 7, Status5xx: 7},
+		{Start: cur - 30*3600, Requests: 99}, // 超出 24 小时
+	}, now)
+	if len(hs) != status.Hours || hs[status.Hours-1].Start != cur || hs[status.Hours-1].Requests != 15 || hs[status.Hours-1].Status5xx != 1 {
+		t.Fatalf("当前小时：%+v", hs[status.Hours-1])
+	}
+	if h := hs[status.Hours-2]; h.Requests != 7 || h.Status5xx != 7 {
+		t.Fatalf("上一小时：%+v", h)
+	}
+	var total uint64
+	for _, h := range hs {
+		total += h.Requests
+	}
+	if total != 22 {
+		t.Fatalf("24 小时以前的不算：%d", total)
 	}
 }
