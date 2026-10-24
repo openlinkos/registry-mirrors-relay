@@ -440,9 +440,19 @@ func TestBasicAuthEntrance(t *testing.T) {
 	if e.logs.last().UserID != "alice" {
 		t.Fatalf("访问日志应记下用户：%+v", e.logs.last())
 	}
+	// 用法页也要登录
+	if resp, _ := e.do(t, http.MethodGet, "private.local", "/", nil); resp.StatusCode != 401 || !strings.HasPrefix(resp.Header.Get("Www-Authenticate"), "Basic ") {
+		t.Fatalf("没登录时用法页应返回 Basic 质询：%d", resp.StatusCode)
+	}
+	if resp, body := e.do(t, http.MethodGet, "private.local", "/", basic("alice", "correct horse")); resp.StatusCode != 200 || !strings.Contains(string(body), "<html") {
+		t.Fatalf("登录后应显示用法页：%d", resp.StatusCode)
+	}
 	// 公开入口不受影响
 	if resp, _ := e.do(t, http.MethodGet, "reg.local", "/v2/", nil); resp.StatusCode != 200 {
 		t.Fatal("公开入口不需要登录")
+	}
+	if resp, _ := e.do(t, http.MethodGet, "reg.local", "/", nil); resp.StatusCode != 200 {
+		t.Fatal("公开入口的用法页不需要登录")
 	}
 	// 停用账号
 	e.update(t, func(d *store.Data) { d.Users[0].Disabled = true })

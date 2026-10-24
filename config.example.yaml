@@ -45,7 +45,7 @@ entrances:
   - hosts: [quay.example.com]
     upstream: quay.io
 
-  # 需要登录的入口：账号在 access.users_file 或管理后台里
+  # 需要登录的入口：账号在 access.users_file 或管理后台里；用法页也要登录
   # - hosts: [private.example.com]
   #   auth: basic
 

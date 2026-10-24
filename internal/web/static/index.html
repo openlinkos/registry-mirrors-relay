@@ -1,7 +1,7 @@
 <!doctype html>
-<!-- LinkOS Mirrors 用法页。浏览器打开任一加速域名时由 Caddy 提供，纯静态，不加载任何外部资源。
-     data-variant：cache = 缓存版（registry-mirrors），direct = 零磁盘版（registry-mirrors-caddy），只影响常见问题的措辞。
-     加速域名默认由当前地址推导（docker.example.com → *.example.com），可用同目录的 site.json 覆盖，见 site.json.sample。
+<!-- 用法页。浏览器打开任一入口的域名时由 registry-mirrors-relay 提供（需要登录的入口要先登录），纯静态，不加载任何外部资源。
+     data-variant：cache = 缓存版，direct = 零磁盘版（relay 用这个），只影响常见问题的措辞。
+     加速域名和页脚链接来自同目录的 site.json，由 relay 按配置生成；没有 site.json 时由当前地址推导（docker.example.com → *.example.com）。
      URL 参数：?lang=en|zh 指定语言，?image=<镜像> 预填地址转换。 -->
 <html lang="zh-CN" data-variant="direct">
 <head>

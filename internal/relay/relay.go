@@ -106,18 +106,19 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 		writeError(w, r, http.StatusForbidden, "DENIED", "拒绝访问")
 		return
 	}
-	if !isV2 {
-		if !rt.Web.Serve(w, r) {
-			http.NotFound(w, r)
-		}
-		return
-	}
+	// 需要登录的入口连用法页也要登录：没登录的人看不出这是一个镜像站
 	var user *access.User
 	if ent.Auth == "basic" {
 		if user = h.basicAuth(w, r, e, rt, client); user == nil {
 			return
 		}
 		e.UserID = user.Name
+	}
+	if !isV2 {
+		if !rt.Web.Serve(w, r) {
+			http.NotFound(w, r)
+		}
+		return
 	}
 	t, perr := rt.Router.Parse(ent, r.URL)
 	if perr != nil {
