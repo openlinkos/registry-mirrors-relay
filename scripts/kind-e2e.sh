@@ -120,8 +120,9 @@ fi
 echo "管理后台"
 loc="$(admin_login)"
 if [ "$loc" = "http://127.0.0.1:19090/admin/" ]; then ok "经 port-forward 用 Secret 里的口令登录管理后台（和拉取共用端口）"; else bad "登录后跳到了 $loc"; fi
-# 集群里的 Pod 直连：能打开后台；带 X-Forwarded-For（像经过 Ingress、CDN）就是 404；指标默认关
-svc=http://registry-mirrors-relay.$NS.svc
+# 集群里的 Pod 直连：能打开后台；带 X-Forwarded-For（像经过 Ingress、CDN）就是 404；指标默认关。
+# 后台只接受 localhost、IP 或 public_url 的 Host（防 DNS 重绑定），所以用 Service 的 IP 访问
+svc="http://$(kubectl -n "$NS" get svc registry-mirrors-relay -o jsonpath='{.spec.clusterIP}')"
 kubectl -n pull run mgmt-check --image=docker.io/library/busybox:1.37 --restart=Never --command -- sh -c \
   "wget -q -O /dev/null $svc/admin/login && echo direct=200 || echo direct=fail
    wget -q -O /dev/null --header 'X-Forwarded-For: 198.51.100.7' $svc/admin/login && echo proxied=200 || echo proxied=fail

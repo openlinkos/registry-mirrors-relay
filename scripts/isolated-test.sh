@@ -153,11 +153,13 @@ echo "  服务端跟随的跳转："
 printf '%s\n' "$hops" | sed 's/^/    /'
 
 echo "管理后台和指标（和拉取共用 5000）"
-# 同一网络里的容器直连：能打开后台和指标；带 X-Forwarded-For（像经过反向代理）就是 404
+# 同一网络里的容器直连：能打开后台和指标；带 X-Forwarded-For（像经过反向代理）就是 404。
+# 后台只接受 localhost、IP 或 public_url 的 Host（防 DNS 重绑定），所以用 relay 的 IP 访问
+rip="$(docker inspect -f "{{(index .NetworkSettings.Networks \"$NET\").IPAddress}}" "$RELAY")"
 mg="$(docker run --rm --network "$NET" --entrypoint sh "$CR" -c "
-  wget -q -O /dev/null http://$RELAY:5000/admin/login && echo direct=200 || echo direct=fail
-  wget -q -O /dev/null --header 'X-Forwarded-For: 198.51.100.7' http://$RELAY:5000/admin/login && echo proxied=200 || echo proxied=fail
-  wget -q -O - http://$RELAY:5000/metrics | grep -q '^relay_' && echo metrics=200 || echo metrics=fail" 2>/dev/null)"
+  wget -q -O /dev/null http://$rip:5000/admin/login && echo direct=200 || echo direct=fail
+  wget -q -O /dev/null --header 'X-Forwarded-For: 198.51.100.7' http://$rip:5000/admin/login && echo proxied=200 || echo proxied=fail
+  wget -q -O - http://$rip:5000/metrics | grep -q '^relay_' && echo metrics=200 || echo metrics=fail" 2>/dev/null)"
 case "$mg" in *direct=200*) ok "直连能打开后台" ;; *) bad "直连打不开后台：$mg" ;; esac
 case "$mg" in *proxied=fail*) ok "带 X-Forwarded-For 的后台请求是 404" ;; *) bad "带 X-Forwarded-For 的后台请求没有被拒绝：$mg" ;; esac
 case "$mg" in *metrics=200*) ok "直连能抓指标" ;; *) bad "抓不到指标：$mg" ;; esac
