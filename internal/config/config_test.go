@@ -254,7 +254,7 @@ func TestInitialAdminFromEnvFile(t *testing.T) {
 	}
 	t.Setenv("RELAY_ADMIN_PASSWORD_FILE", p)
 	res := mustParse(t, "")
-	if ia := res.Config.Admin.InitialAdmin; ia.Username != "admin" || ia.Password.Reveal() != "from-secret-file-1" {
+	if ia := res.Config.Admin.InitialAdmin; ia.Username != "admin" || ia.Password.Reveal() != "from-secret-file-1" || !ia.FromEnv {
 		t.Fatalf("RELAY_ADMIN_PASSWORD_FILE：%+v", ia)
 	}
 	t.Setenv("RELAY_ADMIN_USERNAME", "ops")

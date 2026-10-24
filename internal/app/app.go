@@ -172,7 +172,11 @@ func (a *App) bootstrapAdmin(cfg *config.Config) error {
 		return nil
 	}
 	if len(a.Store.Data().Admins) > 0 {
-		a.log.Warn("配置里还有 admin.initial_admin，但运营数据库里已经有管理员，它不会再被使用；请把它和对应的口令文件或环境变量删掉")
+		if ia.FromEnv {
+			a.log.Warn("RELAY_ADMIN_PASSWORD_FILE 指向的口令文件还在，但运营数据库里已经有管理员，它不会再被使用；请删掉这个文件（k8s 里是对应的 Secret）")
+		} else {
+			a.log.Warn("配置里还有 admin.initial_admin，但运营数据库里已经有管理员，它不会再被使用；请把它和对应的口令文件或环境变量删掉")
+		}
 		return nil
 	}
 	h, err := bcrypt.GenerateFromPassword([]byte(ia.Password.Reveal()), 12)
@@ -184,7 +188,11 @@ func (a *App) bootstrapAdmin(cfg *config.Config) error {
 		return nil
 	})
 	if err == nil {
-		a.log.Info("已按 admin.initial_admin 创建第一个管理员；第一次登录后必须改口令，之后请把 initial_admin 从配置里删掉", "username", ia.Username)
+		if ia.FromEnv {
+			a.log.Info("已按 RELAY_ADMIN_PASSWORD_FILE 指向的口令文件创建第一个管理员；第一次登录后必须改口令，之后请删掉这个文件（k8s 里是对应的 Secret）", "username", ia.Username)
+		} else {
+			a.log.Info("已按 admin.initial_admin 创建第一个管理员；第一次登录后必须改口令，之后请把 initial_admin 从配置里删掉", "username", ia.Username)
+		}
 		_ = a.Store.Audit(store.AuditEntry{Actor: "system", Action: "admin.bootstrap", Target: ia.Username})
 	}
 	return err

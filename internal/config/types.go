@@ -211,6 +211,7 @@ type Store struct {
 type InitialAdmin struct {
 	Username string `yaml:"username"`
 	Password Secret `yaml:"password"`
+	FromEnv  bool   `yaml:"-"` // 来自 RELAY_ADMIN_PASSWORD_FILE，不是配置文件
 }
 
 // Log 是日志设置。
