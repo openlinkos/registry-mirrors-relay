@@ -1,0 +1,6 @@
+# 后台只给内网（admin.public: false）又和 NodePort 的拉取共用端口：要 externalTrafficPolicy: Local
+service:
+  type: NodePort
+config:
+  admin:
+    public: false

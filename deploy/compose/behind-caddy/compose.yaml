@@ -18,14 +18,13 @@ services:
     depends_on: [relay]
 
   relay:
-    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.3.0
+    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.4.0
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     ports:
-      # 8080 上有拉取入口，也有管理后台（/admin/）。Caddy 在 Compose 网络里连它；宿主机上只映射到 127.0.0.1，
-      # 远程用 ssh -L 8080:127.0.0.1:8080 打开 http://127.0.0.1:8080/admin/。经 Caddy 访问后台是 404。
+      # 8080 上有拉取入口，也有管理后台（/admin/），都经 Caddy 对外。宿主机上只映射到 127.0.0.1（本机调试用）
       - "127.0.0.1:8080:8080"
     volumes:
       - ./config.yaml:/etc/registry-mirrors-relay/config.yaml:ro

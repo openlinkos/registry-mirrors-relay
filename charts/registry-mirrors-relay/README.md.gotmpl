@@ -17,13 +17,13 @@ helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mir
   --set admin.existingSecret=registry-mirrors-relay-admin
 ```
 
-Open the admin console with `kubectl -n registry-mirror port-forward svc/registry-mirrors-relay 8080:80` and `http://127.0.0.1:8080/admin/`.
+Open the admin console at `/admin/` on your Ingress host, or with `kubectl -n registry-mirror port-forward svc/registry-mirrors-relay 8080:80` and `http://127.0.0.1:8080/admin/`.
 
 ## Admin console, admin API and metrics
 
-They share the pull port by default and answer only direct connections from loopback and private addresses (`config.admin.allow`): `kubectl port-forward` and Prometheus scraping the pods work, while anything that comes through an Ingress, a Gateway or a CDN carries forwarding headers and gets 404. Metrics are off unless `metrics.enabled` or `metrics.serviceMonitor.enabled`.
+They share the pull port by default. The console and the admin API are open to every address (`config.admin.public`, default true), through an Ingress, a Gateway or a CDN too, and are protected by their sign-in. Metrics and pprof have no sign-in, so they answer only direct connections from loopback and private addresses (`config.admin.allow`): Prometheus scraping the pods works, anything that comes through a proxy gets 404. Metrics are off unless `metrics.enabled` or `metrics.serviceMonitor.enabled`. With `config.admin.public: false` the console follows the same rule as metrics.
 
-Set `admin.separatePort: true` to move all three to their own port and `<fullname>-admin` Service instead. A NodePort or LoadBalancer pull Service needs either that or `service.externalTrafficPolicy: Local`, because otherwise outside clients arrive with node addresses and look internal; the chart refuses to render the combination.
+Set `admin.separatePort: true` to move all three to their own port and `<fullname>-admin` Service instead. When metrics are on (or `config.admin.public` is false), a NodePort or LoadBalancer pull Service needs either that or `service.externalTrafficPolicy: Local`, because otherwise outside clients arrive with node addresses and look internal; the chart refuses to render the combination.
 
 ## Modes
 

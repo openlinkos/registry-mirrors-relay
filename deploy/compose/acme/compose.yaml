@@ -7,15 +7,14 @@ name: registry-mirrors-relay
 
 services:
   relay:
-    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.3.0
+    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.4.0
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     ports:
       - "80:8080"               # 明文：ACME 的 HTTP-01 验证，也能拉取
-      - "443:8443"              # HTTPS：证书自动申请和续期
-      - "127.0.0.1:9090:9090"   # 管理后台、管理 API 和指标：只在本机，远程用 SSH 转发
+      - "443:8443"              # HTTPS：证书自动申请和续期；管理后台在 https://<域名>/admin/
     volumes:
       - ./config.yaml:/etc/registry-mirrors-relay/config.yaml:ro
       - data:/var/lib/registry-mirrors-relay   # 运营数据库和 ACME 证书

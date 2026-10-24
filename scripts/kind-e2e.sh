@@ -147,7 +147,7 @@ kubectl -n pull run mgmt-check --image=docker.io/library/busybox:1.37 --restart=
 kubectl -n pull wait --for=jsonpath='{.status.phase}'=Succeeded pod/mgmt-check --timeout=120s >/dev/null || true
 out="$(kubectl -n pull logs mgmt-check 2>/dev/null)"
 case "$out" in *direct=200*) ok "集群里的 Pod 直连能打开后台" ;; *) bad "集群里的 Pod 直连打不开后台：$out" ;; esac
-case "$out" in *proxied=fail*) ok "带 X-Forwarded-For 的后台请求是 404" ;; *) bad "带 X-Forwarded-For 的后台请求没有被拒绝：$out" ;; esac
+case "$out" in *proxied=200*) ok "后台默认公开：带 X-Forwarded-For 也能打开登录页" ;; *) bad "经代理打不开后台：$out" ;; esac
 case "$out" in *metrics=fail*) ok "指标默认关" ;; *) bad "指标默认应关：$out" ;; esac
 
 if [ "$INSTALL" = helm ]; then

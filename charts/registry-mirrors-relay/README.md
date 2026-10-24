@@ -13,17 +13,17 @@ openssl rand -base64 18 > admin-password
 kubectl -n registry-mirror create secret generic registry-mirrors-relay-admin --from-file=password=admin-password
 
 helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay \
-  --namespace registry-mirror --version 0.3.0 \
+  --namespace registry-mirror --version 0.4.0 \
   --set admin.existingSecret=registry-mirrors-relay-admin
 ```
 
-Open the admin console with `kubectl -n registry-mirror port-forward svc/registry-mirrors-relay 8080:80` and `http://127.0.0.1:8080/admin/`.
+Open the admin console at `/admin/` on your Ingress host, or with `kubectl -n registry-mirror port-forward svc/registry-mirrors-relay 8080:80` and `http://127.0.0.1:8080/admin/`.
 
 ## Admin console, admin API and metrics
 
-They share the pull port by default and answer only direct connections from loopback and private addresses (`config.admin.allow`): `kubectl port-forward` and Prometheus scraping the pods work, while anything that comes through an Ingress, a Gateway or a CDN carries forwarding headers and gets 404. Metrics are off unless `metrics.enabled` or `metrics.serviceMonitor.enabled`.
+They share the pull port by default. The console and the admin API are open to every address (`config.admin.public`, default true), through an Ingress, a Gateway or a CDN too, and are protected by their sign-in. Metrics and pprof have no sign-in, so they answer only direct connections from loopback and private addresses (`config.admin.allow`): Prometheus scraping the pods works, anything that comes through a proxy gets 404. Metrics are off unless `metrics.enabled` or `metrics.serviceMonitor.enabled`. With `config.admin.public: false` the console follows the same rule as metrics.
 
-Set `admin.separatePort: true` to move all three to their own port and `<fullname>-admin` Service instead. A NodePort or LoadBalancer pull Service needs either that or `service.externalTrafficPolicy: Local`, because otherwise outside clients arrive with node addresses and look internal; the chart refuses to render the combination.
+Set `admin.separatePort: true` to move all three to their own port and `<fullname>-admin` Service instead. When metrics are on (or `config.admin.public` is false), a NodePort or LoadBalancer pull Service needs either that or `service.externalTrafficPolicy: Local`, because otherwise outside clients arrive with node addresses and look internal; the chart refuses to render the combination.
 
 ## Modes
 
@@ -58,10 +58,10 @@ To let containerd on the nodes pull through the relay, expose it on an address t
 The chart is signed keylessly by this repository's release workflow and has a build provenance attestation:
 
 ```bash
-cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.3.0 \
+cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.4.0 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.3.0 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.4.0 -R openlinkos/registry-mirrors-relay
 ```
 
 ## Requirements
@@ -74,7 +74,7 @@ Kubernetes: `>=1.30.0-0`
 |-----|------|---------|-------------|
 | admin.existingSecret | string | `""` | Name of an existing Secret holding the first administrator's password. There is no default password. With `writable` the administrator must change it at the first sign-in, after which the Secret can be deleted. With `readonly` this is the only administrator and the password stays valid. |
 | admin.existingSecretKey | string | `"password"` | Key in that Secret. |
-| admin.separatePort | bool | `false` | Serve the admin console, the admin API and metrics on their own port (`containerPorts.admin`) instead of the pull port. On the pull port they answer only direct connections from loopback and private addresses (`config.admin.allow`), so Ingress and Gateway traffic never reaches them. Turn this on when the pull Service is a NodePort or LoadBalancer without `externalTrafficPolicy: Local`. |
+| admin.separatePort | bool | `false` | Serve the admin console, the admin API and metrics on their own port (`containerPorts.admin`) instead of the pull port. The console is open to every address unless `config.admin.public` is false; metrics answer only direct connections from loopback and private addresses (`config.admin.allow`). Turn this on when metrics are on and the pull Service is a NodePort or LoadBalancer without `externalTrafficPolicy: Local`. |
 | admin.service.port | int | `9090` | With `separatePort`: port of the `<fullname>-admin` ClusterIP Service, for `kubectl port-forward`. |
 | admin.username | string | `"admin"` | User name of the first administrator. |
 | affinity | object | `{}` | Affinity. |

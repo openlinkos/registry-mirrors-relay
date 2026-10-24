@@ -1,10 +1,9 @@
 # 放在 CDN 或反向代理之后。挂载后它代替镜像自带的配置文件（没写的项用程序的默认值）；
-# 管理后台、管理 API 和指标放在单独的 9090，宿主机上只映射到 127.0.0.1。全部选项见仓库的 config.example.yaml。
+# 管理后台在同一个域名的 /admin/。全部选项见仓库的 config.example.yaml。
 data_dir: /var/lib/registry-mirrors-relay
 
 listen:
   http: ":8080"
-  admin: ":9090"     # 宿主机上只映射到 127.0.0.1
 
 client_ip:
   # 只信任 CDN 或反向代理的回源地址发来的 X-Forwarded-For。改成你自己的地址段。

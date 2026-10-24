@@ -1,0 +1,3 @@
+# 后台公开（默认）、指标关：NodePort 不需要 externalTrafficPolicy: Local
+service:
+  type: NodePort

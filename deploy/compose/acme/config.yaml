@@ -4,7 +4,6 @@ data_dir: /var/lib/registry-mirrors-relay
 listen:
   http: ":8080"
   https: ":8443"
-  admin: ":9090"     # 管理后台、管理 API 和指标，宿主机上只映射到 127.0.0.1
 
 tls:
   mode: acme

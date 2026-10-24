@@ -43,9 +43,9 @@ admin:
   # -- User name of the first administrator.
   username: admin
   # -- Serve the admin console, the admin API and metrics on their own port (`containerPorts.admin`) instead of
-  # the pull port. On the pull port they answer only direct connections from loopback and private addresses
-  # (`config.admin.allow`), so Ingress and Gateway traffic never reaches them. Turn this on when the pull Service is a
-  # NodePort or LoadBalancer without `externalTrafficPolicy: Local`.
+  # the pull port. The console is open to every address unless `config.admin.public` is false; metrics answer only
+  # direct connections from loopback and private addresses (`config.admin.allow`). Turn this on when metrics are on
+  # and the pull Service is a NodePort or LoadBalancer without `externalTrafficPolicy: Local`.
   separatePort: false
   service:
     # -- With `separatePort`: port of the `<fullname>-admin` ClusterIP Service, for `kubectl port-forward`.

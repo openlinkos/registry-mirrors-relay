@@ -6,14 +6,13 @@ name: registry-mirrors-relay
 
 services:
   relay:
-    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.3.0
+    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.4.0
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     ports:
-      - "8080:8080"             # 拉取入口，CDN 或反向代理回源到这里
-      - "127.0.0.1:9090:9090"   # 管理后台、管理 API 和指标：只在本机，远程用 SSH 转发
+      - "8080:8080"             # 拉取入口和管理后台（/admin/），CDN 或反向代理回源到这里
     volumes:
       - ./config.yaml:/etc/registry-mirrors-relay/config.yaml:ro
       - data:/var/lib/registry-mirrors-relay

@@ -14,8 +14,14 @@ To let containerd on the nodes pull through it, write for each upstream (docker.
     capabilities = ["pull", "resolve"]
 {{- end }}
 
-Admin console{{ if or .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }} and /metrics{{ end }} (direct connections from loopback and private addresses only;
-requests through Ingress, Gateway or a CDN get 404):
+{{- $public := ne ((index (.Values.config | default dict) "admin" | default dict).public | toString) "false" }}
+{{- if $public }}
+Admin console: /admin/ on the pull entrance{{ if not .Values.admin.separatePort }} (also through Ingress, Gateway or a CDN){{ end }}, protected by
+its sign-in{{ if or .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }}; /metrics answers only direct connections from loopback and private addresses{{ end }}. Locally:
+{{- else }}
+Admin console{{ if or .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }} and /metrics{{ end }} (config.admin.public is false: direct connections from loopback
+and private addresses only; requests through Ingress, Gateway or a CDN get 404):
+{{- end }}
 {{- if .Values.admin.separatePort }}
 
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "rmr.fullname" . }}-admin {{ .Values.admin.service.port }}

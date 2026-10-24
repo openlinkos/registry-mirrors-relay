@@ -2,7 +2,7 @@
 data_dir: /var/lib/registry-mirrors-relay
 
 listen:
-  http: ":8080"   # 管理后台和指标也在这个端口，只接受不经 Caddy 的直连（见 compose.yaml）
+  http: ":8080"   # 管理后台也在这个端口，经 Caddy 打开 https://mirror.example.com/admin/
 
 client_ip:
   # relay 的 8080 只在 Compose 的内部网络里，只有 Caddy 连得到，所以信任私有地址段发来的 X-Forwarded-For

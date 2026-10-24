@@ -124,8 +124,10 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- if and .Values.metrics.serviceMonitor.enabled (hasKey $m "enabled") (not (index $m "enabled")) -}}
 {{- fail "metrics.serviceMonitor.enabled needs metrics; config.metrics.enabled is false" -}}
 {{- end -}}
-{{- if and (not .Values.admin.separatePort) (has .Values.service.type (list "NodePort" "LoadBalancer")) (ne .Values.service.externalTrafficPolicy "Local") -}}
-{{- fail (printf "service.type %s without externalTrafficPolicy: Local makes outside clients look like cluster addresses, and the admin console shares the pull port; set service.externalTrafficPolicy: Local or admin.separatePort: true" .Values.service.type) -}}
+{{- /* 按地址放行的部分（指标、pprof，以及 admin.public: false 时的后台）靠 TCP 对端判断，NodePort、LoadBalancer 的 SNAT 会让外部客户端看起来像集群地址 */ -}}
+{{- $gated := or .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled (eq (index $m "enabled" | toString) "true") (eq (index $admin "public" | toString) "false") -}}
+{{- if and $gated (not .Values.admin.separatePort) (has .Values.service.type (list "NodePort" "LoadBalancer")) (ne .Values.service.externalTrafficPolicy "Local") -}}
+{{- fail (printf "service.type %s without externalTrafficPolicy: Local makes outside clients look like cluster addresses, and metrics (or the console with config.admin.public: false) share the pull port; set service.externalTrafficPolicy: Local or admin.separatePort: true" .Values.service.type) -}}
 {{- end -}}
 {{- end -}}
 
