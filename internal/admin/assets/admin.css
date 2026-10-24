@@ -116,3 +116,14 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* 入口编辑表：表格里的输入框不随列收窄，放不下时整张表横向滚动 */
+.admin-edit-table .ol-input,
+.admin-edit-table .ol-select {
+  inline-size: 100%;
+  min-inline-size: 8rem;
+}
+
+.admin-edit-table .admin-col-wide {
+  min-inline-size: 16rem;
+}

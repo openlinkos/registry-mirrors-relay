@@ -113,9 +113,10 @@
 </div>{{end}}
 
 {{/* 成功提示（PRG 跳转回来时）和表单错误 */}}
-{{define "notices"}}{{if or .Notice .FormErr}}<div class="ol-notices">
+{{define "notices"}}{{if or .Notice .FormErr .Warns}}<div class="ol-notices">
   {{with .Notice}}{{template "alert" (dict "Tone" "success" "Text" .)}}{{end}}
   {{with .FormErr}}{{template "alert" (dict "Tone" "danger" "Text" .)}}{{end}}
+  {{range .Warns}}{{template "alert" (dict "Tone" "warning" "Text" .)}}{{end}}
 </div>{{end}}{{end}}
 
 {{define "alert"}}<div class="ol-alert ol-alert-{{.Tone}}" role="{{if eq .Tone "danger"}}alert{{else}}status{{end}}">{{if eq .Tone "success"}}{{icon "circle-check"}}{{else if eq .Tone "warning"}}{{icon "triangle-alert"}}{{else if eq .Tone "danger"}}{{icon "circle-alert"}}{{else}}{{icon "info"}}{{end}}<div class="ol-alert-body">{{with .Title}}<p class="ol-alert-title">{{.}}</p>{{end}}<p>{{.Text}}</p></div></div>{{end}}
@@ -141,6 +142,22 @@
 </div>{{end}}
 
 {{define "csrf"}}<input type="hidden" name="_csrf" value="{{.CSRF}}">{{end}}
+
+{{/* 后台对配置的修改的状态 */}}
+{{define "ovState"}}{{if eq .S "active"}}{{template "badge" (dict "Text" (.V.T "config.state.active") "Tone" "accent" "Square" true)}}{{else if eq .S "drift"}}{{template "badge" (dict "Text" (.V.T "config.state.drift") "Tone" "warning" "Square" true)}}{{else if eq .S "suspended"}}{{template "badge" (dict "Text" (.V.T "config.state.suspended") "Tone" "danger" "Square" true)}}{{else}}{{template "badge" (dict "Text" (.V.T "config.state.ignored") "Square" true)}}{{end}}{{end}}
+
+{{/* 去掉后台对配置的一处修改，改回配置文件的值 */}}
+{{define "resetButton"}}<form method="post" action="/admin/config/reset" class="admin-inline" data-confirm="{{.V.T "config.resetConfirm" "key" .Key}}">{{template "csrf" .V}}<input type="hidden" name="key" value="{{.Key}}"><button type="submit" class="ol-btn ol-btn-ghost ol-btn-xs">{{icon "rotate-ccw" "sm"}}{{if .Label}}{{.Label}}{{else}}{{.V.T "config.reset"}}{{end}}</button></form>{{end}}
+
+{{/* 配置表单里的一个字段（cfgField）：F 是字段，ID 是输入框的 id */}}
+{{define "cfgField"}}{{$f := .F}}<div class="ol-field">
+  {{if eq $f.Kind "bool"}}<label class="ol-check"><input type="checkbox" role="switch" class="ol-switch" id="{{.ID}}" name="{{$f.Name}}" value="true"{{if eq $f.Value "true"}} checked{{end}}{{if $f.Locked}} disabled{{end}}> {{$f.Label}}</label>
+  {{else}}<label class="ol-label" for="{{.ID}}">{{$f.Label}}</label>
+  {{if $f.Choices}}<select class="ol-select" id="{{.ID}}" name="{{$f.Name}}"{{if $f.Locked}} disabled{{end}}>{{range $f.Choices}}<option value="{{.}}"{{if eq . $f.Value}} selected{{end}}>{{.}}</option>{{end}}</select>
+  {{else if eq $f.Kind "list"}}<textarea class="ol-textarea ol-input-mono" id="{{.ID}}" name="{{$f.Name}}" rows="2" spellcheck="false"{{if $f.Locked}} disabled{{end}}>{{$f.Value}}</textarea>
+  {{else}}<input class="ol-input ol-input-mono{{if ne $f.Kind "string"}} admin-input-short{{end}}" id="{{.ID}}" name="{{$f.Name}}" value="{{$f.Value}}"{{if or (eq $f.Kind "int") (eq $f.Kind "float")}} inputmode="decimal"{{end}} autocomplete="off" spellcheck="false"{{if $f.Locked}} disabled{{end}}>{{end}}{{end}}
+  {{if or $f.Hint $f.Changed $f.Locked}}<p class="ol-hint">{{$f.Hint}}{{if $f.Locked}} {{.V.T "config.locked"}}{{end}}{{if $f.Changed}} {{.V.T "config.fileValue" "v" (or $f.File "—")}}{{end}}</p>{{end}}
+</div>{{end}}
 
 {{/* 表格行里的删除按钮：一个只有隐藏字段的小表单 */}}
 {{define "deleteButton"}}<form method="post" action="{{.Action}}" class="admin-inline" data-confirm="{{.Confirm}}">

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openlinkos/registry-mirrors-relay/internal/app"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
 	"github.com/openlinkos/registry-mirrors-relay/internal/ops"
 	"github.com/openlinkos/registry-mirrors-relay/internal/stats"
@@ -132,6 +133,21 @@ func (h *Handler) overviewPage(c *ctx) error {
 		case u.Health != nil && !u.Health.OK:
 			d.Warnings = append(d.Warnings, tr(c.lang, "overview.probeFailed", "name", u.Name, "error", u.Health.Error))
 		}
+	}
+	var suspended, drift []string
+	for _, o := range rt.Overrides {
+		switch o.State {
+		case app.OverrideSuspended:
+			suspended = append(suspended, o.Key)
+		case app.OverrideDrift:
+			drift = append(drift, o.Key)
+		}
+	}
+	if len(suspended) > 0 {
+		d.Warnings = append(d.Warnings, tr(c.lang, "overview.overridesSuspended", "n", len(suspended), "keys", strings.Join(suspended, ", ")))
+	}
+	if len(drift) > 0 {
+		d.Warnings = append(d.Warnings, tr(c.lang, "overview.overridesDrift", "keys", strings.Join(drift, ", ")))
 	}
 	if n := h.app.AccessLogDropped(); n > 0 {
 		d.Warnings = append(d.Warnings, tr(c.lang, "overview.logDropped", "n", fmtNum(n)))

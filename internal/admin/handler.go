@@ -142,6 +142,9 @@ type ctx struct {
 	// 表单出错时重新渲染页面用
 	status  int
 	formErr string
+	// 保存成功但有提醒时，不跳转，直接显示页面：成功提示和提醒
+	flash    string
+	warnings []string
 }
 
 // httpError 是要以错误页回答的请求错误。

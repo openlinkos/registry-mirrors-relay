@@ -3,7 +3,7 @@
 {{template "notices" .}}
 
 <section class="ol-section">
-  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "usage.entrances"}}</h2><p class="ol-section-description">{{.T "usage.entrancesHelp"}}</p></div>
+  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "usage.entrances"}}</h2><p class="ol-section-description">{{.T "usage.entrancesHelp"}}</p>{{if .CanEditConfig}}<div class="ol-section-actions"><a class="ol-btn ol-btn-secondary ol-btn-sm" href="/admin/config/entrances">{{icon "pencil" "sm"}}{{.T "config.editEntrances"}}</a></div>{{end}}</div>
   <div class="ol-table-wrap"><table class="ol-table">
     <thead><tr><th>{{.T "usage.entrance"}}</th><th>{{.T "usage.hosts"}}</th><th>{{.T "usage.mode"}}</th><th>{{.T "usage.auth"}}</th><th>{{.T "usage.page"}}</th></tr></thead>
     <tbody>{{range $d.Entrances}}<tr>

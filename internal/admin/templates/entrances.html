@@ -1,0 +1,35 @@
+{{define "content"}}{{$v := .}}{{$d := .Data}}
+{{template "header" (dict "Title" (.T "config.entrancesTitle") "Desc" (.T "config.entrancesDescription"))}}
+{{template "notices" .}}
+{{with $d.Override}}<div class="ol-notices">{{if or (eq .State "active") (eq .State "drift")}}{{template "alert" (dict "Tone" "info" "Text" ($v.T "config.entrancesOverridden"))}}{{else}}{{template "alert" (dict "Tone" "warning" "Text" ($v.T "config.entrancesNotApplied" "error" (or .Error "admin.config_edit: false")))}}{{end}}</div>{{end}}
+
+<section class="ol-section">
+  {{if $d.Editable}}<form method="post" action="/admin/config/entrances/save" class="ol-stack">
+    {{template "csrf" .}}<input type="hidden" name="rows" value="{{len $d.Rows}}">
+    <div class="ol-table-wrap"><table class="ol-table ol-table-compact admin-edit-table">
+      <thead><tr><th>{{.T "usage.entrance"}}</th><th>{{.T "usage.hosts"}}</th><th>{{.T "config.entranceUpstream"}}</th><th>{{.T "config.entranceDefault"}}</th><th>{{.T "usage.auth"}}</th><th>{{.T "usage.page"}}</th><th>{{.T "action.delete"}}</th></tr></thead>
+      <tbody>{{range $d.Rows}}{{$r := .}}{{$i := .Index}}<tr>
+        <td><label class="ol-sr-only" for="name_{{$i}}">{{$v.T "usage.entrance"}}</label><input class="ol-input ol-input-sm" id="name_{{$i}}" name="name_{{$i}}" value="{{.Name}}" maxlength="64" autocomplete="off"></td>
+        <td><label class="ol-sr-only" for="hosts_{{$i}}">{{$v.T "usage.hosts"}}</label><input class="ol-input ol-input-sm ol-input-mono admin-col-wide" id="hosts_{{$i}}" name="hosts_{{$i}}" value="{{.Hosts}}" placeholder="mirror.example.com" maxlength="2000" autocomplete="off" spellcheck="false"></td>
+        <td><label class="ol-sr-only" for="upstream_{{$i}}">{{$v.T "config.entranceUpstream"}}</label><select class="ol-select ol-input-sm" id="upstream_{{$i}}" name="upstream_{{$i}}"><option value="">{{$v.T "usage.single"}}</option>{{range $d.Upstreams}}<option value="{{.}}"{{if eq . $r.Upstream}} selected{{end}}>{{.}}</option>{{end}}</select></td>
+        <td><label class="ol-sr-only" for="default_upstream_{{$i}}">{{$v.T "config.entranceDefault"}}</label><select class="ol-select ol-input-sm" id="default_upstream_{{$i}}" name="default_upstream_{{$i}}"><option value="">—</option>{{range $d.Upstreams}}<option value="{{.}}"{{if eq . $r.DefaultUpstream}} selected{{end}}>{{.}}</option>{{end}}</select></td>
+        <td><label class="ol-sr-only" for="auth_{{$i}}">{{$v.T "usage.auth"}}</label><select class="ol-select ol-input-sm" id="auth_{{$i}}" name="auth_{{$i}}"><option value="none"{{if ne .Auth "basic"}} selected{{end}}>{{$v.T "usage.open"}}</option><option value="basic"{{if eq .Auth "basic"}} selected{{end}}>{{$v.T "usage.basic"}}</option></select></td>
+        <td><label class="ol-sr-only" for="page_{{$i}}">{{$v.T "usage.page"}}</label><select class="ol-select ol-input-sm" id="page_{{$i}}" name="page_{{$i}}">{{range (list "public" "login" "off")}}<option value="{{.}}"{{if eq . $r.Page}} selected{{end}}>{{$v.T (print "usage.page." .)}}</option>{{end}}</select></td>
+        <td>{{if .Hosts}}<label class="ol-check"><input type="checkbox" class="ol-checkbox" name="delete_{{$i}}" value="1"><span class="ol-sr-only">{{$v.T "action.delete"}}</span></label>{{end}}</td>
+      </tr>{{end}}</tbody>
+    </table></div>
+    <p class="ol-hint">{{.T "config.entrancesFormHelp"}}</p>
+    <div class="ol-form-actions"><button type="submit" class="ol-btn ol-btn-primary">{{icon "check" "sm"}}{{.T "action.save"}}</button></div>
+  </form>
+  {{with $d.Override}}<div class="admin-after">{{template "resetButton" (dict "V" $v "Key" "entrances")}}</div>{{end}}
+  {{else}}<div class="ol-table-wrap"><table class="ol-table ol-table-compact">
+    <thead><tr><th>{{.T "usage.entrance"}}</th><th>{{.T "usage.hosts"}}</th><th>{{.T "config.entranceUpstream"}}</th><th>{{.T "config.entranceDefault"}}</th><th>{{.T "usage.auth"}}</th><th>{{.T "usage.page"}}</th></tr></thead>
+    <tbody>{{range $d.Rows}}<tr><td>{{.Name}}</td><td class="ol-mono admin-wrap">{{.Hosts}}</td><td>{{if .Upstream}}{{.Upstream}}{{else}}{{$v.T "usage.single"}}{{end}}</td><td>{{if .DefaultUpstream}}{{.DefaultUpstream}}{{else}}—{{end}}</td><td>{{if eq .Auth "basic"}}{{$v.T "usage.basic"}}{{else}}{{$v.T "usage.open"}}{{end}}</td><td>{{$v.T (print "usage.page." .Page)}}</td></tr>{{end}}</tbody>
+  </table></div>{{end}}
+</section>
+
+{{if $d.Override}}<section class="ol-section">
+  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "config.entrancesFile"}}</h2></div>
+  <ul class="ol-mono ol-text-sm">{{range $d.FileHosts}}<li>{{.}}</li>{{end}}</ul>
+</section>{{end}}
+{{end}}

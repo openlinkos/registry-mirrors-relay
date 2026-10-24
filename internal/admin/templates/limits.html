@@ -9,7 +9,7 @@
 </div>
 
 <section class="ol-section">
-  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "limits.settings"}}</h2><p class="ol-section-description">{{.T "limits.settingsHelp"}}</p></div>
+  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "limits.settings"}}</h2><p class="ol-section-description">{{.T "limits.settingsHelp"}}</p>{{if .CanEditConfig}}<div class="ol-section-actions"><a class="ol-btn ol-btn-secondary ol-btn-sm" href="/admin/config#limits">{{icon "pencil" "sm"}}{{.T "limits.editConfig"}}</a></div>{{end}}</div>
   <dl class="ol-dl">
     <dt>{{.T "limits.manifestRate"}}</dt><dd>{{if $l.ManifestRate}}{{.T "limits.rateValue" "rate" (num $l.ManifestRate) "burst" (num $l.ManifestBurst) "head" (num $l.HeadWeight)}}{{else}}{{.T "limits.unlimited"}}{{end}}</dd>
     <dt>{{.T "limits.perClientStreams"}}</dt><dd>{{if $l.BlobStreamsPerClient}}{{num $l.BlobStreamsPerClient}}{{else}}{{.T "limits.unlimited"}}{{end}}</dd>

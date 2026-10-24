@@ -63,7 +63,8 @@ type envOpts struct {
 
 func newEnv(t *testing.T, o envOpts) *env {
 	t.Helper()
-	res, err := config.Parse([]byte("log: {access: {output: \"off\"}}\nproxy: {health_interval: 0s}\n" + o.yaml))
+	raw := []byte("log: {access: {output: \"off\"}}\nproxy: {health_interval: 0s}\n" + o.yaml)
+	res, err := config.Parse(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +91,7 @@ func newEnv(t *testing.T, o envOpts) *env {
 			}
 		}
 	}
-	a, err := app.New(res, nil, app.Options{Log: slog.New(slog.DiscardHandler), Store: st})
+	a, err := app.New(res, raw, app.Options{Log: slog.New(slog.DiscardHandler), Store: st})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +484,8 @@ func TestWriteRoutesPinned(t *testing.T) {
 	e := newEnv(t, envOpts{})
 	want := []string{
 		"/admin/account/password", "/admin/admins/create", "/admin/admins/delete", "/admin/admins/update",
-		"/admin/bans/add", "/admin/bans/delete", "/admin/login", "/admin/logout", "/admin/prefs", "/admin/reauth",
+		"/admin/bans/add", "/admin/bans/delete", "/admin/config/entrances/save", "/admin/config/reset",
+		"/admin/config/save", "/admin/config/upstream/save", "/admin/login", "/admin/logout", "/admin/prefs", "/admin/reauth",
 		"/admin/reload", "/admin/rules/image/add", "/admin/rules/image/delete", "/admin/rules/ip/add",
 		"/admin/rules/ip/delete", "/admin/sessions/revoke", "/admin/settings/reset", "/admin/settings/site",
 		"/admin/tokens/create", "/admin/tokens/delete", "/admin/upstreams/check", "/admin/upstreams/hosts/add",
@@ -495,7 +497,7 @@ func TestWriteRoutesPinned(t *testing.T) {
 	// 敏感操作都要求最近输入过口令
 	for _, r := range e.h.routes {
 		sensitive := strings.HasPrefix(r.path, "/admin/admins/") || strings.HasPrefix(r.path, "/admin/tokens/") ||
-			r.path == "/admin/sessions/revoke" || r.path == "/admin/account/password"
+			strings.HasPrefix(r.path, "/admin/config/") || r.path == "/admin/sessions/revoke" || r.path == "/admin/account/password"
 		if r.method == http.MethodPost && sensitive && r.auth != authFresh {
 			t.Errorf("%s 应要求重新输入口令", r.path)
 		}
@@ -570,7 +572,8 @@ func TestPagesRender(t *testing.T) {
 		"/admin/users/edit?name=bob", "/admin/rules", "/admin/rules?image=ghcr.io/evil/miner:1", "/admin/rules?image=nginx",
 		"/admin/limits", "/admin/requests", "/admin/requests?status=5&q=x", "/admin/requests?page=3", "/admin/abuse",
 		"/admin/abuse?hours=168", "/admin/audit", "/admin/settings", "/admin/admins", "/admin/admins/edit?name=victor",
-		"/admin/system", "/admin/account", "/admin/reauth", "/admin/nope",
+		"/admin/system", "/admin/account", "/admin/reauth", "/admin/config", "/admin/config/entrances",
+		"/admin/config/upstream?name=ghcr.io", "/admin/config/upstream", "/admin/nope",
 	}
 	for _, lang := range []string{"zh", "en"} {
 		for _, who := range []testSession{admin, viewer} {
@@ -660,6 +663,26 @@ func TestMessagesComplete(t *testing.T) {
 	for _, k := range ops.SiteLinkKeys {
 		if _, ok := messagesZH["settings.link."+k]; !ok {
 			t.Errorf("缺 settings.link.%s", k)
+		}
+	}
+	for _, k := range []string{"builtin", "config", "console"} {
+		if _, ok := messagesZH["config.source."+k]; !ok {
+			t.Errorf("缺 config.source.%s", k)
+		}
+	}
+	for _, key := range append(append([]string{}, config.OverrideSections...), "upstreams/x.example.com") {
+		sec, _, _ := strings.Cut(key, "/")
+		if sec == key {
+			for _, k := range []string{"cfg." + key, "cfg." + key + "Help"} {
+				if _, ok := messagesZH[k]; !ok {
+					t.Errorf("缺 %s", k)
+				}
+			}
+		}
+		for _, f := range config.OverrideFields(key) {
+			if _, ok := messagesZH["cfg."+sec+"."+f]; !ok {
+				t.Errorf("缺 cfg.%s.%s", sec, f)
+			}
 		}
 	}
 	for _, n := range notices {
@@ -962,5 +985,112 @@ func TestPasswordsSetByOthersMustChange(t *testing.T) {
 		if a.Name == "alice" && a.MustChange {
 			t.Fatal("自己改的口令不需要再改")
 		}
+	}
+}
+
+func TestConfigPages(t *testing.T) {
+	e := newEnv(t, envOpts{yaml: "limits: {manifest_rate: 3}\n"})
+	s := e.login("alice", alicePW)
+	// 限流：只存和配置文件不同的字段
+	form := url.Values{"key": {"limits"}}
+	for _, f := range config.OverrideFields("limits") {
+		form.Set(f, config.FieldText(e.app.Runtime().Config, "limits", f))
+	}
+	form.Set("max_inflight", "77")
+	if r := e.post(s, "/admin/config/save", form); r.StatusCode != 303 || r.Header.Get("Location") != "/admin/config?ok=config.saved&v=limits" {
+		t.Fatalf("保存：%d %s", r.StatusCode, r.body)
+	}
+	if v := e.app.Store.Data().ConfigOverrides["limits"].Value; v != "max_inflight: 77\n" || e.app.Runtime().Config.Limits.MaxInflight != 77 {
+		t.Fatalf("存下的修改：%q", v)
+	}
+	r := e.get("/admin/config?ok=config.saved&v=limits", s.cookie)
+	if !strings.Contains(r.body, "max_inflight: 77") || !strings.Contains(r.body, `action="/admin/config/reset"`) {
+		t.Fatal("配置页列出修改，能重置")
+	}
+	checkPage(t, "config", r.body)
+	// 填错：带着说明和填过的值重新显示，不保存
+	form.Set("max_inflight", "lots")
+	if r := e.post(s, "/admin/config/save", form); r.StatusCode != 400 || !strings.Contains(r.body, `value="lots"`) {
+		t.Fatalf("填错：%d", r.StatusCode)
+	}
+	if r := e.post(s, "/admin/config/save", url.Values{"key": {"listen"}}); r.StatusCode != 400 {
+		t.Fatalf("不能改的段：%d", r.StatusCode)
+	}
+	// 开关：没勾选按 false
+	if r := e.post(s, "/admin/config/save", url.Values{"key": {"site"}}); r.StatusCode != 303 || e.app.Runtime().Site.ShowStatus {
+		t.Fatalf("关掉服务状态：%d", r.StatusCode)
+	}
+
+	// 新建上游，再加一个固定转发到它的入口
+	r = e.post(s, "/admin/config/upstream/save", url.Values{"new": {"1"}, "upstream": {"CR.example.com"}, "registry": {"registry.example.com"},
+		"token_realm_hosts": {"auth.example.com"}, "unlisted_redirect": {"pass"}})
+	if r.StatusCode != 303 || e.app.Runtime().Config.Upstreams["cr.example.com"] == nil {
+		t.Fatalf("新建上游：%d %s", r.StatusCode, r.body)
+	}
+	if r := e.post(s, "/admin/config/upstream/save", url.Values{"new": {"1"}, "upstream": {"ghcr.io"}, "registry": {"x.example.com"}}); r.StatusCode != 409 {
+		t.Fatalf("和已有的重名：%d", r.StatusCode)
+	}
+	if r := e.post(s, "/admin/config/upstream/save", url.Values{"new": {"1"}, "upstream": {"nodot"}}); r.StatusCode != 400 {
+		t.Fatalf("名字不对：%d", r.StatusCode)
+	}
+	// 没写 token_realm_hosts：保存，但直接显示提醒
+	r = e.post(s, "/admin/config/upstream/save", url.Values{"new": {"1"}, "upstream": {"bare.example.com"}, "registry": {"bare.example.com"}})
+	if r.StatusCode != 200 || !strings.Contains(r.body, "token_realm_hosts") || !strings.Contains(r.body, "ol-alert-success") {
+		t.Fatalf("有提醒时直接显示：%d", r.StatusCode)
+	}
+	checkPage(t, "upstream warnings", r.body)
+	r = e.get("/admin/config/entrances", s.cookie)
+	checkPage(t, "entrances", r.body)
+	if !strings.Contains(r.body, `name="rows" value="3"`) {
+		t.Fatal("一个入口加两行空的")
+	}
+	ent := url.Values{"rows": {"3"},
+		"name_0": {"default"}, "hosts_0": {"*"}, "upstream_0": {""}, "default_upstream_0": {"docker.io"}, "auth_0": {"none"}, "page_0": {"public"},
+		"name_1": {""}, "hosts_1": {"cr.test"}, "upstream_1": {"cr.example.com"}, "auth_1": {"none"}, "page_1": {"off"},
+		"hosts_2": {""}}
+	if r := e.post(s, "/admin/config/entrances/save", ent); r.StatusCode != 303 {
+		t.Fatalf("保存入口：%d %s", r.StatusCode, r.body)
+	}
+	if en := e.app.Runtime().Router.Entrance("cr.test"); en == nil || en.Upstream != "cr.example.com" || en.Page != "off" {
+		t.Fatalf("新入口应生效：%+v", en)
+	}
+	// 被入口引用的上游不能删
+	if r := e.post(s, "/admin/config/reset", url.Values{"key": {"upstreams/cr.example.com"}}); r.StatusCode != 422 {
+		t.Fatalf("被引用的上游不能删：%d", r.StatusCode)
+	}
+	// 删入口（勾选删除）
+	ent.Set("delete_1", "1")
+	if r := e.post(s, "/admin/config/entrances/save", ent); r.StatusCode != 303 || e.app.Runtime().Router.Entrance("cr.test").Upstream != "" {
+		t.Fatalf("删除入口：%d", r.StatusCode)
+	}
+	if _, ok := e.app.Store.Data().ConfigOverrides["entrances"]; ok {
+		t.Fatal("和配置文件一样的入口列表不存")
+	}
+	if r := e.post(s, "/admin/config/reset", url.Values{"key": {"upstreams/cr.example.com"}}); r.StatusCode != 303 || e.app.Runtime().Config.Upstreams["cr.example.com"] != nil {
+		t.Fatalf("删除后台新建的上游：%d", r.StatusCode)
+	}
+
+	// 导出
+	r = e.get("/admin/config/export", s.cookie)
+	if r.StatusCode != 200 || !strings.Contains(r.body, "max_inflight: 77") || !strings.Contains(r.Header.Get("Content-Disposition"), "config-overrides.yaml") {
+		t.Fatalf("导出：%d %s", r.StatusCode, r.body)
+	}
+	if r := e.get("/admin/config/export?format=merged", s.cookie); r.StatusCode != 200 || !strings.Contains(r.body, "manifest_rate: 3") {
+		t.Fatalf("合并导出：%d %s", r.StatusCode, r.body)
+	}
+
+	// 只读角色：看得到，改不了
+	v := e.login("victor", victorPW)
+	r = e.get("/admin/config", v.cookie)
+	if strings.Contains(r.body, `action="/admin/config/save"`) || !strings.Contains(r.body, "max_inflight") {
+		t.Fatal("只读角色只能看")
+	}
+	if r := e.post(v, "/admin/config/save", url.Values{"key": {"limits"}, "max_inflight": {"1"}}); r.StatusCode != 403 {
+		t.Fatalf("只读角色不能改：%d", r.StatusCode)
+	}
+	// 超过 10 分钟要重新输入口令
+	e.advance(11 * time.Minute)
+	if r := e.post(s, "/admin/config/save", form); r.StatusCode != 303 || !strings.HasPrefix(r.Header.Get("Location"), "/admin/reauth") {
+		t.Fatalf("改配置要最近输入过口令：%d %s", r.StatusCode, r.Header.Get("Location"))
 	}
 }

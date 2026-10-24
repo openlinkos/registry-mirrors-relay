@@ -16,7 +16,7 @@
       {{with .Quota}}<dt>{{$v.T "upstreams.quota"}}</dt><dd>{{$v.T "upstreams.quotaValue" "remaining" (num .Remaining) "limit" (num .Limit)}}{{if .Window}} · {{$v.T "overview.quotaWindow" "window" ($v.Dur .Window)}}{{end}} · {{time .Observed}}</dd>{{end}}
       <dt>{{$v.T "upstreams.unlisted"}}</dt><dd>{{if eq .Unlisted "deny"}}{{$v.T "upstreams.unlistedDeny"}}{{else}}{{$v.T "upstreams.unlistedPass"}}{{end}}</dd>
     </dl>
-    {{if $v.IsAdmin}}<form method="post" action="/admin/upstreams/check">{{template "csrf" $v}}<input type="hidden" name="upstream" value="{{.Name}}"><button type="submit" class="ol-btn ol-btn-secondary ol-btn-sm">{{icon "refresh-cw" "sm"}}{{$v.T "upstreams.check"}}</button></form>{{end}}
+    {{if $v.IsAdmin}}<div class="ol-cluster"><form method="post" action="/admin/upstreams/check">{{template "csrf" $v}}<input type="hidden" name="upstream" value="{{.Name}}"><button type="submit" class="ol-btn ol-btn-secondary ol-btn-sm">{{icon "refresh-cw" "sm"}}{{$v.T "upstreams.check"}}</button></form>{{if $v.CanEditConfig}}<a class="ol-btn ol-btn-ghost ol-btn-sm" href="/admin/config/upstream?name={{.Name}}">{{icon "pencil" "sm"}}{{$v.T "action.edit"}}</a>{{end}}</div>{{end}}
 
     {{with .UnlistedHosts}}<div>
       <h3 class="ol-heading-sm">{{$v.T "upstreams.unlistedSeen"}}</h3>

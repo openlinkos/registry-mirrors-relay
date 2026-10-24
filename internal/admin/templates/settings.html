@@ -21,7 +21,7 @@
     <dt>{{.T "settings.operator"}}</dt><dd>{{if $s.Operator}}{{$s.Operator}}{{else}}—{{end}}</dd>
     {{range $d.LinkKeys}}<dt>{{$v.T (print "settings.link." .)}}</dt><dd class="ol-mono ol-break">{{with index $s.Links .}}{{.}}{{else}}—{{end}}</dd>{{end}}
   </dl>{{end}}
-  <p class="ol-hint">{{if $s.ShowStatus}}{{.T "usage.showStatusOn"}}{{else}}{{.T "usage.showStatusOff"}}{{end}}</p>
+  <p class="ol-hint">{{if $s.ShowStatus}}{{.T "usage.showStatusOn"}}{{else}}{{.T "usage.showStatusOff"}}{{end}}{{if .CanEditConfig}} <a href="/admin/config#site">{{.T "action.edit"}}</a>{{end}}</p>
 </section>
 
 <section class="ol-section">

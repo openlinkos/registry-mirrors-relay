@@ -1,0 +1,20 @@
+{{define "content"}}{{$v := .}}{{$d := .Data}}
+{{template "header" (dict "Title" .Title "Desc" (.T "config.upstreamDescription"))}}
+{{template "notices" .}}
+{{if $d.Credentials}}<div class="ol-notices">{{template "alert" (dict "Tone" "info" "Text" (.T "config.upstreamCredentials"))}}</div>{{end}}
+{{with $d.Override}}{{if not (or (eq .State "active") (eq .State "drift"))}}<div class="ol-notices">{{template "alert" (dict "Tone" "warning" "Text" ($v.T "config.upstreamNotApplied" "error" (or .Error "admin.config_edit: false")))}}</div>{{end}}{{end}}
+
+<section class="ol-section">
+  {{if not $d.New}}<p class="ol-section-description">{{.T (print "config.source." $d.Source)}}{{with $d.Override}} {{template "ovState" (dict "S" .State "V" $v)}}{{end}}</p>{{end}}
+  {{if $d.Editable}}<form method="post" action="/admin/config/upstream/save" class="ol-form">
+    {{template "csrf" .}}
+    {{if $d.New}}<input type="hidden" name="new" value="1">
+    <div class="ol-field"><label class="ol-label" for="upstream">{{.T "upstreams.name"}} <span class="ol-required">*</span></label><input class="ol-input ol-input-mono" id="upstream" name="upstream" value="{{$d.Name}}" required maxlength="253" placeholder="registry.example.com" autocomplete="off" spellcheck="false" aria-describedby="upstream-hint"><p class="ol-hint" id="upstream-hint">{{.T "config.upstreamNameHint"}}</p></div>
+    {{else}}<input type="hidden" name="upstream" value="{{$d.Name}}">{{end}}
+    <div class="ol-grid ol-grid-2">{{range $d.Fields}}{{template "cfgField" (dict "F" . "V" $v "ID" .Name)}}{{end}}</div>
+    <div class="ol-form-actions"><button type="submit" class="ol-btn ol-btn-primary">{{icon "check" "sm"}}{{.T "action.save"}}</button><a class="ol-btn ol-btn-ghost" href="/admin/config#upstreams">{{.T "action.cancel"}}</a></div>
+  </form>
+  {{with $d.Override}}<div class="admin-after">{{if eq $d.Source "console"}}{{template "resetButton" (dict "V" $v "Key" .Key "Label" ($v.T "config.upstreamRemove"))}}{{else}}{{template "resetButton" (dict "V" $v "Key" .Key)}}{{end}}</div>{{end}}
+  {{else}}<dl class="ol-dl">{{range $d.Fields}}<dt>{{.Label}}</dt><dd class="ol-mono admin-wrap">{{if .Value}}{{.Value}}{{else}}—{{end}}{{if .Changed}} <span class="ol-muted">{{$v.T "config.fileValue" "v" (or .File "—")}}</span>{{end}}</dd>{{end}}</dl>{{end}}
+</section>
+{{end}}

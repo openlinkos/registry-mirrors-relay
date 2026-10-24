@@ -63,8 +63,14 @@ func (v *view) IsAdmin() bool            { return v.c.sess != nil && v.c.sess.Ro
 // CanWrite：admin 角色，并且运营数据可写。
 func (v *view) CanWrite() bool { return v.IsAdmin() && v.Writable() }
 
+// CanEditConfig：能在后台改配置（admin 角色、运营数据可写、没有写 admin.config_edit: false）。
+func (v *view) CanEditConfig() bool { return v.h.canEditConfig(v.c) }
+
 // FormErr 是表单出错时的说明。
 func (v *view) FormErr() string { return v.c.formErr }
+
+// Warns 是保存成功后要提醒的事（例如后台改的配置带来的新提醒）。
+func (v *view) Warns() []string { return v.c.warnings }
 
 // F 是表单出错重新渲染时用户填过的值。
 func (v *view) F(name string) string {
@@ -96,7 +102,7 @@ var navTable = []struct {
 	{"nav.groupService", [][3]string{{"upstreams", "/admin/upstreams", "server"}, {"usage", "/admin/usage", "plug"}}},
 	{"nav.groupAccess", [][3]string{{"users", "/admin/users", "user"}, {"rules", "/admin/rules", "shield-check"}, {"limits", "/admin/limits", "activity"}}},
 	{"nav.groupRecords", [][3]string{{"requests", "/admin/requests", "list"}, {"abuse", "/admin/abuse", "triangle-alert"}, {"audit", "/admin/audit", "scroll-text"}}},
-	{"nav.groupSystem", [][3]string{{"settings", "/admin/settings", "settings"}, {"admins", "/admin/admins", "key-round"}, {"system", "/admin/system", "cpu"}}},
+	{"nav.groupSystem", [][3]string{{"settings", "/admin/settings", "settings"}, {"config", "/admin/config", "wrench"}, {"admins", "/admin/admins", "key-round"}, {"system", "/admin/system", "cpu"}}},
 }
 
 func (v *view) NavGroups() []navGroup {

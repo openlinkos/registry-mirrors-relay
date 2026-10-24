@@ -62,6 +62,15 @@ func (h *Handler) routeTable() []route {
 		fresh("/admin/tokens/create", "/admin/admins", h.tokenCreate),
 		fresh("/admin/tokens/delete", "/admin/admins", h.tokenDelete),
 		fresh("/admin/sessions/revoke", "/admin/admins", h.sessionRevoke),
+		get("/admin/config", h.configPage),
+		get("/admin/config/export", h.configExport),
+		get("/admin/config/entrances", h.entrancesPage),
+		get("/admin/config/upstream", h.upstreamEditPage),
+		// 改配置：入口和上游决定拉取请求发到哪里，和管理员、令牌一样要最近输入过口令
+		fresh("/admin/config/save", "/admin/config", h.configSave),
+		fresh("/admin/config/entrances/save", "/admin/config/entrances", h.entrancesSave),
+		fresh("/admin/config/upstream/save", "/admin/config", h.upstreamSave),
+		fresh("/admin/config/reset", "/admin/config", h.configReset),
 		get("/admin/system", h.systemPage),
 		post("/admin/reload", h.reload),
 		get("/admin/account", h.accountPage),
@@ -167,9 +176,13 @@ var notices = []string{
 	"user.created", "user.updated", "user.deleted", "rule.added", "rule.deleted", "ban.added", "ban.deleted",
 	"host.added", "host.deleted", "site.saved", "site.reset", "admin.created", "admin.updated", "admin.deleted",
 	"token.deleted", "session.revoked", "reloaded", "password.changed", "upstream.ok", "upstream.failed",
+	"config.saved", "config.reset",
 }
 
 func (c *ctx) notice() string {
+	if c.flash != "" {
+		return c.flash
+	}
 	q := c.r.URL.Query()
 	k := q.Get("ok")
 	if k == "" || !slices.Contains(notices, k) {

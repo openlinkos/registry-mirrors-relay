@@ -13,8 +13,8 @@ var iconNames = []string{
 	"activity", "arrow-left", "ban", "check", "circle-alert", "circle-check", "clock", "copy", "cpu", "database",
 	"download", "external-link", "filter", "globe", "hard-drive", "info", "key-round", "languages", "layout-dashboard",
 	"list", "lock", "log-in", "log-out", "menu", "moon", "pencil", "plug", "plus", "refresh-cw", "scroll-text",
-	"search", "server", "settings", "shield-check", "sun", "sun-moon", "terminal", "trash-2", "triangle-alert",
-	"user", "x",
+	"rotate-ccw", "search", "server", "settings", "shield-check", "sun", "sun-moon", "terminal", "trash-2", "triangle-alert",
+	"user", "wrench", "x",
 }
 
 var iconNameRe = regexp.MustCompile(`^[a-z0-9-]+$`)
