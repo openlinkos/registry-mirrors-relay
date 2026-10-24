@@ -173,7 +173,7 @@ func cmdServe(args []string, stderr io.Writer) int {
 	} else {
 		extras = append(extras, server.Listener{Name: "管理入口", Addr: cfg.Listen.Admin, Handler: m.Standalone(log)})
 	}
-	log.Info("管理入口", "listen", cmp.Or(cfg.Listen.Admin, "和拉取入口共用"), "allow", cfg.Admin.Allow,
+	log.Info("管理入口", "listen", cmp.Or(cfg.Listen.Admin, "和拉取入口共用"), "public", cfg.Admin.Public, "allow", cfg.Admin.Allow,
 		"proxied_allow", cfg.Admin.ProxiedAllow, "metrics", cfg.Metrics.Enabled)
 	srv := server.New(cfg, log, pull, extras...)
 	srv.ACMEHosts(func() []string { return a.Runtime().Config.TLS.ACME.Hosts })
