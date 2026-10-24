@@ -24,7 +24,8 @@ spec:
     - name: probe
       image: {{ include "rmr.image" . }}
       imagePullPolicy: {{ .Values.image.pullPolicy }}
-      args: [probe, -url, "http://{{ include "rmr.fullname" . }}:{{ .Values.service.port }}/readyz", -timeout, 10s]
+      # 新建的 Service 要等 kube-proxy 同步后才连得通，所以最多重试 60 秒
+      args: [probe, -url, "http://{{ include "rmr.fullname" . }}:{{ .Values.service.port }}/readyz", -timeout, 5s, -wait, 60s]
       securityContext:
         {{- toYaml .Values.securityContext | nindent 8 }}
       resources:

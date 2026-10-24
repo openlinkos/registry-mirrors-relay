@@ -4,7 +4,7 @@
 //	registry-mirrors-relay check [-config 文件] [-print]
 //	registry-mirrors-relay hash-password [-user 名字] [-cost 12]
 //	registry-mirrors-relay admin create|password|list [-config 文件] [-name 名字] [-role admin|viewer]
-//	registry-mirrors-relay probe [-url http://127.0.0.1:8080/healthz]
+//	registry-mirrors-relay probe [-url http://127.0.0.1:8080/healthz] [-wait 60s]
 //	registry-mirrors-relay version
 package main
 
@@ -87,7 +87,8 @@ func usage(w io.Writer) {
   registry-mirrors-relay admin password -name 名字      重设后台管理员的口令（并启用）
   registry-mirrors-relay admin list                     列出后台管理员
                                                         admin 子命令要先停止服务：运营数据库同时只能被一个进程打开
-  registry-mirrors-relay probe [-config 文件] [-url 地址]  健康检查，给容器的 HEALTHCHECK 用；默认按配置的端口
+  registry-mirrors-relay probe [-config 文件] [-url 地址] [-wait 时长]
+                                                        健康检查，给容器的 HEALTHCHECK 用；默认按配置的端口
   registry-mirrors-relay version
 
 配置文件依次取 -config、环境变量 RELAY_CONFIG、`+defaultConfigPath+`；都没有时只用默认值。
@@ -435,12 +436,14 @@ func cmdAdmin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 // cmdProbe 是容器的 HEALTHCHECK：请求本机拉取入口的 /healthz。没给 -url 时按配置里的 listen.http（没开时用
 // listen.https，不校验证书）拼出地址，这样改了端口也不用改健康检查。
+// -wait 时失败了每秒重试一次，直到成功或超时：helm test 用它，刚建好的 Service 要过一会儿才连得通。
 func cmdProbe(args []string, stderr io.Writer) int {
 	fl := flag.NewFlagSet("probe", flag.ContinueOnError)
 	fl.SetOutput(stderr)
 	cfgPath := fl.String("config", "", "配置文件（没给 -url 时用来找端口）")
 	url := fl.String("url", "", "探测地址，默认按配置的 listen.http 或 listen.https")
-	timeout := fl.Duration("timeout", 3*time.Second, "超时")
+	timeout := fl.Duration("timeout", 3*time.Second, "每次请求的超时")
+	wait := fl.Duration("wait", 0, "失败时每秒重试一次，最多等这么久")
 	if err := fl.Parse(args); err != nil {
 		return 2
 	}
@@ -462,22 +465,38 @@ func cmdProbe(args []string, stderr io.Writer) int {
 			client = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}} //nolint:gosec // 见上
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, *url, nil)
-	if err != nil {
+	if _, err := http.NewRequestWithContext(context.Background(), http.MethodGet, *url, nil); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
+	deadline := time.Now().Add(*wait)
+	for {
+		err := probeOnce(client, *url, *timeout)
+		if err == nil {
+			return 0
+		}
+		if time.Now().After(deadline) {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+func probeOnce(client *http.Client, url string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+		return err
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		fmt.Fprintln(stderr, "状态码", resp.StatusCode)
-		return 1
+		return fmt.Errorf("状态码 %d", resp.StatusCode)
 	}
-	return 0
+	return nil
 }

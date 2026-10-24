@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -76,6 +78,21 @@ func TestProbe(t *testing.T) {
 	defer bad.Close()
 	if code, _, _ := runCmd(t, "", "probe", "-url", bad.URL); code != 1 {
 		t.Fatal("非 200 时 probe 应返回 1")
+	}
+	// -wait：前两次 503，第三次 200
+	var n atomic.Int32
+	flaky := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if n.Add(1) < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	}))
+	defer flaky.Close()
+	if code, _, errs := runCmd(t, "", "probe", "-url", flaky.URL, "-wait", "10s"); code != 0 || n.Load() != 3 {
+		t.Fatalf("-wait 应重试到成功：%d，请求了 %d 次，%s", code, n.Load(), errs)
+	}
+	start := time.Now()
+	if code, _, _ := runCmd(t, "", "probe", "-url", bad.URL, "-wait", "1500ms"); code != 1 || time.Since(start) < 1500*time.Millisecond {
+		t.Fatalf("一直失败时应等满 -wait 再返回 1：%d，%v", code, time.Since(start))
 	}
 }
 
