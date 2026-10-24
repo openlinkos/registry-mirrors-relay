@@ -1,7 +1,8 @@
 name: release
 
 # 推送 v* 标签时发布：二进制、压缩包、SHA256SUMS（cosign keyless 签名）、SBOM、多平台镜像（签名）、
-# Helm chart（OCI，签名），并为二进制、镜像和 chart 生成 GitHub 的构建来源证明。配置见 .goreleaser.yaml。
+# Helm chart（OCI，签名），并为二进制、镜像和 chart 生成 GitHub 的构建来源证明；最后从 GHCR 匿名安装一遍 chart 验证。
+# 配置见 .goreleaser.yaml。
 on:
   push:
     tags: ["v*"]
@@ -89,3 +90,36 @@ jobs:
           subject-name: ghcr.io/openlinkos/charts/registry-mirrors-relay
           subject-digest: ${{ steps.chart.outputs.digest }}
           push-to-registry: true
+
+  # 发布之后从 GHCR 匿名拉取刚发布的 chart 和镜像，装进 kind（restricted 命名空间）再跑 helm test
+  verify:
+    name: verify the published chart
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: install tools
+        run: scripts/ci-tools.sh kubectl kind helm
+      - name: helm install from the registry
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          cosign verify "ghcr.io/openlinkos/charts/registry-mirrors-relay:$version" \
+            --certificate-identity "https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/$TAG" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
+          kind create cluster --wait 120s
+          kubectl create namespace relay
+          kubectl label namespace relay pod-security.kubernetes.io/enforce=restricted
+          helm4 install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version "$version" \
+            -n relay --wait --timeout 5m
+          helm4 test registry-mirrors-relay -n relay --logs
+          image="$(kubectl -n relay get deploy registry-mirrors-relay -o jsonpath='{.spec.template.spec.containers[0].image}')"
+          echo "$image"
+          case "$image" in "ghcr.io/openlinkos/registry-mirrors-relay:$TAG@sha256:"*) ;; *) echo "没有按 digest 拉取本次发布的镜像"; exit 1 ;; esac
