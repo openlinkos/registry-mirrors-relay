@@ -29,7 +29,7 @@ docker run -d --name registry-mirrors-relay --restart unless-stopped \
   -v relay-data:/var/lib/registry-mirrors-relay \
   -v "$PWD/admin-password:/run/secrets/admin_password:ro" \
   -e RELAY_ADMIN_PASSWORD_FILE=/run/secrets/admin_password \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.1.1
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.1.2
 ```
 
 - 拉取：`docker pull 服务器:8080/library/alpine`（明文时要把 `服务器:8080` 加进 Docker 的 `insecure-registries`；正式使用请放在 HTTPS 之后，见[部署](docs/deploy.md)）。

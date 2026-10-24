@@ -13,7 +13,7 @@ openssl rand -base64 18 > admin-password
 kubectl -n registry-mirror create secret generic registry-mirrors-relay-admin --from-file=password=admin-password
 
 helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay \
-  --namespace registry-mirror --version 0.1.1 \
+  --namespace registry-mirror --version 0.1.2 \
   --set admin.existingSecret=registry-mirrors-relay-admin
 ```
 
@@ -52,10 +52,10 @@ To let containerd on the nodes pull through the relay, expose it on an address t
 The chart is signed keylessly by this repository's release workflow and has a build provenance attestation:
 
 ```bash
-cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.1.1 \
+cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.1.2 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.1.1 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.1.2 -R openlinkos/registry-mirrors-relay
 ```
 
 ## Requirements
