@@ -56,6 +56,9 @@ func ParsePrefixes(items []string) ([]netip.Prefix, error) {
 	return out, nil
 }
 
+// MaxACMEHosts 是 ACME 最多申请证书的域名数：入口可以在后台改，数量要有上限，免得撞上证书签发的频率限制。
+const MaxACMEHosts = 100
+
 var (
 	// accountRe 是账号、令牌名的写法（客户端账号、后台管理员、API 令牌共用）
 	accountRe      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
@@ -105,6 +108,9 @@ func validate(c *Config, res *Result) []error {
 		}
 		if len(c.TLS.ACME.Hosts) == 0 {
 			bad("tls.mode 是 acme 时要有明确的域名：在入口的 hosts 里写域名，或写 tls.acme.hosts")
+		}
+		if len(c.TLS.ACME.Hosts) > MaxACMEHosts {
+			bad("tls.mode 是 acme 时最多为 %d 个域名申请证书，现在有 %d 个", MaxACMEHosts, len(c.TLS.ACME.Hosts))
 		}
 		for _, h := range c.TLS.ACME.Hosts {
 			if h == "*" || !hostRe.MatchString(h) {

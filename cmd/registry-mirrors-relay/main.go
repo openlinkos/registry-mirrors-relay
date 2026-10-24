@@ -176,6 +176,7 @@ func cmdServe(args []string, stderr io.Writer) int {
 	log.Info("管理入口", "listen", cmp.Or(cfg.Listen.Admin, "和拉取入口共用"), "allow", cfg.Admin.Allow,
 		"proxied_allow", cfg.Admin.ProxiedAllow, "metrics", cfg.Metrics.Enabled)
 	srv := server.New(cfg, log, pull, extras...)
+	srv.ACMEHosts(func() []string { return a.Runtime().Config.TLS.ACME.Hosts })
 	if err := srv.Run(ctx); err != nil {
 		log.Error("退出", "err", err)
 		return 1

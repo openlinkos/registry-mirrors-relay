@@ -84,6 +84,15 @@ type Site struct {
 	UpdatedBy string            `json:"updated_by,omitempty"`
 }
 
+// ConfigOverride 是在后台对配置的一处修改（见 config.Override），按 key 存在 Data.ConfigOverrides 里。
+type ConfigOverride struct {
+	Value string `json:"value"` // 这一段的 YAML，只有和配置文件不同的字段
+	// Base 是保存时配置文件里这些字段的值的指纹（config.OverrideBase）。对不上说明配置文件之后又改过。
+	Base      string    `json:"base,omitempty"`
+	Updated   time.Time `json:"updated"`
+	UpdatedBy string    `json:"updated_by,omitempty"`
+}
+
 // Data 是全部运营数据。很小（通常几 KB），整体读写。
 type Data struct {
 	Users      []ClientUser `json:"users,omitempty"`
@@ -95,7 +104,9 @@ type Data struct {
 	// ExtraRedirectHosts 是在后台加进白名单的重定向主机（精确主机名，不是正则），按上游分
 	ExtraRedirectHosts map[string][]string `json:"extra_redirect_hosts,omitempty"`
 	Site               *Site               `json:"site,omitempty"`
-	Updated            time.Time           `json:"updated"`
+	// ConfigOverrides 是在后台对配置的修改，键是 config.Override 的 Key
+	ConfigOverrides map[string]ConfigOverride `json:"config_overrides,omitempty"`
+	Updated         time.Time                 `json:"updated"`
 }
 
 // Clone 深拷贝。

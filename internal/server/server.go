@@ -30,6 +30,8 @@ type Server struct {
 	handler http.Handler
 	extras  []Listener
 	ready   atomic.Bool
+	// acmeHosts 返回现在要放行的 ACME 域名，为 nil 时用 cfg 里的
+	acmeHosts func() []string
 
 	mu    sync.Mutex
 	bound []string // 实际监听的地址，监听 :0 时能拿到端口
@@ -45,6 +47,9 @@ func New(cfg *config.Config, log *slog.Logger, handler http.Handler, extras ...L
 	}
 	return s
 }
+
+// ACMEHosts 让 ACME 按 f 返回的域名放行（生效的配置里的 tls.acme.hosts），入口改了不用重启。Run 之前调用。
+func (s *Server) ACMEHosts(f func() []string) { s.acmeHosts = f }
 
 // ServeHTTP 先处理探活，其余交给 handler。
 //   - /healthz：进程在就返回 200，给 liveness 和外部监控用。
@@ -91,7 +96,7 @@ func (s *Server) Addrs() []string {
 // 先让 /readyz 返回 503，停止接受新连接，已有的请求最多等 timeouts.shutdown_grace。
 func (s *Server) Run(ctx context.Context) error {
 	t := s.cfg.Timeouts
-	tlsConf, acmeWrap, err := tlsSetup(s.cfg, s.log)
+	tlsConf, acmeWrap, err := tlsSetup(s.cfg, s.log, s.acmeHosts)
 	if err != nil {
 		return err
 	}

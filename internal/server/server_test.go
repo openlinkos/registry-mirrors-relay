@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -170,7 +171,10 @@ func TestTLSFilesMissing(t *testing.T) {
 
 func TestACMEWiring(t *testing.T) {
 	dir := t.TempDir()
-	conf, wrap, err := tlsSetup(mustConfig(t, "data_dir: \""+filepath.ToSlash(dir)+"\"\nlisten: {http: \"127.0.0.1:0\", https: \"127.0.0.1:0\"}\ntls: {mode: acme, acme: {hosts: [mirror.example.com], directory_url: \"https://acme.invalid/directory\"}}\n"), slog.New(slog.DiscardHandler))
+	var hosts atomic.Pointer[[]string]
+	hosts.Store(&[]string{"mirror.example.com"})
+	conf, wrap, err := tlsSetup(mustConfig(t, "data_dir: \""+filepath.ToSlash(dir)+"\"\nlisten: {http: \"127.0.0.1:0\", https: \"127.0.0.1:0\"}\ntls: {mode: acme, acme: {hosts: [mirror.example.com], directory_url: \"https://acme.invalid/directory\"}}\n"),
+		slog.New(slog.DiscardHandler), func() []string { return *hosts.Load() })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,8 +197,13 @@ func TestACMEWiring(t *testing.T) {
 		t.Fatal("验证路径应由 autocert 处理")
 	}
 	// 不在名单里的域名不申请证书
-	if _, err := conf.GetCertificate(&tls.ClientHelloInfo{ServerName: "evil.example.com"}); err == nil {
-		t.Fatal("不在 tls.acme.hosts 里的域名不能申请证书")
+	if _, err := conf.GetCertificate(&tls.ClientHelloInfo{ServerName: "new.example.com"}); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("不在 tls.acme.hosts 里的域名不能申请证书：%v", err)
+	}
+	// 生效的配置里加了域名（例如在后台加了入口），不用重启就放行
+	hosts.Store(&[]string{"mirror.example.com", "new.example.com"})
+	if _, err := conf.GetCertificate(&tls.ClientHelloInfo{ServerName: "new.example.com"}); err == nil || strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("新加的域名应放行（之后连不上 ACME 服务而失败）：%v", err)
 	}
 }
 

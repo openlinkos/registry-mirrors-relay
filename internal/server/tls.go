@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -21,8 +22,9 @@ import (
 //   - acme：用 autocert 自动申请和续期，证书存在 tls.acme.cache_dir。TLS-ALPN-01 在 HTTPS 入口上完成，
 //     HTTP-01 在明文入口上完成（返回的 wrap 包在明文入口的 handler 外面，其余请求照常处理）。
 //
+// ACME 只为 hosts 返回的域名申请证书（为 nil 时用 tls.acme.hosts），每次需要新证书时现取。
 // tls.mode 是 off 时返回 nil。
-func tlsSetup(cfg *config.Config, log *slog.Logger) (conf *tls.Config, wrap func(http.Handler) http.Handler, err error) {
+func tlsSetup(cfg *config.Config, log *slog.Logger, hosts func() []string) (conf *tls.Config, wrap func(http.Handler) http.Handler, err error) {
 	switch cfg.TLS.Mode {
 	case "files":
 		r := &certReloader{certFile: cfg.TLS.CertFile, keyFile: cfg.TLS.KeyFile, log: log, now: time.Now}
@@ -35,11 +37,17 @@ func tlsSetup(cfg *config.Config, log *slog.Logger) (conf *tls.Config, wrap func
 		if err := os.MkdirAll(a.CacheDir, 0o700); err != nil {
 			return nil, nil, fmt.Errorf("tls.acme.cache_dir：%w", err)
 		}
+		if hosts == nil {
+			hosts = func() []string { return a.Hosts }
+		}
 		m := &autocert.Manager{
-			Prompt:     autocert.AcceptTOS,
-			Cache:      autocert.DirCache(a.CacheDir),
-			HostPolicy: autocert.HostWhitelist(a.Hosts...),
-			Email:      a.Email,
+			Prompt: autocert.AcceptTOS,
+			Cache:  autocert.DirCache(a.CacheDir),
+			// 只在缓存里没有这个域名的证书时调用
+			HostPolicy: func(ctx context.Context, host string) error {
+				return autocert.HostWhitelist(hosts()...)(ctx, host)
+			},
+			Email: a.Email,
 		}
 		if a.DirectoryURL != "" {
 			m.Client = &acme.Client{DirectoryURL: a.DirectoryURL}

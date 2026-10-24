@@ -1,4 +1,5 @@
 // Package app 把配置和运营数据组装成一份不可变的 Runtime，并在配置文件或运营数据变化时整体替换（热重载）。
+// 后台对配置的修改存在运营数据库里，叠加在配置文件之上，见 overrides.go。
 //
 // 替换时尽量保留状态：上游和代理设置没变就沿用原来的连接池（令牌缓存随之保留），缓存设置没变就沿用 manifest 缓存；
 // 限流计数、口令校验缓存、统计一直保留。监听地址、TLS、运营数据的存储方式这类改动要重启才能生效，会在日志里提示。
@@ -16,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -63,6 +65,10 @@ type Runtime struct {
 	Mgmt      MgmtPolicy         // 管理入口（后台、API、指标）的访问范围
 	Built     time.Time
 
+	// FileConfig 是只按配置文件解析的配置（不含后台的修改），Config 是叠加了后台修改的、生效的配置
+	FileConfig *config.Config
+	Overrides  []OverrideState // 后台对配置的修改和它们的状态
+
 	poolKey, cacheKey string
 }
 
@@ -96,9 +102,12 @@ type App struct {
 	Started   time.Time
 
 	rt      atomic.Pointer[Runtime]
-	mu      sync.Mutex // 串行化重载
+	mu      sync.Mutex // 串行化重载和后台对配置的修改；下面三项也由它保护
 	cfgHash [32]byte
-	reload  atomic.Pointer[ReloadStatus]
+	fileRaw []byte // 配置文件的内容，后台修改配置时叠加在它上面
+	// warnings 是生效的配置的提醒，后台保存修改时只报新增的
+	warnings []string
+	reload   atomic.Pointer[ReloadStatus]
 
 	healthMu sync.Mutex
 	health   map[string]upstream.Health
@@ -112,13 +121,14 @@ type ReloadStatus struct {
 	Restart []string // 需要重启才能生效的改动
 }
 
-// New 组装 App。cfg 是已经通过校验的配置。
+// New 组装 App。res 是配置文件 raw 已经通过校验的解析结果；运营数据库里后台对配置的修改在这里叠加上去。
 func New(res *config.Result, raw []byte, opt Options) (*App, error) {
 	if opt.Log == nil {
 		opt.Log = slog.Default()
 	}
 	cfg := res.Config
-	a := &App{log: opt.Log, opt: opt, Started: time.Now(), cfgHash: sha256.Sum256(raw), probes: status.NewHistory()}
+	a := &App{log: opt.Log, opt: opt, Started: time.Now(), cfgHash: sha256.Sum256(raw), probes: status.NewHistory(),
+		fileRaw: raw}
 	a.Store = opt.Store
 	if a.Store == nil {
 		switch cfg.Admin.Store.Driver {
@@ -144,13 +154,21 @@ func New(res *config.Result, raw []byte, opt Options) (*App, error) {
 	a.Metrics = metrics.New(version.Version)
 	a.Limiter = limit.New(limitConfig(cfg))
 	a.Auth = access.NewAuthenticator()
-	rt, err := a.build(cfg, nil)
+	rt, eff, err := a.assemble(raw, res, nil)
 	if err != nil {
 		_ = a.Store.Close()
 		return nil, err
 	}
-	a.rt.Store(rt)
+	for _, w := range eff.Warnings {
+		if !slices.Contains(res.Warnings, w) {
+			a.log.Warn(w)
+		}
+	}
+	a.noteOverrides(nil, rt.Overrides)
+	a.commit(rt, nil)
+	a.warnings = eff.Warnings
 	a.registerMetrics()
+	a.registerOverrideMetrics()
 	return a, nil
 }
 
@@ -159,6 +177,13 @@ func (a *App) Runtime() *Runtime { return a.rt.Load() }
 
 // ConfigPath 是配置文件的路径，只用默认值时为空。
 func (a *App) ConfigPath() string { return a.opt.ConfigPath }
+
+// ConfigFile 返回配置文件现在的内容（最近一次成功加载的），只用默认值时为空。
+func (a *App) ConfigFile() []byte {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.fileRaw
+}
 
 // LastReload 返回最近一次重载的结果，没有重载过时为 nil。
 func (a *App) LastReload() *ReloadStatus { return a.reload.Load() }
@@ -229,11 +254,17 @@ func fingerprint(parts ...any) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// build 由配置和当前的运营数据生成 Runtime。prev 不为 nil 时尽量沿用其中的连接池和缓存。
-func (a *App) build(cfg *config.Config, prev *Runtime) (*Runtime, error) {
+// build 由配置和当前的运营数据生成 Runtime，还没有生效：生效用 commit，不用了用 discard。
+// prev 不为 nil 时尽量沿用其中的连接池和缓存。
+func (a *App) build(cfg *config.Config, prev *Runtime) (_ *Runtime, err error) {
 	data := a.Store.Data()
 	now := time.Now()
 	rt := &Runtime{Config: cfg, Data: data, Built: now}
+	defer func() {
+		if err != nil && rt.Pool != nil {
+			a.discard(rt, prev)
+		}
+	}()
 
 	// 客户端账号：配置文件里的优先，运营数据库里同名的忽略
 	rt.Users = map[string]*access.User{}
@@ -331,14 +362,8 @@ func (a *App) build(cfg *config.Config, prev *Runtime) (*Runtime, error) {
 	rt.poolKey = fingerprint(ups, credHash, cfg.Proxy, cfg.Timeouts)
 	if prev != nil && prev.poolKey == rt.poolKey {
 		rt.Pool = prev.Pool
-	} else {
-		if rt.Pool, err = upstream.NewPool(&ucfg, a.withLog(a.opt.Upstream)); err != nil {
-			return nil, err
-		}
-		if prev != nil {
-			old := prev.Pool
-			time.AfterFunc(2*time.Minute, old.Close) // 进行中的请求继续用旧的，空闲连接稍后关掉
-		}
+	} else if rt.Pool, err = upstream.NewPool(&ucfg, a.withLog(a.opt.Upstream)); err != nil {
+		return nil, err
 	}
 	rt.cacheKey = fingerprint(cfg.Cache, cfg.Limits.MaxManifestBuffers, cfg.Timeouts.ResponseHeader)
 	if prev != nil && prev.cacheKey == rt.cacheKey {
@@ -386,8 +411,27 @@ func (a *App) build(cfg *config.Config, prev *Runtime) (*Runtime, error) {
 	if rt.Web, err = web.New(&wcfg, func() any { return a.StatusReport() }); err != nil {
 		return nil, err
 	}
-	a.Limiter.SetConfig(limitConfig(cfg))
+	if prev != nil {
+		rt.FileConfig, rt.Overrides = prev.FileConfig, prev.Overrides
+	}
 	return rt, nil
+}
+
+// commit 让 build 生成的 rt 生效：换下来的连接池稍后关掉（进行中的请求继续用旧的），限流设置跟着换。
+func (a *App) commit(rt, prev *Runtime) {
+	if prev != nil && prev.Pool != rt.Pool {
+		old := prev.Pool
+		time.AfterFunc(2*time.Minute, old.Close)
+	}
+	a.Limiter.SetConfig(limitConfig(rt.Config))
+	a.rt.Store(rt)
+}
+
+// discard 丢掉 build 生成、但不再生效的 rt：它新建的连接池关掉。
+func (a *App) discard(rt, prev *Runtime) {
+	if prev == nil || prev.Pool != rt.Pool {
+		rt.Pool.Close()
+	}
 }
 
 func (a *App) withLog(o upstream.Options) upstream.Options {
@@ -406,7 +450,7 @@ func (a *App) Rebuild() error {
 	if err != nil {
 		return err
 	}
-	a.rt.Store(rt)
+	a.commit(rt, prev)
 	return nil
 }
 
@@ -414,6 +458,7 @@ func (a *App) Rebuild() error {
 var ErrNoConfigFile = errors.New("没有配置文件，只在用默认值")
 
 // ReloadConfig 重新读取配置文件并替换 Runtime。配置有错时保留原来的设置并返回错误。
+// 后台对配置的修改重新叠加上去，和配置文件冲突的暂停（配置文件是基准，和重启时一样）。
 func (a *App) ReloadConfig() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -435,21 +480,23 @@ func (a *App) ReloadConfig() error {
 		return err
 	}
 	prev := a.rt.Load()
-	rt, err := a.build(res.Config, prev)
+	rt, eff, err := a.assemble(raw, res, prev)
 	if err != nil {
 		st.Err = err.Error()
 		a.log.Error("新配置无法生效，保留原来的设置", "err", err)
 		return err
 	}
-	st.Restart = restartNeeded(prev.Config, res.Config)
-	for _, w := range res.Warnings {
+	st.Restart = restartNeeded(prev.Config, eff.Config)
+	for _, w := range eff.Warnings {
 		a.log.Warn(w)
 	}
 	if len(st.Restart) > 0 {
 		a.log.Warn("这些改动要重启才能生效", "fields", strings.Join(st.Restart, ", "))
 	}
-	a.rt.Store(rt)
+	a.noteOverrides(prev.Overrides, rt.Overrides)
+	a.commit(rt, prev)
 	a.cfgHash = sha256.Sum256(raw)
+	a.fileRaw, a.warnings = raw, eff.Warnings
 	a.log.Info("已重新加载配置", "path", a.opt.ConfigPath)
 	return nil
 }
@@ -463,7 +510,10 @@ func restartNeeded(old, cur *config.Config) []string {
 		}
 	}
 	check("listen", old.Listen, cur.Listen)
-	check("tls", old.TLS, cur.TLS)
+	// ACME 的域名随时按生效的配置放行（入口可以在后台改），不用重启
+	ot, ct := old.TLS, cur.TLS
+	ot.ACME.Hosts, ct.ACME.Hosts = nil, nil
+	check("tls", ot, ct)
 	check("data_dir", old.DataDir, cur.DataDir)
 	check("admin.store", old.Admin.Store, cur.Admin.Store)
 	check("log.access", old.Log.Access, cur.Log.Access)

@@ -198,7 +198,10 @@ type Admin struct {
 	Allow []string `yaml:"allow"`
 	// ProxiedAllow：经反向代理访问后台时，允许的客户端地址（取自受信任代理的 X-Forwarded-For）。
 	// 默认为空，即不允许经代理访问；要用时还得写 public_url 和 client_ip.trusted_proxies。
-	ProxiedAllow []string     `yaml:"proxied_allow"`
+	ProxiedAllow []string `yaml:"proxied_allow"`
+	// ConfigEdit：允许在后台改配置（入口、上游、限流、缓存等，存在运营数据库里，叠加在配置文件之上）。
+	// 默认打开；写 false 时后台的修改一律不生效，只能重置，配置全部以配置文件为准（适合严格的 GitOps）。
+	ConfigEdit   bool         `yaml:"config_edit"`
 	Store        Store        `yaml:"store"`
 	InitialAdmin InitialAdmin `yaml:"initial_admin"`
 	// APITokens 是写在配置里的管理 API 令牌（适合自动化和 k8s Secret）。也可以在后台创建，存进运营数据库。

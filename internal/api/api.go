@@ -12,6 +12,7 @@ package api
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/netip"
 	"runtime"
@@ -97,6 +98,10 @@ func New(a *app.App, o *ops.Ops, opt Options) *API {
 	r("DELETE /site", "admin", x.resetSite)
 	r("GET /audit", "viewer", x.audit)
 	r("GET /config", "viewer", x.config)
+	r("GET /config/overrides", "viewer", x.listOverrides)
+	r("PUT /config/overrides/{key...}", "admin", x.setOverride)
+	r("DELETE /config/overrides/{key...}", "admin", x.resetOverride)
+	r("GET /config/export", "viewer", x.exportConfig)
 	r("POST /reload", "admin", x.reload)
 	return x
 }
@@ -462,13 +467,51 @@ func (x *API) audit(w http.ResponseWriter, r *http.Request, _ ops.Actor) {
 	writeJSON(w, http.StatusOK, x.app.Store.AuditLog(intParam(r, "limit", 100, 1, 1000)))
 }
 
-func (x *API) config(w http.ResponseWriter, _ *http.Request, _ ops.Actor) {
-	b, err := x.app.Runtime().Config.Print()
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+// config 是生效的配置（叠加了后台的修改）；?view=file 是只按配置文件的。
+func (x *API) config(w http.ResponseWriter, r *http.Request, _ ops.Actor) {
+	b, err := x.ops.ConfigText(r.URL.Query().Get("view"))
+	done(w, err, http.StatusOK, map[string]string{"yaml": string(b)})
+}
+
+func (x *API) listOverrides(w http.ResponseWriter, _ *http.Request, _ ops.Actor) {
+	writeJSON(w, http.StatusOK, map[string]any{"editable": x.ops.ConfigEditable(), "overrides": x.ops.Overrides()})
+}
+
+// setOverride 的请求体是这一段的 JSON：limits、cache、proxy、site、upstreams/<名字> 是对象，entrances 是数组。
+func (x *API) setOverride(w http.ResponseWriter, r *http.Request, who ops.Actor) {
+	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		writeErr(w, http.StatusUnsupportedMediaType, "请求体要用 application/json")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"yaml": string(b)})
+	body, err := io.ReadAll(r.Body)
+	if err != nil || !json.Valid(body) {
+		writeErr(w, http.StatusBadRequest, "请求体不是合法的 JSON")
+		return
+	}
+	key := r.PathValue("key")
+	warnings, err := x.ops.SetConfig(who, key, string(body))
+	if err != nil {
+		writeOpsErr(w, err)
+		return
+	}
+	// 全都和配置文件一样时这一处被去掉，override 为 null
+	var cur *ops.OverrideView
+	for _, o := range x.ops.Overrides() {
+		if o.Key == key {
+			cur = &o
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"override": cur, "warnings": append([]string{}, warnings...)})
+}
+
+func (x *API) resetOverride(w http.ResponseWriter, r *http.Request, who ops.Actor) {
+	done(w, x.ops.ResetConfig(who, r.PathValue("key")), http.StatusNoContent, nil)
+}
+
+// exportConfig 导出生效中的后台修改：?format=overrides（默认，只有改过的部分）或 merged（合进配置文件）。
+func (x *API) exportConfig(w http.ResponseWriter, r *http.Request, _ ops.Actor) {
+	b, err := x.ops.ExportConfig(r.URL.Query().Get("format"))
+	done(w, err, http.StatusOK, map[string]string{"yaml": string(b)})
 }
 
 func (x *API) reload(w http.ResponseWriter, _ *http.Request, who ops.Actor) {

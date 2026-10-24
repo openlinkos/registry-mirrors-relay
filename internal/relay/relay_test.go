@@ -110,7 +110,7 @@ func newEnvStore(t *testing.T, extra string, st store.Store) *env {
 	}
 	e.cfg = res.Config
 	log := slog.New(slog.DiscardHandler)
-	e.app, err = app.New(res, nil, app.Options{
+	e.app, err = app.New(res, []byte(testConfig+extra), app.Options{
 		Upstream: upstream.Options{DialContext: n.DialContext, RootCAs: n.CA.Pool, Log: log},
 		Log:      log, Store: st, Hook: e.logs.Log,
 	})

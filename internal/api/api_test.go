@@ -33,13 +33,14 @@ func newEnv(t *testing.T, st store.Store) *env {
 	t.Helper()
 	t.Setenv("T_ADMIN", adminTok)
 	t.Setenv("T_VIEWER", viewerTok)
-	res, err := config.Parse([]byte(`
+	raw := []byte(`
 log: {access: {output: "off"}}
 admin:
   api_tokens:
     - {name: ops, role: admin, token: {env: T_ADMIN}}
     - {name: grafana, role: viewer, token: {env: T_VIEWER}}
-`))
+`)
+	res, err := config.Parse(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +51,7 @@ admin:
 		}
 		st = bs
 	}
-	a, err := app.New(res, nil, app.Options{Log: slog.New(slog.DiscardHandler), Store: st})
+	a, err := app.New(res, raw, app.Options{Log: slog.New(slog.DiscardHandler), Store: st})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,5 +301,82 @@ func TestAdminsAndSite(t *testing.T) {
 	}
 	if code, _, _ := e.call(t, "POST", "/upstreams/nope.example/check", adminTok, nil); code != 404 {
 		t.Fatalf("探测不存在的上游：%d", code)
+	}
+}
+
+func TestConfigOverrides(t *testing.T) {
+	e := newEnv(t, nil)
+	code, m, raw := e.call(t, "PUT", "/config/overrides/limits", adminTok, map[string]any{"max_inflight": 50, "manifest_rate": 2})
+	if code != 200 || e.app.Runtime().Config.Limits.MaxInflight != 50 {
+		t.Fatalf("改限流：%d %s", code, raw)
+	}
+	// manifest_rate 和配置文件（默认值）一样，不存
+	if ov := m["override"].(map[string]any); ov["state"] != "active" || strings.Contains(ov["value"].(string), "manifest_rate") {
+		t.Fatalf("返回存下的修改：%v", ov)
+	}
+	code, _, raw = e.call(t, "PUT", "/config/overrides/upstreams/cr.example.com", adminTok, map[string]any{"registry": "registry.example.com"})
+	if code != 200 || !strings.Contains(string(raw), "token_realm_hosts") {
+		t.Fatalf("新建上游，返回提醒：%d %s", code, raw)
+	}
+	if code, _, _ := e.call(t, "PUT", "/config/overrides/entrances", adminTok, []map[string]any{{"hosts": []string{"cr.example.com"}, "upstream": "cr.example.com"}, {"hosts": []string{"*"}}}); code != 200 {
+		t.Fatalf("改入口：%d", code)
+	}
+	if e := e.app.Runtime().Router.Entrance("cr.example.com"); e == nil || e.Upstream != "cr.example.com" {
+		t.Fatal("新入口应立即生效")
+	}
+	for _, c := range []struct {
+		path string
+		body any
+		code int
+	}{
+		{"/config/overrides/listen", map[string]any{"http": ":80"}, 422},
+		{"/config/overrides/admin", map[string]any{"allow": []string{"0.0.0.0/0"}}, 422},
+		{"/config/overrides/limits", map[string]any{"tracked_clients": 1}, 422},
+		{"/config/overrides/entrances", []map[string]any{{"hosts": []string{"x.example.com"}, "upstream": "nope.example.com"}}, 422},
+	} {
+		if code, m, _ := e.call(t, "PUT", c.path, adminTok, c.body); code != c.code || !strings.Contains(m["error"].(string), "没有保存") {
+			t.Errorf("%s：%d %v", c.path, code, m)
+		}
+	}
+	if code, _, _ := e.call(t, "PUT", "/config/overrides/limits", viewerTok, map[string]any{"max_inflight": 1}); code != 403 {
+		t.Fatal("viewer 不能改")
+	}
+	code, m, _ = e.call(t, "GET", "/config/overrides", viewerTok, nil)
+	if code != 200 || m["editable"] != true || len(m["overrides"].([]any)) != 3 {
+		t.Fatalf("列表：%d %v", code, m)
+	}
+	_, m, _ = e.call(t, "GET", "/config", viewerTok, nil)
+	if !strings.Contains(m["yaml"].(string), "max_inflight: 50") {
+		t.Fatal("生效的配置叠加了后台的修改")
+	}
+	_, m, _ = e.call(t, "GET", "/config?view=file", viewerTok, nil)
+	if strings.Contains(m["yaml"].(string), "max_inflight: 50") {
+		t.Fatal("view=file 只按配置文件")
+	}
+	_, m, _ = e.call(t, "GET", "/config/export", viewerTok, nil)
+	if y := m["yaml"].(string); !strings.Contains(y, "max_inflight: 50") || !strings.Contains(y, "cr.example.com") {
+		t.Fatalf("导出：%s", y)
+	}
+	_, m, _ = e.call(t, "GET", "/config/export?format=merged", viewerTok, nil)
+	if y := m["yaml"].(string); !strings.Contains(y, "T_ADMIN") || !strings.Contains(y, "max_inflight: 50") {
+		t.Fatalf("合并导出：%s", y)
+	}
+	if code, _, _ := e.call(t, "GET", "/config/export?format=zip", viewerTok, nil); code != 400 {
+		t.Fatal("不认识的格式")
+	}
+	if code, _, _ := e.call(t, "DELETE", "/config/overrides/limits", adminTok, nil); code != 204 || e.app.Runtime().Config.Limits.MaxInflight == 50 {
+		t.Fatal("重置后回到配置文件的值")
+	}
+	if code, _, _ := e.call(t, "DELETE", "/config/overrides/limits", adminTok, nil); code != 404 {
+		t.Fatal("重置没改过的返回 404")
+	}
+	_, _, raw = e.call(t, "GET", "/audit", viewerTok, nil)
+	if !strings.Contains(string(raw), `"config.override.set"`) || !strings.Contains(string(raw), `"config.override.reset"`) {
+		t.Fatalf("审计：%s", raw)
+	}
+	// 只读存储
+	ro := newEnv(t, store.NewReadOnly())
+	if code, _, _ := ro.call(t, "PUT", "/config/overrides/limits", adminTok, map[string]any{"max_inflight": 5}); code != 409 {
+		t.Fatalf("只读存储：%d", code)
 	}
 }

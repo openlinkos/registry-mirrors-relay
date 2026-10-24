@@ -48,6 +48,13 @@ var messages = map[string][2]string{
 	"site.link":              {"链接 {v} 要写完整的 http(s) 地址", "The {v} link must be a full http(s) address."},
 	"store.readonly":         {"运营数据是只读的（admin.store.driver: none），请改配置文件", "Operational data is read-only (admin.store.driver: none). Change the configuration file instead."},
 	"reload.failed":          {"重新加载配置失败", "Reloading the configuration failed"},
+	"config.invalid":         {"配置没有保存", "The configuration was not saved"},
+	"config.edit_off":        {"配置文件里写了 admin.config_edit: false，后台不能改配置，只能重置", "The configuration file sets admin.config_edit: false, so the configuration cannot be changed here, only reset."},
+	"config.not_found":       {"{v} 没有在后台改过", "{v} has not been changed here."},
+	"config.view":            {"view 只能是 effective 或 file", "The view must be effective or file."},
+	"config.format":          {"format 只能是 overrides 或 merged", "The format must be overrides or merged."},
+	"config.upstreamName":    {"上游名应该是镜像地址里的 registry 写法，如 registry.example.com（小写，至少有一个点）", "The upstream name must be written as in image names, such as registry.example.com (lowercase, with at least one dot)."},
+	"config.upstreamExists":  {"已经有上游 {v}，请在列表里修改它", "The upstream {v} already exists; change it from the list."},
 }
 
 // Message 返回这个错误在 lang（zh 或 en）下的说明。

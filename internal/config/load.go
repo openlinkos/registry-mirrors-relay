@@ -33,11 +33,15 @@ func Load(path string) (*Result, error) {
 func LoadDefaults() (*Result, error) { return Parse(nil) }
 
 // Parse 解析配置内容。空内容等于只用默认值。
-func Parse(b []byte) (*Result, error) {
+func Parse(b []byte) (*Result, error) { return ParseWithOverrides(b, nil) }
+
+// ParseWithOverrides 解析配置内容，再叠加后台对配置的修改（见 Override），和 Parse 一样合并默认值、校验、解析密钥。
+func ParseWithOverrides(b []byte, ovs []Override) (*Result, error) {
 	cfg := Defaults()
 	userUpstreams := map[string][]byte{}
 	var warnings []string
 
+	top := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	if len(bytes.TrimSpace(b)) > 0 {
 		var root yaml.Node
 		if err := yaml.Unmarshal(b, &root); err != nil {
@@ -46,12 +50,17 @@ func Parse(b []byte) (*Result, error) {
 		if root.Kind != yaml.DocumentNode || len(root.Content) != 1 || root.Content[0].Kind != yaml.MappingNode {
 			return nil, errors.New("配置的最外层应该是键值对")
 		}
-		top := root.Content[0]
+		top = root.Content[0]
 		removedWarn, err := checkRemoved(top)
 		if err != nil {
 			return nil, err
 		}
 		warnings = append(warnings, removedWarn...)
+	}
+	if err := applyOverrides(top, ovs); err != nil {
+		return nil, err
+	}
+	if len(top.Content) > 0 {
 		// upstreams 单独处理：每个上游在内置定义的基础上覆盖字段，不能整个替换
 		for i := 0; i+1 < len(top.Content); i += 2 {
 			if top.Content[i].Value != "upstreams" {
@@ -200,31 +209,7 @@ func mergeUpstreams(user map[string][]byte) (map[string]*Upstream, error) {
 
 // normalize 统一大小写，并补上依赖其他字段的默认值。
 func normalize(c *Config) {
-	for i := range c.Entrances {
-		e := &c.Entrances[i]
-		for j, h := range e.Hosts {
-			e.Hosts[j] = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(h)), ".")
-		}
-		e.Upstream = strings.ToLower(e.Upstream)
-		e.DefaultUpstream = strings.ToLower(e.DefaultUpstream)
-		if e.Upstream == "" && e.DefaultUpstream == "" {
-			e.DefaultUpstream = DefaultUpstream
-		}
-		if e.Auth == "" {
-			e.Auth = "none"
-		}
-		if e.Page == "" {
-			e.Page = "public"
-		}
-		if e.Name == "" {
-			switch {
-			case len(e.Hosts) > 0:
-				e.Name = e.Hosts[0]
-			default:
-				e.Name = fmt.Sprintf("entrance-%d", i+1)
-			}
-		}
-	}
+	normalizeEntrances(c.Entrances)
 	for _, u := range c.Upstreams {
 		u.Registry = strings.ToLower(u.Registry)
 		for i, a := range u.Aliases {
@@ -254,6 +239,35 @@ func normalize(c *Config) {
 	}
 	if c.Site.Links == nil {
 		c.Site.Links = map[string]string{}
+	}
+}
+
+// normalizeEntrances 统一入口的大小写，补上默认值。
+func normalizeEntrances(es []Entrance) {
+	for i := range es {
+		e := &es[i]
+		for j, h := range e.Hosts {
+			e.Hosts[j] = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(h)), ".")
+		}
+		e.Upstream = strings.ToLower(e.Upstream)
+		e.DefaultUpstream = strings.ToLower(e.DefaultUpstream)
+		if e.Upstream == "" && e.DefaultUpstream == "" {
+			e.DefaultUpstream = DefaultUpstream
+		}
+		if e.Auth == "" {
+			e.Auth = "none"
+		}
+		if e.Page == "" {
+			e.Page = "public"
+		}
+		if e.Name == "" {
+			switch {
+			case len(e.Hosts) > 0:
+				e.Name = e.Hosts[0]
+			default:
+				e.Name = fmt.Sprintf("entrance-%d", i+1)
+			}
+		}
 	}
 }
 
