@@ -29,7 +29,7 @@ docker run -d --name registry-mirrors-relay --restart unless-stopped \
   -v relay-data:/var/lib/registry-mirrors-relay \
   -v "$PWD/admin-password:/run/secrets/admin_password:ro" \
   -e RELAY_ADMIN_PASSWORD_FILE=/run/secrets/admin_password \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.1.2
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.1.3
 ```
 
 - 拉取：`docker pull 服务器:8080/library/alpine`（明文时要把 `服务器:8080` 加进 Docker 的 `insecure-registries`；正式使用请放在 HTTPS 之后，见[部署](docs/deploy.md)）。
@@ -55,6 +55,7 @@ Docker Compose（CDN 之后、直接用 ACME、Caddy 在前三种）、Kubernete
 
 - **拉取入口**：按域名、端口或单域名（路径前缀、`ns`、根路径）的入口；HTTPS 可以用证书文件（自动重新加载）或 ACME 自动申请。
 - **省额度、省资源**：manifest 在内存里缓存（有上限），按 tag 拉取时先用不计次数的 HEAD 确认；镜像层流式转发，每个流一块 16 KiB 缓冲。
+- **用法页和服务状态**：打开域名就能看到加速地址、地址转换和各客户端的配置，以及各上游的连通性、近 24 小时的可用率和本站的请求成功率。需要登录的入口默认只有拉取要登录，用法页也可以设成要登录或关掉。见[部署](docs/deploy.md#用法页和服务状态)。
 - **访问控制**：需要登录的入口（bcrypt 账号）、IP 黑白名单、临时封禁、镜像黑白名单（403 或 451）、按账号或 IP 的限流。
 - **管理后台和 API**：概览、上游状态和 Docker Hub 剩余额度、客户端配置生成、账号、规则、限流、请求、滥用、审计、管理员与令牌，中英文、深浅色。见 [docs/admin.md](docs/admin.md)、[docs/api.md](docs/api.md)。
 - **运维**：Prometheus 指标、Caddy 格式的访问日志、配置热重载（SIGHUP、文件变化、后台按钮）、优雅退出、按容器内存上限自动设置 GOMEMLIMIT。

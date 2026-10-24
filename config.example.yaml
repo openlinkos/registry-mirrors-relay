@@ -24,6 +24,8 @@ site:
     home: https://linkos.org
     status: https://uptime.linkos.org
     source: https://github.com/openlinkos/registry-mirrors-relay
+  # 用法页上显示服务状态（/status.json）：各上游的连通性和近 24 小时的可用率、本站的请求成功率。默认打开
+  # show_status: true
 
 entrances:
   # 单域名入口：
@@ -45,9 +47,11 @@ entrances:
   - hosts: [quay.example.com]
     upstream: quay.io
 
-  # 需要登录的入口：账号在 access.users_file 或管理后台里；用法页也要登录
+  # 需要登录的入口：账号在 access.users_file 或管理后台里。用法页默认谁都能看，只有拉取要登录；
+  # page: login 时用法页也要登录，page: off 时不提供用法页
   # - hosts: [private.example.com]
   #   auth: basic
+  #   page: public
 
 upstreams:
   # 内置 docker.io、gcr.io、ghcr.io、registry.k8s.io、quay.io。同名的上游只写要改的字段。

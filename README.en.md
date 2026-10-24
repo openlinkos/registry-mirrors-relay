@@ -29,7 +29,7 @@ docker run -d --name registry-mirrors-relay --restart unless-stopped \
   -v relay-data:/var/lib/registry-mirrors-relay \
   -v "$PWD/admin-password:/run/secrets/admin_password:ro" \
   -e RELAY_ADMIN_PASSWORD_FILE=/run/secrets/admin_password \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.1.2
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.1.3
 ```
 
 - Pull: `docker pull server:8080/library/alpine` (over plain HTTP, add `server:8080` to Docker's `insecure-registries`; for real use put it behind HTTPS, see [Deployment](docs/deploy.en.md)).
@@ -55,6 +55,7 @@ Docker Hub, gcr.io, ghcr.io, registry.k8s.io and quay.io are built in; more upst
 
 - **Pull entrances**: by host, by port or single-domain (path prefix, `ns`, root path); HTTPS with certificate files (reloaded on change) or ACME.
 - **Saves quota and resources**: manifests are cached in memory with a cap, and pulls by tag are confirmed with a HEAD, which Docker Hub does not count; layers are streamed with one 16 KiB buffer per stream.
+- **Usage page and service status**: opening a host shows the mirror addresses, an address converter and configuration for each client, plus each upstream's reachability, its availability over the last 24 hours and this site's request success rate. On entrances that require sign-in only pulls need it by default; the page can also require sign-in or be turned off. See [Deployment](docs/deploy.en.md#usage-page-and-service-status).
 - **Access control**: entrances that require sign-in (bcrypt accounts), IP allow and deny lists, temporary bans, image allow and deny rules (403 or 451), rate limits per account or IP.
 - **Admin console and API**: overview, upstream status and Docker Hub quota left, client configuration, accounts, rules, rate limits, requests, abuse, audit log, admins and tokens; Chinese and English, light and dark. See [docs/admin.en.md](docs/admin.en.md) and [docs/api.en.md](docs/api.en.md).
 - **Operations**: Prometheus metrics, Caddy-format access logs, hot reload (SIGHUP, file changes, a button in the console), graceful shutdown, GOMEMLIMIT set from the container's memory limit.

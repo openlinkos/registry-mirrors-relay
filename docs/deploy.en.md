@@ -45,7 +45,7 @@ docker run -d --name registry-mirrors-relay --restart unless-stopped \
   -v relay-data:/var/lib/registry-mirrors-relay \
   -v "$PWD/admin-password:/run/secrets/admin_password:ro" \
   -e RELAY_ADMIN_PASSWORD_FILE=/run/secrets/admin_password \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.1.2
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.1.3
 ```
 
 - The image carries a configuration: pull entrance 8080, console 9090, metrics 9180, one single-domain entrance for any host name. To change it, mount your own at `/etc/registry-mirrors-relay/config.yaml` (see [`config.example.yaml`](../config.example.yaml)); inside a container, `listen.admin` and `listen.metrics` must be `:9090` and `:9180`.
@@ -103,9 +103,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: registry-mirror
 resources:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.1.2
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.1.3
 components:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.1.2
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.1.3
 ```
 
 ```bash
@@ -168,7 +168,7 @@ kubectl create namespace registry-mirror
 openssl rand -base64 18 > admin-password
 kubectl -n registry-mirror create secret generic registry-mirrors-relay-admin --from-file=password=admin-password
 rm admin-password
-helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version 0.1.2 \
+helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version 0.1.3 \
   -n registry-mirror -f values.yaml
 helm test registry-mirrors-relay -n registry-mirror
 kubectl -n registry-mirror port-forward svc/registry-mirrors-relay-admin 9090   # then open http://127.0.0.1:9090/admin/
@@ -212,20 +212,30 @@ cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 sha256sum --ignore-missing -c SHA256SUMS
 
-cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.1.2 \
+cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.1.3 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.1.2 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.1.3 -R openlinkos/registry-mirrors-relay
 
-cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.1.2 \
+cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.1.3 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.1.2 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.1.3 -R openlinkos/registry-mirrors-relay
 ```
+
+## Usage page and service status
+
+Opening any entrance's host in a browser shows the usage page: the mirror address for each upstream, an address converter, configuration for Docker, containerd, k3s and Podman, and the **service status**:
+
+- Whether each upstream is reachable right now and how fast it answers; upstreams behind an open circuit breaker are marked. The relay requests every upstream's `/v2/` once a minute (`proxy.health_interval`), which does not count against pull quotas.
+- One bar per hour for the last 24 hours: each upstream's availability, and this site's request success rate (the share of responses that are not 5xx; hours with fewer than 20 requests are not counted).
+- Version and uptime. The figures live in memory and start again after a restart.
+
+The page reads `/status.json` and refreshes it every minute. Anyone can fetch it, so it holds only what is safe to publish: failures are reduced to a category (timeout, DNS, connection, TLS, HTTP status), never the raw error, addresses, upstream quotas or request counts. Set `site.show_status: false` to turn it off.
 
 ## Entrances that require sign-in and Docker's registry-mirrors
 
-On an entrance with `auth: basic` the usage page needs a sign-in too; visitors without an account only get a 401.
+On such an entrance the usage page is open to everyone by default and only pulls need a sign-in; the page tells visitors to `docker login` first. To show the page only to signed-in users, set `page: login` on the entrance; to have no page at all, set `page: off` (pulls only, the host answers 404).
 
 With `auth: basic` on an entrance, Docker's `registry-mirrors` in `daemon.json` cannot be used: Docker does not send the credentials stored by `docker login` to registry mirrors. For such entrances use the path prefix (`docker login mirror.example.com`, then `docker pull mirror.example.com/docker.io/library/nginx`), or a header in containerd's `hosts.toml`:
 

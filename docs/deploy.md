@@ -45,7 +45,7 @@ docker run -d --name registry-mirrors-relay --restart unless-stopped \
   -v relay-data:/var/lib/registry-mirrors-relay \
   -v "$PWD/admin-password:/run/secrets/admin_password:ro" \
   -e RELAY_ADMIN_PASSWORD_FILE=/run/secrets/admin_password \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.1.2
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.1.3
 ```
 
 - 镜像自带一份配置：拉取入口 8080，管理后台 9090，指标 9180，一个匹配任意域名的单域名入口。要改就把自己的配置挂到 `/etc/registry-mirrors-relay/config.yaml`（写法见 [`config.example.yaml`](../config.example.yaml)）；容器里 `listen.admin`、`listen.metrics` 要写成 `:9090`、`:9180`。
@@ -103,9 +103,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: registry-mirror
 resources:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.1.2
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.1.3
 components:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.1.2
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.1.3
 ```
 
 ```bash
@@ -168,7 +168,7 @@ kubectl create namespace registry-mirror
 openssl rand -base64 18 > admin-password
 kubectl -n registry-mirror create secret generic registry-mirrors-relay-admin --from-file=password=admin-password
 rm admin-password
-helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version 0.1.2 \
+helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version 0.1.3 \
   -n registry-mirror -f values.yaml
 helm test registry-mirrors-relay -n registry-mirror
 kubectl -n registry-mirror port-forward svc/registry-mirrors-relay-admin 9090   # 打开 http://127.0.0.1:9090/admin/
@@ -212,20 +212,30 @@ cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 sha256sum --ignore-missing -c SHA256SUMS
 
-cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.1.2 \
+cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.1.3 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.1.2 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.1.3 -R openlinkos/registry-mirrors-relay
 
-cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.1.2 \
+cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.1.3 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.1.2 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.1.3 -R openlinkos/registry-mirrors-relay
 ```
+
+## 用法页和服务状态
+
+浏览器打开任一入口的域名，看到的是用法页：各上游的加速地址、地址转换、Docker、containerd、k3s、Podman 的配置，以及**服务状态**：
+
+- 各上游现在能不能连通、延迟多少，熔断的上游会标出来。relay 每分钟（`proxy.health_interval`）请求一次各上游的 `/v2/`，不计入拉取额度。
+- 近 24 小时每小时一格：上游的可用率，以及本站的请求成功率（非 5xx 的比例，请求少于 20 个的小时不算）。
+- 版本和已运行时长。数据只在内存里，重启后从头统计。
+
+数据来自 `/status.json`，页面每分钟刷新一次。这个接口谁都能访问，所以只有公开也无妨的内容：失败原因只给分类（超时、DNS、连接、TLS、HTTP 状态码），不给错误原文、地址、上游额度和请求量。不想显示时写 `site.show_status: false`。
 
 ## 需要登录的入口和 Docker 的 registry-mirrors
 
-这类入口的用法页也要登录，没登录的人只会看到 401。
+这类入口的用法页默认谁都能看，只有拉取要登录，页面会提示先 `docker login`。要连用法页也只给登录的人看，入口写 `page: login`；不要用法页写 `page: off`（只剩拉取，打开域名是 404）。
 
 入口配了 `auth: basic` 时，Docker 的 `daemon.json` 里的 `registry-mirrors` 用不了：Docker 访问镜像源时不会带 `docker login` 存下的账号。这类入口请用路径前缀（`docker login mirror.example.com` 后 `docker pull mirror.example.com/docker.io/library/nginx`），或者 containerd 的 `hosts.toml` 加上请求头：
 
