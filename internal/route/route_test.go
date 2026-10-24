@@ -19,7 +19,7 @@ entrances:
     upstream: ghcr.io
   - hosts: [gcr.example.com]
     upstream: gcr.io
-  - listen: ":5005"
+  - hosts: [quay.example.com]
     upstream: quay.io
   - hosts: ["*"]
 `))
@@ -47,22 +47,26 @@ func TestEntranceLookup(t *testing.T) {
 		"10.0.0.1:8080":          "*",
 		"[::1]:8080":             "*",
 	} {
-		e := r.Entrance(MainListener, host)
+		e := r.Entrance(host)
 		if e == nil || e.Name != want {
 			t.Errorf("%s：期望入口 %s，实际 %+v", host, want, e)
 		}
 	}
-	if e := r.Entrance(":5005", "anything"); e == nil || e.Upstream != "quay.io" {
-		t.Fatalf("按端口的入口：%+v", e)
+	if e := r.Entrance("quay.example.com"); e == nil || e.Upstream != "quay.io" {
+		t.Fatalf("固定上游的入口：%+v", e)
 	}
-	if e := r.Entrance(":9999", "x"); e != nil {
-		t.Fatal("没有配置的监听不应有入口")
+	res, err := config.Parse([]byte("entrances: [{hosts: [only.example.com]}]"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := New(res.Config).Entrance("other.example.com"); e != nil {
+		t.Fatal("没有匹配的入口时应返回 nil")
 	}
 }
 
 func TestParseAllInOne(t *testing.T) {
 	r := testRouter(t)
-	e := r.Entrance(MainListener, "mirror.example.com")
+	e := r.Entrance("mirror.example.com")
 	cases := []struct {
 		path, up, repo, client string
 		kind                   Kind
@@ -98,7 +102,7 @@ func TestParseAllInOne(t *testing.T) {
 
 func TestParseFixedEntrance(t *testing.T) {
 	r := testRouter(t)
-	e := r.Entrance(MainListener, "gcr.example.com")
+	e := r.Entrance("gcr.example.com")
 	// 固定上游的入口不把第一段当 registry：gcr.io 上的 google.com/... 是一个仓库
 	tg, err := parse(t, r, e, "/v2/google.com/cloudsdktool/cloud-sdk/manifests/slim")
 	if err != nil || tg.Upstream != "gcr.io" || tg.Repo != "google.com/cloudsdktool/cloud-sdk" {
@@ -119,7 +123,7 @@ func TestParseFixedEntrance(t *testing.T) {
 
 func TestParseRejects(t *testing.T) {
 	r := testRouter(t)
-	e := r.Entrance(MainListener, "mirror.example.com")
+	e := r.Entrance("mirror.example.com")
 	for path, status := range map[string]int{
 		"/v2/_catalog":                                     404,
 		"/v2/x/blobs/uploads/":                             404,
@@ -149,7 +153,7 @@ func TestParseRejects(t *testing.T) {
 
 func TestLinkRewrite(t *testing.T) {
 	r := testRouter(t)
-	e := r.Entrance(MainListener, "mirror.example.com")
+	e := r.Entrance("mirror.example.com")
 	tg, _ := parse(t, r, e, "/v2/docker.io/nginx/tags/list?n=2")
 	if tg.Query.Get("n") != "2" {
 		t.Fatalf("n 应转发：%v", tg.Query)
@@ -176,7 +180,7 @@ func FuzzParse(f *testing.F) {
 		f.Fatal(err)
 	}
 	r := New(res.Config)
-	e := r.Entrance(MainListener, "x")
+	e := r.Entrance("x")
 	f.Fuzz(func(t *testing.T, raw string) {
 		u, err := url.Parse(raw)
 		if err != nil {

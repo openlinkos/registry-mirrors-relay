@@ -62,6 +62,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if e.Status == 0 {
 			e.Status = 499 // 没来得及写响应，客户端已经走了
 		}
+		if e.Error == "" {
+			e.Error = accesslog.NoteFrom(r.Context())
+		}
 		e.RespContentLength = rec.Header().Get("Content-Length")
 		e.RespContentType = rec.Header().Get("Content-Type")
 		h.App.Log(e)
@@ -90,7 +93,7 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 		writeError(w, r, http.StatusRequestEntityTooLarge, "SIZE_INVALID", "请求体太大")
 		return
 	}
-	ent := rt.Router.Entrance(route.ListenerFrom(r.Context()), r.Host)
+	ent := rt.Router.Entrance(r.Host)
 	isV2 := r.URL.Path == "/v2" || strings.HasPrefix(r.URL.Path, "/v2/")
 	if ent == nil {
 		if isV2 {

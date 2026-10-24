@@ -67,9 +67,7 @@ func Defaults() *Config {
 	return &Config{
 		DataDir: "/var/lib/registry-mirrors-relay",
 		Listen: Listen{
-			HTTP:    ":8080",
-			Admin:   "127.0.0.1:9090",
-			Metrics: "127.0.0.1:9180",
+			HTTP: ":8080",
 		},
 		TLS: TLS{Mode: "off"},
 		Site: Site{
@@ -116,7 +114,7 @@ func Defaults() *Config {
 			BreakerCooldown:     Duration(10 * time.Second),
 			HealthInterval:      Duration(time.Minute),
 		},
-		Admin: Admin{Store: Store{Driver: "bolt"}},
+		Admin: Admin{Store: Store{Driver: "bolt"}, Allow: []string{"loopback", "private_ranges"}},
 		Log: Log{
 			Level: "info",
 			Access: AccessLog{

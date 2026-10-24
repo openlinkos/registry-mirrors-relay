@@ -70,8 +70,7 @@ func validate(c *Config, res *Result) []error {
 
 	// 监听地址
 	for name, addr := range map[string]string{
-		"listen.http": c.Listen.HTTP, "listen.https": c.Listen.HTTPS,
-		"listen.admin": c.Listen.Admin, "listen.metrics": c.Listen.Metrics,
+		"listen.http": c.Listen.HTTP, "listen.https": c.Listen.HTTPS, "listen.admin": c.Listen.Admin,
 	} {
 		if addr == "" {
 			continue
@@ -80,8 +79,11 @@ func validate(c *Config, res *Result) []error {
 			bad("%s %q 写法不对，应写成 :8080 或 127.0.0.1:9090", name, addr)
 		}
 	}
-	if c.Listen.HTTP == "" && c.Listen.HTTPS == "" && !hasPortEntrance(c) {
-		bad("listen.http 和 listen.https 都没开，也没有按端口区分的入口，客户端无处可连")
+	if c.Listen.HTTP == "" && c.Listen.HTTPS == "" {
+		bad("listen.http 和 listen.https 都没开，客户端无处可连")
+	}
+	if c.Listen.Admin != "" && (c.Listen.Admin == c.Listen.HTTP || c.Listen.Admin == c.Listen.HTTPS) {
+		bad("listen.admin 和拉取入口用了同一个地址：要和拉取共用端口，把 listen.admin 留空即可")
 	}
 
 	// TLS
@@ -192,37 +194,23 @@ func validate(c *Config, res *Result) []error {
 	}
 
 	// 入口
-	type key struct{ listen, host string }
-	seen := map[key]string{}
+	seen := map[string]string{}
 	if len(c.Entrances) == 0 {
 		bad("至少要有一个入口（entrances）")
 	}
 	for _, e := range c.Entrances {
 		where := fmt.Sprintf("入口 %s", e.Name)
-		if len(e.Hosts) == 0 && e.Listen == "" {
-			bad("%s 要写 hosts 或 listen", where)
+		if len(e.Hosts) == 0 {
+			bad(`%s 要写 hosts（"*" 表示任意域名）`, where)
 		}
-		if e.Listen != "" {
-			if _, _, err := net.SplitHostPort(e.Listen); err != nil {
-				bad("%s 的 listen %q 写法不对", where, e.Listen)
-			}
-			if e.Listen == c.Listen.HTTP || e.Listen == c.Listen.HTTPS {
-				bad("%s 的 listen %q 和 listen.http/https 相同：按端口区分的入口要用单独的端口", where, e.Listen)
-			}
-		}
-		hosts := e.Hosts
-		if len(hosts) == 0 {
-			hosts = []string{"*"}
-		}
-		for _, h := range hosts {
+		for _, h := range e.Hosts {
 			if h != "*" && !hostRe.MatchString(h) {
 				bad("%s 的 host %q 不是合法的域名（不要带端口和协议）", where, h)
 			}
-			k := key{e.Listen, h}
-			if other, ok := seen[k]; ok {
+			if other, ok := seen[h]; ok {
 				bad("%s 和 %s 都匹配 %q", other, where, h)
 			}
-			seen[k] = where
+			seen[h] = where
 		}
 		for _, ref := range []struct{ field, name string }{{"upstream", e.Upstream}, {"default_upstream", e.DefaultUpstream}} {
 			if ref.name == "" {
@@ -335,8 +323,35 @@ func validate(c *Config, res *Result) []error {
 		} else if u.Scheme == "http" && !isLoopbackListen(net.JoinHostPort(u.Hostname(), "80")) {
 			warn("admin.public_url 用的是 http：后台的口令和会话会明文经过网络，建议放在 https 反向代理之后")
 		}
-	} else if c.Listen.Admin != "" && !isLoopbackListen(c.Listen.Admin) {
-		warn("listen.admin 不只监听本机，也没有写 admin.public_url：后台只接受用 127.0.0.1 或 localhost 访问。在容器里这是正常的，请只把这个端口映射到宿主机的 127.0.0.1")
+	}
+	// 管理入口（后台、API、指标）的访问范围
+	for _, l := range []struct {
+		name string
+		list []string
+	}{{"admin.allow", c.Admin.Allow}, {"admin.proxied_allow", c.Admin.ProxiedAllow}} {
+		ps, err := ParsePrefixes(l.list)
+		if err != nil {
+			bad("%s：%v", l.name, err)
+		}
+		for _, p := range ps {
+			if p.Bits() == 0 {
+				warn("%s 里的 %s 放行了所有地址：管理后台只靠口令保护", l.name, p)
+			}
+		}
+	}
+	if len(c.Admin.Allow) == 0 && len(c.Admin.ProxiedAllow) == 0 {
+		warn("admin.allow 为空：管理后台、管理 API 和指标都关掉了，谁也打不开")
+	}
+	if len(c.Admin.ProxiedAllow) > 0 {
+		if c.Admin.PublicURL == "" {
+			bad("admin.proxied_allow 要和 admin.public_url 一起用：经代理访问时，只认 public_url 的域名")
+		}
+		if len(trusted) == 0 {
+			bad("admin.proxied_allow 要求写 client_ip.trusted_proxies：只有受信任的代理传来的客户端地址才可信")
+		}
+	}
+	if c.Metrics.Pprof && !c.Metrics.Enabled {
+		warn("metrics.pprof 要先开 metrics.enabled 才有效")
 	}
 	seenTok := map[string]bool{}
 	for i := range c.Admin.APITokens {
@@ -384,15 +399,6 @@ func validate(c *Config, res *Result) []error {
 		bad("log.access.output 只能是 stdout、file、off")
 	}
 	return errs
-}
-
-func hasPortEntrance(c *Config) bool {
-	for _, e := range c.Entrances {
-		if e.Listen != "" {
-			return true
-		}
-	}
-	return false
 }
 
 func isLoopbackListen(addr string) bool {

@@ -4,6 +4,9 @@ import (
 	"html/template"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/openlinkos/registry-mirrors-relay/internal/status"
 )
 
 // 曲线的画布：横向拉伸到容器宽度（preserveAspectRatio="none"），线宽不随拉伸变化。
@@ -67,3 +70,59 @@ func points(vs []float64, n int, peak float64) string {
 }
 
 func ftoa(f float64) string { return strconv.FormatFloat(f, 'f', 1, 64) }
+
+// hourLabel 是一格的时间（UTC），给 title 用。
+func hourLabel(start int64) string { return time.Unix(start, 0).UTC().Format("01-02 15:00 UTC") }
+
+// hoursStrip 画近 24 小时的上游可用率：每小时一格，颜色按 status.Level，没有数据的格子是灰的。
+// 和曲线一样只有类名，没有内联样式；每格的 title 写时间和检测次数，整条用 aria-label 概括。
+func hoursStrip(hs []status.Hour, label string) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<span class="admin-hours" role="img" aria-label="` + template.HTMLEscapeString(label+" "+hoursPct(hs)) + `">`)
+	for _, h := range hs {
+		class, title := "", hourLabel(h.Start)+" · —"
+		if h.Total > 0 {
+			class = " " + status.Level(float64(h.OK)/float64(h.Total))
+			title = hourLabel(h.Start) + " · " + strconv.Itoa(h.OK) + "/" + strconv.Itoa(h.Total)
+		}
+		b.WriteString(`<span class="admin-hour` + class + `" title="` + template.HTMLEscapeString(title) + `"></span>`)
+	}
+	b.WriteString(`</span>`)
+	return template.HTML(b.String()) //nolint:gosec // 只有数字、类名和转义过的说明
+}
+
+// ratioStrip 画近 24 小时本站的请求成功率；请求太少的小时没有数值，格子是灰的。
+func ratioStrip(rs []status.Ratio, label string) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<span class="admin-hours" role="img" aria-label="` + template.HTMLEscapeString(label) + `">`)
+	for _, r := range rs {
+		class, title := "", hourLabel(r.Start)+" · —"
+		if r.Value != nil {
+			class = " " + status.Level(*r.Value)
+			title = hourLabel(r.Start) + " · " + fmtPct(*r.Value, 1.0)
+		}
+		b.WriteString(`<span class="admin-hour` + class + `" title="` + template.HTMLEscapeString(title) + `"></span>`)
+	}
+	b.WriteString(`</span>`)
+	return template.HTML(b.String()) //nolint:gosec // 只有数字、类名和转义过的说明
+}
+
+// hoursPct 是近 24 小时的总可用率，没有数据时为 "—"。
+func hoursPct(hs []status.Hour) string {
+	ok, total := 0, 0
+	for _, h := range hs {
+		ok += h.OK
+		total += h.Total
+	}
+	return fmtPct(ok, total)
+}
+
+// lastRatio 是最近一个有数值的小时的成功率，没有时为 -1。
+func lastRatio(rs []status.Ratio) float64 {
+	for i := len(rs) - 1; i >= 0; i-- {
+		if rs[i].Value != nil {
+			return *rs[i].Value
+		}
+	}
+	return -1
+}

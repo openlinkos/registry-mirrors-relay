@@ -21,7 +21,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/http/pprof"
 	"net/netip"
 	"os"
 	"os/signal"
@@ -32,10 +31,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
 
-	"github.com/openlinkos/registry-mirrors-relay/internal/admin"
-	"github.com/openlinkos/registry-mirrors-relay/internal/api"
 	"github.com/openlinkos/registry-mirrors-relay/internal/app"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/mgmt"
 	"github.com/openlinkos/registry-mirrors-relay/internal/ops"
 	"github.com/openlinkos/registry-mirrors-relay/internal/relay"
 	"github.com/openlinkos/registry-mirrors-relay/internal/server"
@@ -162,52 +160,28 @@ func cmdServe(args []string, stderr io.Writer) int {
 	go a.WatchUpstreams(ctx) // 每分钟探测一次各上游的 /v2/
 	watchSignals(ctx, a, log)
 
-	adminH, err := adminHandler(a, log)
+	m, err := mgmt.New(a, log)
 	if err != nil {
 		log.Error("启动失败", "err", err)
 		return 1
 	}
 	cfg := res.Config
-	srv := server.New(cfg, log, relay.New(relay.Deps{App: a, Log: log}),
-		server.Listener{Name: "管理后台", Addr: cfg.Listen.Admin, Handler: adminH},
-		server.Listener{Name: "指标", Addr: cfg.Listen.Metrics, Handler: metricsHandler(a, cfg.Metrics.Pprof)},
-	)
+	var pull http.Handler = relay.New(relay.Deps{App: a, Log: log})
+	var extras []server.Listener
+	if cfg.Listen.Admin == "" {
+		pull = m.Shared(pull) // 三合一：后台、API、指标和拉取共用端口
+	} else {
+		extras = append(extras, server.Listener{Name: "管理入口", Addr: cfg.Listen.Admin, Handler: m.Standalone(log)})
+	}
+	log.Info("管理入口", "listen", cmp.Or(cfg.Listen.Admin, "和拉取入口共用"), "allow", cfg.Admin.Allow,
+		"proxied_allow", cfg.Admin.ProxiedAllow, "metrics", cfg.Metrics.Enabled)
+	srv := server.New(cfg, log, pull, extras...)
 	if err := srv.Run(ctx); err != nil {
 		log.Error("退出", "err", err)
 		return 1
 	}
 	log.Info("已退出")
 	return 0
-}
-
-// adminHandler 是管理后台的监听：/admin/ 是网页后台，/admin/api/v1/ 是 JSON API（也认网页后台的会话），
-// 根路径跳转到 /admin/。
-func adminHandler(a *app.App, log *slog.Logger) (http.Handler, error) {
-	o := ops.New(a)
-	web, err := admin.New(a, o, admin.Options{Log: log})
-	if err != nil {
-		return nil, err
-	}
-	mux := http.NewServeMux()
-	mux.Handle(api.Prefix+"/", api.New(a, o, api.Options{Session: web.Session}))
-	mux.Handle("/admin/", web)
-	mux.Handle("/admin", web)
-	mux.Handle("GET /{$}", http.RedirectHandler("/admin/", http.StatusSeeOther))
-	return mux, nil
-}
-
-// metricsHandler 是指标的监听：/metrics，开了 metrics.pprof 时还有 /debug/pprof/。
-func metricsHandler(a *app.App, withPprof bool) http.Handler {
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", a.Metrics)
-	if withPprof {
-		mux.HandleFunc("/debug/pprof/", pprof.Index)
-		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	}
-	return mux
 }
 
 func cmdCheck(args []string, stdout, stderr io.Writer) int {

@@ -60,8 +60,8 @@ type Hour struct {
 	Total int   `json:"total"`
 }
 
-// hours 返回 name 近 24 小时的统计，旧的在前，最后一项是当前小时。
-func (h *History) hours(name string, now time.Time) []Hour {
+// Hours 返回 name 近 24 小时的统计，旧的在前，最后一项是当前小时。
+func (h *History) Hours(name string, now time.Time) []Hour {
 	cur := now.Truncate(time.Hour).Unix()
 	out := make([]Hour, Hours)
 	h.mu.Lock()
@@ -156,7 +156,7 @@ func Build(in Input) Report {
 	for _, name := range names {
 		u := Upstream{Name: name, Status: "unknown", Hours: make([]Hour, 0)}
 		if in.History != nil {
-			u.Hours = in.History.hours(name, in.Now)
+			u.Hours = in.History.Hours(name, in.Now)
 		}
 		if p, seen := in.Probes[name]; seen {
 			checked := p.Checked.UTC().Truncate(time.Second)
@@ -199,6 +199,17 @@ func Build(in Input) Report {
 		r.Service.Hours = append(r.Service.Hours, x)
 	}
 	return r
+}
+
+// Level 把可用率分成三档，和用法页一致：ok（≥99%）、mid（≥90%）、bad。
+func Level(v float64) string {
+	switch {
+	case v >= 0.99:
+		return "ok"
+	case v >= 0.9:
+		return "mid"
+	}
+	return "bad"
 }
 
 // Reason 把探测失败归成几类。错误原文可能带地址，不公开。

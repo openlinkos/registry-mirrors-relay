@@ -1,7 +1,9 @@
 package clientip
 
 import (
+	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"testing"
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
@@ -88,4 +90,59 @@ func FuzzClientIP(f *testing.F) {
 			t.Fatalf("来源不受信任时客户端 IP 必须等于来源：%s %s", got, rem)
 		}
 	})
+}
+
+func TestProxied(t *testing.T) {
+	if Proxied(httptest.NewRequest(http.MethodGet, "/", nil)) {
+		t.Fatal("直连不算经过代理")
+	}
+	for _, h := range []string{
+		"X-Forwarded-For", "X-Forwarded-Proto", "X-Forwarded-Host", "Forwarded", "Via", "X-Real-IP",
+		"CF-Connecting-IP", "True-Client-IP", "Fastly-Client-IP", "X-Client-IP", "X-Cluster-Client-IP",
+		"X-Envoy-External-Address", "X-Original-Forwarded-For",
+	} {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set(h, "198.51.100.7")
+		if !Proxied(r) {
+			t.Errorf("带 %s 应算经过代理", h)
+		}
+	}
+	old := httptest.NewRequest(http.MethodGet, "/", nil)
+	old.Proto, old.ProtoMajor, old.ProtoMinor = "HTTP/1.0", 1, 0
+	if !Proxied(old) {
+		t.Fatal("HTTP/1.0 应算经过代理")
+	}
+}
+
+func TestForwarded(t *testing.T) {
+	r := resolver(t, false, "10.0.0.0/8")
+	req := func(remote string, hdr map[string]string) *http.Request {
+		q := httptest.NewRequest(http.MethodGet, "/", nil)
+		q.RemoteAddr = remote
+		for k, v := range hdr {
+			q.Header.Set(k, v)
+		}
+		return q
+	}
+	if c, ok := r.Forwarded(req("10.0.0.1:5000", map[string]string{"X-Forwarded-For": "198.51.100.7"})); !ok || c != netip.MustParseAddr("198.51.100.7") {
+		t.Fatalf("受信任的代理传来的地址：%v %v", c, ok)
+	}
+	for name, q := range map[string]*http.Request{
+		"对端不受信任":           req("192.0.2.1:5000", map[string]string{"X-Forwarded-For": "198.51.100.7"}),
+		"只有 Forwarded":     req("10.0.0.1:5000", map[string]string{"Forwarded": "for=198.51.100.7"}),
+		"只有 Via":           req("10.0.0.1:5000", map[string]string{"Via": "1.1 proxy"}),
+		"没开 use_x_real_ip": req("10.0.0.1:5000", map[string]string{"X-Real-IP": "198.51.100.7"}),
+		"没有任何头":            req("10.0.0.1:5000", nil),
+	} {
+		if _, ok := r.Forwarded(q); ok {
+			t.Errorf("%s：不应取到客户端地址", name)
+		}
+	}
+	xr := resolver(t, true, "10.0.0.0/8")
+	if c, ok := xr.Forwarded(req("10.0.0.1:5000", map[string]string{"X-Real-IP": "198.51.100.8"})); !ok || c != netip.MustParseAddr("198.51.100.8") {
+		t.Fatalf("use_x_real_ip 时取 X-Real-IP：%v %v", c, ok)
+	}
+	if !r.Trusted(netip.MustParseAddr("10.9.9.9")) || r.Trusted(netip.MustParseAddr("192.0.2.1")) {
+		t.Fatal("Trusted")
+	}
 }

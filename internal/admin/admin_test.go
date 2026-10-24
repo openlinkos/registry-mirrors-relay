@@ -256,6 +256,18 @@ func TestHostCheck(t *testing.T) {
 	if r := e.get("/admin/login"); r.StatusCode != 200 {
 		t.Fatalf("localhost 可以：%d", r.StatusCode)
 	}
+	// 局域网里用 IP 直接打开：没有 DNS 重绑定的问题
+	for _, h := range []string{"192.0.2.10:8080", "[2001:db8::10]:8080"} {
+		e.host = h
+		if r := e.get("/admin/login"); r.StatusCode != 200 {
+			t.Fatalf("IP %s 可以：%d", h, r.StatusCode)
+		}
+	}
+	// 用 IP 打开时，Origin 就是 http://<IP>，可以登录
+	e.host, e.origin = "192.0.2.10:8080", "http://192.0.2.10:8080"
+	if r := e.do("POST", "/admin/login", url.Values{"username": {"alice"}, "password": {alicePW}}, nil, nil); r.StatusCode != http.StatusSeeOther {
+		t.Fatalf("用 IP 打开后台应能登录：%d", r.StatusCode)
+	}
 }
 
 func TestLoginAndCookieFlags(t *testing.T) {

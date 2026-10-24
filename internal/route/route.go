@@ -8,7 +8,6 @@
 package route
 
 import (
-	"context"
 	"net"
 	"net/http"
 	"net/url"
@@ -71,24 +70,17 @@ func invalid(msg string) *Error {
 	return &Error{Status: http.StatusBadRequest, Code: "NAME_INVALID", Message: msg}
 }
 
-// MainListener 是 listen.http 和 listen.https 共用的键；按端口区分的入口用自己的监听地址作键。
-const MainListener = ""
-
-type hostTable struct {
-	exact map[string]*Entrance
-	any   *Entrance
-}
-
 // Router 是不可变的，配置重载时整体替换。
 type Router struct {
-	listeners map[string]*hostTable
-	names     map[string]string // 上游名和别名 → 上游名（只含启用的上游）
-	library   map[string]bool
+	exact   map[string]*Entrance // Host → 入口
+	any     *Entrance            // hosts 里写了 "*" 的入口
+	names   map[string]string    // 上游名和别名 → 上游名（只含启用的上游）
+	library map[string]bool
 }
 
 // New 由配置构建 Router。配置应已通过校验。
 func New(cfg *config.Config) *Router {
-	r := &Router{listeners: map[string]*hostTable{}, names: map[string]string{}, library: map[string]bool{}}
+	r := &Router{exact: map[string]*Entrance{}, names: map[string]string{}, library: map[string]bool{}}
 	for name, u := range cfg.Upstreams {
 		if u.Disabled {
 			continue
@@ -101,24 +93,11 @@ func New(cfg *config.Config) *Router {
 	}
 	for _, ce := range cfg.Entrances {
 		e := &Entrance{Name: ce.Name, Upstream: ce.Upstream, DefaultUpstream: ce.DefaultUpstream, Auth: ce.Auth, Page: ce.Page}
-		key := MainListener
-		if ce.Listen != "" {
-			key = ce.Listen
-		}
-		t := r.listeners[key]
-		if t == nil {
-			t = &hostTable{exact: map[string]*Entrance{}}
-			r.listeners[key] = t
-		}
-		hosts := ce.Hosts
-		if len(hosts) == 0 {
-			hosts = []string{"*"}
-		}
-		for _, h := range hosts {
+		for _, h := range ce.Hosts {
 			if h == "*" {
-				t.any = e
+				r.any = e
 			} else {
-				t.exact[h] = e
+				r.exact[h] = e
 			}
 		}
 	}
@@ -134,16 +113,12 @@ func NormalizeHost(host string) string {
 	return strings.TrimSuffix(strings.ToLower(host), ".")
 }
 
-// Entrance 按监听地址和 Host 找入口，找不到返回 nil。
-func (r *Router) Entrance(listener, host string) *Entrance {
-	t := r.listeners[listener]
-	if t == nil {
-		return nil
-	}
-	if e := t.exact[NormalizeHost(host)]; e != nil {
+// Entrance 按 Host 找入口，找不到返回 nil。
+func (r *Router) Entrance(host string) *Entrance {
+	if e := r.exact[NormalizeHost(host)]; e != nil {
 		return e
 	}
-	return t.any
+	return r.any
 }
 
 // Upstream 把名字或别名解析成上游名。
@@ -316,19 +291,4 @@ func (t Target) RewriteLink(link string) string {
 		s += "?" + enc
 	}
 	return s + ">" + link[end+1:]
-}
-
-type listenerKey struct{}
-
-// WithListener 记下请求来自哪个监听（MainListener 或按端口区分的入口的地址）。
-func WithListener(ctx context.Context, key string) context.Context {
-	return context.WithValue(ctx, listenerKey{}, key)
-}
-
-// ListenerFrom 取出 WithListener 记下的监听，没有时返回 MainListener。
-func ListenerFrom(ctx context.Context) string {
-	if v, ok := ctx.Value(listenerKey{}).(string); ok {
-		return v
-	}
-	return MainListener
 }

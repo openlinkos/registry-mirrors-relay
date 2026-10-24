@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
-	"github.com/openlinkos/registry-mirrors-relay/internal/route"
 )
 
 // Listener 是拉取入口以外的监听（管理后台、指标）。
@@ -77,20 +76,13 @@ func writeProbe(w http.ResponseWriter, code int) {
 	}
 }
 
-// Addrs 是需要监听的拉取入口地址：listen.http、listen.https，以及按端口区分的入口。
+// Addrs 是需要监听的拉取入口地址：listen.http 和 listen.https。
 func (s *Server) Addrs() []string {
-	seen := map[string]bool{}
 	var out []string
-	add := func(a string) {
-		if a != "" && !seen[a] {
-			seen[a] = true
+	for _, a := range []string{s.cfg.Listen.HTTP, s.cfg.Listen.HTTPS} {
+		if a != "" {
 			out = append(out, a)
 		}
-	}
-	add(s.cfg.Listen.HTTP)
-	add(s.cfg.Listen.HTTPS)
-	for _, e := range s.cfg.Entrances {
-		add(e.Listen)
 	}
 	return out
 }
@@ -108,22 +100,18 @@ func (s *Server) Run(ctx context.Context) error {
 	var names []string
 	var tlsOn []bool
 	type plan struct {
-		name, addr, key string
-		h               http.Handler
-		tls             bool
+		name, addr string
+		h          http.Handler
+		tls        bool
 	}
 	var plans []plan
 	for _, addr := range s.Addrs() {
-		p := plan{name: "拉取入口", addr: addr, key: route.MainListener, h: s}
+		p := plan{name: "拉取入口", addr: addr, h: s}
 		switch {
 		case addr == s.cfg.Listen.HTTPS && tlsConf != nil:
 			p.name, p.tls = "拉取入口（HTTPS）", true
-		case addr == s.cfg.Listen.HTTP:
-			if acmeWrap != nil {
-				p.h = acmeWrap(s) // ACME 的 HTTP-01 验证，其余请求照常处理
-			}
-		case addr != s.cfg.Listen.HTTPS:
-			p.key = addr // 按端口区分的入口
+		case addr == s.cfg.Listen.HTTP && acmeWrap != nil:
+			p.h = acmeWrap(s) // ACME 的 HTTP-01 验证，其余请求照常处理
 		}
 		plans = append(plans, p)
 	}
@@ -143,7 +131,6 @@ func (s *Server) Run(ctx context.Context) error {
 		s.mu.Lock()
 		s.bound = append(s.bound, ln.Addr().String())
 		s.mu.Unlock()
-		key := pl.key
 		names = append(names, pl.name)
 		tlsOn = append(tlsOn, pl.tls)
 		var sc *tls.Config
@@ -153,7 +140,6 @@ func (s *Server) Run(ctx context.Context) error {
 		servers = append(servers, &http.Server{
 			Handler:           pl.h,
 			TLSConfig:         sc,
-			BaseContext:       func(net.Listener) context.Context { return route.WithListener(context.Background(), key) },
 			ReadHeaderTimeout: t.ReadHeader.D(),
 			IdleTimeout:       t.Idle.D(),
 			MaxHeaderBytes:    32 << 10,

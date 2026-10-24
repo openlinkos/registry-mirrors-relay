@@ -40,6 +40,7 @@ type secretData struct {
 	Name   string
 	Secret string
 	Back   string
+	Base   string // 当前访问后台的地址，如 http://127.0.0.1:8080，用在 API 的示例里
 }
 
 func (h *Handler) userCreate(c *ctx) error {

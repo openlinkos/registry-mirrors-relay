@@ -114,6 +114,10 @@ entrances:
   - hosts: [gcr.example.com]
     upstream: gcr.io
 `,
+		"没有 hosts": `
+entrances:
+  - upstream: docker.io
+`,
 		"page 写错": `
 entrances:
   - hosts: [a.example.com]
@@ -295,4 +299,46 @@ func TestInitialAdminFromEnvFile(t *testing.T) {
 		t.Fatalf("应提醒口令写在配置里：%v", res.Warnings)
 	}
 	parseErr(t, "admin: {initial_admin: {username: administrator1, password: {value: Administrator1}}}\n")
+}
+
+func TestRemovedKeys(t *testing.T) {
+	for name, y := range map[string]string{
+		"listen.metrics":     "listen:\n  http: \":8080\"\n  metrics: \":9180\"\n",
+		"entrances[].listen": "entrances:\n  - listen: \":5001\"\n    upstream: docker.io\n",
+	} {
+		_, err := Parse([]byte(y))
+		if err == nil || !strings.Contains(err.Error(), "v0.2.0") || !strings.Contains(err.Error(), "第 ") {
+			t.Errorf("%s：应报错并说明改法：%v", name, err)
+		}
+	}
+	res := mustParse(t, "listen:\n  http: \":8080\"\n  metrics: \"\"\n")
+	if !strings.Contains(strings.Join(res.Warnings, "\n"), "listen.metrics 已经去掉") {
+		t.Fatalf("空的 listen.metrics 只提醒：%v", res.Warnings)
+	}
+}
+
+func TestManagementSettings(t *testing.T) {
+	c := mustParse(t, "").Config
+	if c.Listen.Admin != "" || c.Metrics.Enabled || strings.Join(c.Admin.Allow, ",") != "loopback,private_ranges" || len(c.Admin.ProxiedAllow) != 0 {
+		t.Fatalf("默认三合一、指标关、只允许本机和内网直连：%+v %+v %+v", c.Listen, c.Metrics, c.Admin.Allow)
+	}
+	cases := map[string]string{
+		"proxied_allow 没有 public_url":      "admin: {proxied_allow: [198.51.100.0/24]}",
+		"proxied_allow 没有 trusted_proxies": "admin: {public_url: \"https://a.example.com\", proxied_allow: [198.51.100.0/24]}",
+		"listen.admin 和 listen.http 相同":    "listen: {admin: \":8080\"}",
+		"admin.allow 写错":                   "admin: {allow: [not-an-address]}",
+	}
+	for name, y := range cases {
+		t.Run(name, func(t *testing.T) { parseErr(t, y) })
+	}
+	mustParse(t, "client_ip: {trusted_proxies: [10.0.0.0/8]}\nadmin: {public_url: \"https://a.example.com\", proxied_allow: [198.51.100.0/24]}")
+	for y, want := range map[string]string{
+		"admin: {allow: []}":                        "关掉了",
+		"metrics: {pprof: true}":                    "metrics.enabled",
+		"admin: {allow: [\"0.0.0.0/0\", \"::/0\"]}": "只靠口令",
+	} {
+		if w := strings.Join(mustParse(t, y).Warnings, "\n"); !strings.Contains(w, want) {
+			t.Errorf("%s：应提醒 %q：%s", y, want, w)
+		}
+	}
 }

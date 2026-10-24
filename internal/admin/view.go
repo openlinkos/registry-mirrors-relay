@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openlinkos/registry-mirrors-relay/internal/status"
 	"github.com/openlinkos/registry-mirrors-relay/internal/version"
 )
 
@@ -140,6 +141,14 @@ var funcs = template.FuncMap{
 	"tone":  statusTone,
 	"str":   func(v any) string { return fmt.Sprint(v) },
 	"list":  func(s ...string) []string { return s },
+	// 近 24 小时的条图
+	"hours":     hoursStrip,
+	"ratios":    ratioStrip,
+	"hoursPct":  hoursPct,
+	"lastRatio": lastRatio,
+	"levelTone": func(v float64) string {
+		return map[string]string{"ok": "success", "mid": "warning", "bad": "danger"}[status.Level(v)]
+	},
 }
 
 // parseTemplates 把版式、组件和全部页面放进同一个模板集：每个页面文件里的 {{define "content"}} 改名为

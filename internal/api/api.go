@@ -65,6 +65,7 @@ func New(a *app.App, o *ops.Ops, opt Options) *API {
 		})
 	}
 	r("GET /status", "viewer", x.status)
+	r("GET /status/report", "viewer", x.statusReport)
 	r("GET /stats/series", "viewer", x.series)
 	r("GET /stats/summary", "viewer", x.summary)
 	r("GET /requests", "viewer", x.requests)
@@ -196,6 +197,12 @@ func done(w http.ResponseWriter, err error, status int, v any) {
 }
 
 // ---- 状态与统计
+
+// statusReport 是和用法页 /status.json 一样的服务状态：总体状态、各上游近 24 小时的可用率、本站的请求成功率。
+// 用法页关掉了服务状态（site.show_status: false）时这里照样可以看。
+func (x *API) statusReport(w http.ResponseWriter, _ *http.Request, _ ops.Actor) {
+	writeJSON(w, http.StatusOK, x.app.StatusReport())
+}
 
 func (x *API) status(w http.ResponseWriter, _ *http.Request, _ ops.Actor) {
 	rt := x.app.Runtime()

@@ -36,6 +36,7 @@ func LoadDefaults() (*Result, error) { return Parse(nil) }
 func Parse(b []byte) (*Result, error) {
 	cfg := Defaults()
 	userUpstreams := map[string][]byte{}
+	var warnings []string
 
 	if len(bytes.TrimSpace(b)) > 0 {
 		var root yaml.Node
@@ -46,6 +47,11 @@ func Parse(b []byte) (*Result, error) {
 			return nil, errors.New("配置的最外层应该是键值对")
 		}
 		top := root.Content[0]
+		removedWarn, err := checkRemoved(top)
+		if err != nil {
+			return nil, err
+		}
+		warnings = append(warnings, removedWarn...)
 		// upstreams 单独处理：每个上游在内置定义的基础上覆盖字段，不能整个替换
 		for i := 0; i+1 < len(top.Content); i += 2 {
 			if top.Content[i].Value != "upstreams" {
@@ -83,7 +89,7 @@ func Parse(b []byte) (*Result, error) {
 
 	envWarn := applyEnv(cfg)
 	normalize(cfg)
-	res := &Result{Config: cfg}
+	res := &Result{Config: cfg, Warnings: warnings}
 	if envWarn != "" {
 		res.Warnings = append(res.Warnings, envWarn)
 	}
@@ -112,6 +118,54 @@ func applyEnv(c *Config) (warning string) {
 	}
 	c.Admin.InitialAdmin = InitialAdmin{Username: cmp.Or(os.Getenv("RELAY_ADMIN_USERNAME"), "admin"), Password: Secret{File: f}, FromEnv: true}
 	return ""
+}
+
+// checkRemoved 处理 v0.2.0 去掉的键：写了值就报错并说明改法；空值（本来就表示不开）只提醒，并从节点树里删掉，
+// 免得严格解码时报成「未知字段」。
+func checkRemoved(top *yaml.Node) (warnings []string, err error) {
+	var errs []error
+	for i := 0; i+1 < len(top.Content); i += 2 {
+		k, v := top.Content[i], top.Content[i+1]
+		switch {
+		case k.Value == "listen" && v.Kind == yaml.MappingNode:
+			for j := 0; j+1 < len(v.Content); j += 2 {
+				if v.Content[j].Value != "metrics" {
+					continue
+				}
+				if val := v.Content[j+1]; val.Kind == yaml.ScalarNode && val.Value == "" {
+					warnings = append(warnings, fmt.Sprintf("第 %d 行：listen.metrics 已经去掉，可以删掉这一行", val.Line))
+				} else {
+					errs = append(errs, fmt.Errorf("第 %d 行：listen.metrics 已经去掉（v0.2.0）：指标和管理后台在同一个入口（listen.admin，留空时是拉取端口），"+
+						"要指标请写 metrics.enabled: true，Prometheus 改抓那个地址的 /metrics", val.Line))
+				}
+				v.Content = append(v.Content[:j], v.Content[j+2:]...)
+				break
+			}
+		case k.Value == "entrances" && v.Kind == yaml.SequenceNode:
+			for _, e := range v.Content {
+				if e.Kind != yaml.MappingNode {
+					continue
+				}
+				for j := 0; j+1 < len(e.Content); j += 2 {
+					if e.Content[j].Value != "listen" {
+						continue
+					}
+					if val := e.Content[j+1]; val.Kind == yaml.ScalarNode && val.Value == "" {
+						warnings = append(warnings, fmt.Sprintf("第 %d 行：入口的 listen 已经去掉，可以删掉这一行", val.Line))
+					} else {
+						errs = append(errs, fmt.Errorf("第 %d 行：按端口区分的入口（entrances[].listen）已经去掉（v0.2.0）：改用 hosts 加 upstream（每个上游一个域名），"+
+							"或者单域名入口的 /v2/<上游>/ 前缀", val.Line))
+					}
+					e.Content = append(e.Content[:j], e.Content[j+2:]...)
+					break
+				}
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return nil, joinErrors(errs)
+	}
+	return warnings, nil
 }
 
 // strictDecode 不认识的字段直接报错，避免拼错的配置项被悄悄忽略。
@@ -166,8 +220,6 @@ func normalize(c *Config) {
 			switch {
 			case len(e.Hosts) > 0:
 				e.Name = e.Hosts[0]
-			case e.Listen != "":
-				e.Name = e.Listen
 			default:
 				e.Name = fmt.Sprintf("entrance-%d", i+1)
 			}

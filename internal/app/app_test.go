@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -174,5 +175,35 @@ func TestRequestHours(t *testing.T) {
 	}
 	if total != 22 {
 		t.Fatalf("24 小时以前的不算：%d", total)
+	}
+}
+
+func TestRestartNeededFields(t *testing.T) {
+	base := func() *config.Config {
+		res, err := config.Parse(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.Config
+	}
+	for name, change := range map[string]func(c *config.Config){
+		"log.level":               func(c *config.Config) { c.Log.Level = "debug" },
+		"timeouts.read_header":    func(c *config.Config) { c.Timeouts.ReadHeader = config.Duration(time.Minute) },
+		"timeouts.idle":           func(c *config.Config) { c.Timeouts.Idle = config.Duration(time.Hour) },
+		"timeouts.shutdown_grace": func(c *config.Config) { c.Timeouts.ShutdownGrace = config.Duration(time.Hour) },
+		"proxy.buffer_size":       func(c *config.Config) { c.Proxy.BufferSize = 64 << 10 },
+		"listen":                  func(c *config.Config) { c.Listen.Admin = "127.0.0.1:9090" },
+	} {
+		old, cur := base(), base()
+		change(cur)
+		if got := restartNeeded(old, cur); !slices.Contains(got, name) {
+			t.Errorf("改 %s 应提示重启：%v", name, got)
+		}
+	}
+	old, cur := base(), base()
+	cur.Metrics.Enabled, cur.Metrics.Pprof = true, true
+	cur.Admin.Allow = []string{"loopback"}
+	if got := restartNeeded(old, cur); len(got) != 0 {
+		t.Fatalf("指标开关和 admin.allow 能热重载：%v", got)
 	}
 }

@@ -5,6 +5,7 @@ package accesslog
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -209,4 +210,17 @@ func (l *Logger) Close() error {
 	close(l.ch)
 	l.wg.Wait()
 	return l.out.Close()
+}
+
+type noteKey struct{}
+
+// WithNote 给这个请求的访问记录附一句说明（写进 error 字段），例如管理入口为什么没有放行。
+func WithNote(ctx context.Context, note string) context.Context {
+	return context.WithValue(ctx, noteKey{}, note)
+}
+
+// NoteFrom 取出 WithNote 附的说明。
+func NoteFrom(ctx context.Context) string {
+	s, _ := ctx.Value(noteKey{}).(string)
+	return s
 }

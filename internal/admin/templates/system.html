@@ -21,8 +21,11 @@
       <dt>{{.T "system.runtimeBuilt"}}</dt><dd>{{time $d.Built}}</dd>
       <dt>{{.T "system.lastReload"}}</dt><dd>{{with $d.Reload}}{{time .Time}}{{if .Err}} · {{$.T "system.failed"}}{{end}}{{else}}—{{end}}</dd>
       <dt>{{.T "system.store"}}</dt><dd class="ol-mono ol-break">{{$d.StoreDriver}}{{if eq $d.StoreDriver "bolt"}} · {{$d.StorePath}}{{end}}{{if not $d.Writable}} · {{.T "system.readOnly"}}{{end}}</dd>
-      <dt>{{.T "system.listeners"}}</dt><dd class="ol-mono">{{.T "system.adminAt" "addr" $d.Admin}} · {{.T "system.metricsAt" "addr" $d.Metrics}}</dd>
-      <dt>{{.T "system.pprof"}}</dt><dd>{{if $d.Pprof}}{{.T "system.pprofOn" "addr" $d.Metrics}}{{else}}{{.T "system.pprofOff"}}{{end}}</dd>
+      <dt>{{.T "system.mgmt"}}</dt><dd>{{if $d.MgmtAddr}}{{.T "system.mgmtSeparate" "addr" $d.MgmtAddr}}{{else}}{{.T "system.mgmtShared" "addr" $d.PullAddr}}{{end}}</dd>
+      <dt>{{.T "system.mgmtAllow"}}</dt><dd class="ol-mono ol-break">{{if $d.Allow}}{{$d.Allow}}{{else}}{{.T "system.mgmtNone"}}{{end}}</dd>
+      <dt>{{.T "system.mgmtProxied"}}</dt><dd class="ol-mono ol-break">{{if $d.ProxiedAllow}}{{$d.ProxiedAllow}}{{else}}{{.T "system.mgmtProxiedOff"}}{{end}}</dd>
+      <dt>{{.T "system.metrics"}}</dt><dd>{{if $d.Metrics}}{{.T "system.metricsOn"}}{{else}}{{.T "system.metricsOff"}}{{end}}</dd>
+      <dt>{{.T "system.pprof"}}</dt><dd>{{if $d.Pprof}}{{.T "system.pprofOn"}}{{else}}{{.T "system.pprofOff"}}{{end}}</dd>
     </dl>
     {{if .IsAdmin}}<form method="post" action="/admin/reload">{{template "csrf" .}}<button type="submit" class="ol-btn ol-btn-secondary ol-btn-sm"{{if not $d.ConfigPath}} disabled{{end}}>{{icon "refresh-cw" "sm"}}{{.T "system.reload"}}</button></form><p class="ol-hint">{{.T "system.reloadHelp"}}</p>{{end}}
     </div>

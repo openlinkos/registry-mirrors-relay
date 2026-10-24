@@ -31,16 +31,24 @@
 </section>
 
 <section class="ol-section">
-  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "nav.upstreams"}}</h2><div class="ol-section-actions"><a class="ol-btn ol-btn-secondary ol-btn-sm" href="/admin/upstreams">{{.T "overview.allUpstreams"}}</a></div></div>
+  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "overview.serviceStatus"}}</h2>{{template "overallStatus" (dict "S" $d.Status.Status "V" $v)}}<div class="ol-section-actions"><a class="ol-btn ol-btn-secondary ol-btn-sm" href="/admin/upstreams">{{.T "overview.allUpstreams"}}</a></div></div>
   <div class="ol-table-wrap"><table class="ol-table">
-    <thead><tr><th>{{.T "upstreams.name"}}</th><th>{{.T "upstreams.status"}}</th><th class="ol-num">{{.T "upstreams.latency"}}</th><th>{{.T "upstreams.checked"}}</th></tr></thead>
+    <thead><tr><th>{{.T "upstreams.name"}}</th><th>{{.T "upstreams.status"}}</th><th class="ol-num">{{.T "upstreams.latency"}}</th><th>{{.T "upstreams.checked"}}</th><th>{{.T "status.last24h"}}</th></tr></thead>
     <tbody>{{range $d.Upstreams}}<tr>
       <td><span class="ol-cell-title">{{.Name}}</span><span class="ol-cell-sub ol-mono">{{.Registry}}</span></td>
       <td>{{template "upstreamStatus" (dict "U" . "V" $v)}}</td>
       <td class="ol-num">{{with .Health}}{{secs .Latency}}{{else}}—{{end}}</td>
       <td class="ol-nowrap">{{with .Health}}{{time .Checked}}{{else}}—{{end}}</td>
-    </tr>{{end}}</tbody>
+      <td><span class="admin-hours-cell">{{hours .Hours ($v.T "status.availability")}}<span class="admin-hours-pct">{{hoursPct .Hours}}</span></span></td>
+    </tr>{{end}}
+    <tr>
+      <td><span class="ol-cell-title">{{.T "status.service"}}</span><span class="ol-cell-sub">{{.T "status.serviceHelp"}}</span></td>
+      <td>{{$r := lastRatio $d.Status.Service.Hours}}{{if ge $r 0.0}}{{template "badge" (dict "Text" ($v.T "status.successRate" "rate" (pct $r 1.0)) "Tone" (levelTone $r) "Dot" true)}}{{else}}{{template "badge" (dict "Text" ($v.T "status.tooFew") "Dot" true)}}{{end}}</td>
+      <td class="ol-num">—</td><td>—</td>
+      <td>{{ratios $d.Status.Service.Hours ($v.T "status.service")}}</td>
+    </tr></tbody>
   </table></div>
+  <p class="ol-hint">{{if $d.Interval}}{{.T "status.note" "interval" (.Dur $d.Interval)}}{{else}}{{.T "status.noProbe"}}{{end}}</p>
 </section>
 
 <div class="ol-grid ol-grid-2">

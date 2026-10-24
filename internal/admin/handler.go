@@ -1,4 +1,4 @@
-// Package admin 是网页管理后台，照 Origin 的后台（openlinkos/origin 的 packages/admin）做：
+// Package admin 是网页管理后台：
 //   - 全部页面在服务端用 html/template 渲染，没有脚本也能用；一个同源的小脚本只做本地时间、复制按钮、删除确认和概览刷新；
 //   - 样式、字体、图标来自设计系统 @openlinkos/ui，打包进程序，不从第三方加载任何东西；
 //   - 严格的 CSP（没有内联脚本和样式，Trusted Types 不允许任何策略）、会话、CSRF、来源检查、登录限速、
@@ -308,7 +308,7 @@ func (h *Handler) dispatch(c *ctx) error {
 }
 
 // checkOrigin 是每个 POST 的跨站检查：拒绝 Sec-Fetch-Site: cross-site，并要求 Origin 是允许的来源之一：
-// public_url 的来源，或者用回环地址访问时的 http://<Host>。
+// public_url 的来源，或者用 localhost、IP 直接访问时的 <协议>://<Host>。
 // mustChangeAllowed 是必须先改口令的会话能打开的页面。
 var mustChangeAllowed = map[string]bool{
 	"/admin/account": true, "/admin/account/password": true, "/admin/logout": true, "/admin/reauth": true,
@@ -327,7 +327,11 @@ func (h *Handler) checkOrigin(c *ctx) error {
 		c.secure = https
 		return nil
 	}
-	if ops.LoopbackHost(r.Host) && origin == "http://"+strings.ToLower(r.Host) {
+	scheme := "http://"
+	if r.TLS != nil {
+		scheme = "https://"
+	}
+	if ops.DirectHost(r.Host) && origin == scheme+strings.ToLower(r.Host) {
 		return nil
 	}
 	return fail(http.StatusForbidden, "error.origin")
@@ -358,10 +362,10 @@ func (c *ctx) parseForm() error {
 }
 
 // sessionFrom 找请求带的会话。https 的 public_url 下只认 __Host- Cookie：同一个上级域名下的兄弟站点
-// 可以替这个主机种普通 Cookie（会话固定攻击），但种不了 __Host- 的。用回环地址访问时两种都认。
+// 可以替这个主机种普通 Cookie（会话固定攻击），但种不了 __Host- 的。用 localhost、IP 直接访问时两种都认。
 func (h *Handler) sessionFrom(r *http.Request, now time.Time) *session {
 	names := []string{secureCookie, plainCookie}
-	if pub, https := h.publicOrigin(); pub != "" && https && !ops.LoopbackHost(r.Host) {
+	if pub, https := h.publicOrigin(); pub != "" && https && !ops.DirectHost(r.Host) {
 		names = names[:1]
 	}
 	for _, n := range names {

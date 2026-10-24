@@ -77,3 +77,42 @@
 .admin-after {
   margin-block-start: var(--ol-space-3);
 }
+
+/* 近 24 小时的条：每小时一格，颜色按可用率分档；没有数据的格子是边框色。 */
+.admin-hours-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+}
+
+.admin-hours {
+  display: inline-flex;
+  gap: 2px;
+  align-items: stretch;
+  block-size: 1.125rem;
+}
+
+.admin-hour {
+  inline-size: 5px;
+  border-radius: 2px;
+  background: var(--ol-color-border);
+}
+
+.admin-hour.ok {
+  background: var(--ol-color-success-solid);
+}
+
+.admin-hour.mid {
+  background: var(--ol-color-warning-solid);
+}
+
+.admin-hour.bad {
+  background: var(--ol-color-danger-solid);
+}
+
+.admin-hours-pct {
+  color: var(--ol-color-fg-muted);
+  font-size: var(--ol-font-size-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

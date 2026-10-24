@@ -11,6 +11,7 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
 	"github.com/openlinkos/registry-mirrors-relay/internal/ops"
 	"github.com/openlinkos/registry-mirrors-relay/internal/stats"
+	"github.com/openlinkos/registry-mirrors-relay/internal/status"
 	"github.com/openlinkos/registry-mirrors-relay/internal/upstream"
 )
 
@@ -22,6 +23,8 @@ type overviewData struct {
 	Peak      string // 24 小时里流量最高的 10 分钟
 	Day       stats.Minute
 	Upstreams []ops.UpstreamView
+	Status    status.Report // 和用法页一样的服务状态：总体状态、本站近 24 小时的成功率
+	Interval  time.Duration // 上游探测的间隔，0 表示不探测
 	Images    []stats.Item
 	Clients   []stats.Item
 	Quota     *upstream.Quota
@@ -74,7 +77,8 @@ func (h *Handler) live(c *ctx) error {
 
 func (h *Handler) overviewPage(c *ctx) error {
 	rt := h.app.Runtime()
-	d := overviewData{Live: h.liveValues(c.lang), Upstreams: h.ops.Upstreams()}
+	d := overviewData{Live: h.liveValues(c.lang), Upstreams: h.ops.Upstreams(), Status: h.app.StatusReport()}
+	d.Interval = time.Duration(d.Status.Interval) * time.Second
 
 	// 24 小时，每 10 分钟一个点
 	series := h.app.Stats.Series(c.now.Add(-24*time.Hour + time.Minute))

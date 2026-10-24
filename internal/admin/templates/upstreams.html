@@ -11,6 +11,7 @@
   <div class="ol-panel-body ol-stack">
     <dl class="ol-dl">
       <dt>{{$v.T "upstreams.registry"}}</dt><dd class="ol-mono">{{.Registry}}</dd>
+      <dt>{{$v.T "status.last24h"}}</dt><dd><span class="admin-hours-cell">{{hours .Hours ($v.T "status.availability")}}<span class="admin-hours-pct">{{hoursPct .Hours}}</span></span></dd>
       <dt>{{$v.T "upstreams.health"}}</dt><dd>{{with .Health}}{{if .OK}}{{$v.T "upstreams.healthOK" "status" (str .Status) "latency" (secs .Latency)}}{{else}}{{.Error}}{{end}} · {{time .Checked}}{{else}}{{$v.T "upstreams.notChecked"}}{{end}}</dd>
       {{with .Quota}}<dt>{{$v.T "upstreams.quota"}}</dt><dd>{{$v.T "upstreams.quotaValue" "remaining" (num .Remaining) "limit" (num .Limit)}}{{if .Window}} · {{$v.T "overview.quotaWindow" "window" ($v.Dur .Window)}}{{end}} · {{time .Observed}}</dd>{{end}}
       <dt>{{$v.T "upstreams.unlisted"}}</dt><dd>{{if eq .Unlisted "deny"}}{{$v.T "upstreams.unlistedDeny"}}{{else}}{{$v.T "upstreams.unlistedPass"}}{{end}}</dd>

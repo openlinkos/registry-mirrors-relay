@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -33,6 +34,26 @@ func TestCheckExampleConfig(t *testing.T) {
 	code, out, _ = runCmd(t, "", "check", "-config", filepath.Join("..", "..", "config.example.yaml"), "-print")
 	if code != 0 || !strings.Contains(out, "upstreams:") || !strings.Contains(out, "mcr.microsoft.com") {
 		t.Fatalf("-print 应输出合并后的上游：%d\n%s", code, out)
+	}
+}
+
+// TestCheckDeployConfigs 检查仓库里所有部署用的配置文件（Docker、Compose、kustomize、测试）都能通过 check，
+// 防止改了配置的写法却漏改某个部署文件。
+func TestCheckDeployConfigs(t *testing.T) {
+	var files []string
+	err := filepath.WalkDir(filepath.Join("..", "..", "deploy"), func(p string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && d.Name() == "config.yaml" {
+			files = append(files, p)
+		}
+		return err
+	})
+	if err != nil || len(files) < 6 {
+		t.Fatalf("找到的配置文件太少：%v %v", files, err)
+	}
+	for _, f := range files {
+		if code, out, errs := runCmd(t, "", "check", "-config", f); code != 0 {
+			t.Errorf("%s 没有通过 check：%s %s", f, out, errs)
+		}
 	}
 }
 

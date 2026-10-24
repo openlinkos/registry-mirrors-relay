@@ -100,8 +100,9 @@ func truncate(s string, n int) string {
 // GeneratePassword 生成一个随机口令（26 个字符的 base32，130 位）。
 func GeneratePassword() string { return rand.Text() }
 
-// HostAllowed 判断管理后台和 API 能不能用这个 Host 访问：和 public_url 的主机一致，或者是 localhost、回环地址
-// （本机、SSH 转发、kubectl port-forward、docker 的 -p 127.0.0.1:9090:9090）。其他 Host 一律拒绝，防 DNS 重绑定。
+// HostAllowed 判断管理后台和 API 能不能用这个 Host 访问：和 public_url 的主机一致，或者是 DirectHost
+// （本机、SSH 转发、kubectl port-forward、局域网里用 IP 直接打开）。其他域名一律拒绝，防 DNS 重绑定。
+// 谁能连进来由管理入口的访问范围（admin.allow）决定，见 mgmt 包；这里只防浏览器被别的网站利用。
 func HostAllowed(publicURL string, r *http.Request) bool {
 	host := strings.ToLower(r.Host)
 	if publicURL != "" {
@@ -109,7 +110,21 @@ func HostAllowed(publicURL string, r *http.Request) bool {
 			return true
 		}
 	}
-	return LoopbackHost(host)
+	return DirectHost(host)
+}
+
+// DirectHost 判断 Host（可以带端口）是不是 localhost 或一个 IP 地址。DNS 重绑定要靠域名，用 IP 访问时不存在；
+// 带 zone 的 IPv6 不接受。
+func DirectHost(host string) bool {
+	if LoopbackHost(host) {
+		return true
+	}
+	h := host
+	if hh, _, err := net.SplitHostPort(host); err == nil {
+		h = hh
+	}
+	a, err := netip.ParseAddr(strings.Trim(h, "[]"))
+	return err == nil && a.Zone() == ""
 }
 
 // LoopbackHost 判断 Host（可以带端口）是不是 localhost 或回环地址。

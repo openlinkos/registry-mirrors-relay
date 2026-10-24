@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -59,9 +60,17 @@ type Runtime struct {
 	Tokens    map[[32]byte]Token // SHA-256(令牌) → 身份
 	Data      store.Data         // 运营数据的快照（API 列表用）
 	Site      config.Site        // 生效的站点信息：后台设置过就用它，否则用配置文件的
+	Mgmt      MgmtPolicy         // 管理入口（后台、API、指标）的访问范围
 	Built     time.Time
 
 	poolKey, cacheKey string
+}
+
+// MgmtPolicy 是管理入口的访问范围，由 mgmt 包使用。
+type MgmtPolicy struct {
+	Allow        []netip.Prefix // 直连时允许的对端（admin.allow）
+	ProxiedAllow []netip.Prefix // 经代理时允许的客户端（admin.proxied_allow）
+	PublicHost   string         // admin.public_url 的 Host，经代理访问时只认它
 }
 
 // Options 主要给测试用。
@@ -358,6 +367,15 @@ func (a *App) build(cfg *config.Config, prev *Runtime) (*Runtime, error) {
 		return nil, err
 	}
 	rt.IPs = clientip.New(trusted, cfg.ClientIP.UseXRealIP)
+	if rt.Mgmt.Allow, err = config.ParsePrefixes(cfg.Admin.Allow); err != nil {
+		return nil, err
+	}
+	if rt.Mgmt.ProxiedAllow, err = config.ParsePrefixes(cfg.Admin.ProxiedAllow); err != nil {
+		return nil, err
+	}
+	if u, err := url.Parse(cfg.Admin.PublicURL); err == nil && cfg.Admin.PublicURL != "" {
+		rt.Mgmt.PublicHost = strings.ToLower(u.Host)
+	}
 	rt.Router = route.New(cfg)
 	rt.Site = cfg.Site
 	if s := data.Site; s != nil {
@@ -449,14 +467,11 @@ func restartNeeded(old, cur *config.Config) []string {
 	check("data_dir", old.DataDir, cur.DataDir)
 	check("admin.store", old.Admin.Store, cur.Admin.Store)
 	check("log.access", old.Log.Access, cur.Log.Access)
-	var ol, cl []string
-	for _, e := range old.Entrances {
-		ol = append(ol, e.Listen)
-	}
-	for _, e := range cur.Entrances {
-		cl = append(cl, e.Listen)
-	}
-	check("entrances[].listen", ol, cl)
+	check("log.level", old.Log.Level, cur.Log.Level)
+	check("timeouts.read_header", old.Timeouts.ReadHeader, cur.Timeouts.ReadHeader)
+	check("timeouts.idle", old.Timeouts.Idle, cur.Timeouts.Idle)
+	check("timeouts.shutdown_grace", old.Timeouts.ShutdownGrace, cur.Timeouts.ShutdownGrace)
+	check("proxy.buffer_size", old.Proxy.BufferSize, cur.Proxy.BufferSize)
 	check("limits.tracked_clients", old.Limits.TrackedClients, cur.Limits.TrackedClients)
 	return out
 }
@@ -514,6 +529,9 @@ func (a *App) CheckUpstream(ctx context.Context, name string) (h upstream.Health
 	a.probes.Record(name, h.OK, h.Latency, h.Checked)
 	return h, true
 }
+
+// ProbeHours 是一个上游近 24 小时每小时的探测结果。
+func (a *App) ProbeHours(name string) []status.Hour { return a.probes.Hours(name, time.Now()) }
 
 // StatusReport 是用法页 /status.json 的内容：各上游的连通性和近 24 小时的可用率，以及本服务的请求成功率。
 func (a *App) StatusReport() status.Report {

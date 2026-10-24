@@ -1,7 +1,9 @@
 package admin
 
 import (
+	"cmp"
 	"net/http"
+	"net/url"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -107,7 +109,26 @@ func (h *Handler) tokenCreate(c *ctx) error {
 		return c.retry(err, h.adminsPage)
 	}
 	return h.render(c, "secret", &view{Title: tr(c.lang, "secret.tokenTitle"), Nav: "admins",
-		Crumbs: []crumb{{tr(c.lang, "nav.admins"), "/admin/admins"}}, Data: secretData{Kind: "token", Name: name, Secret: tok, Back: "/admin/admins"}})
+		Crumbs: []crumb{{tr(c.lang, "nav.admins"), "/admin/admins"}}, Data: secretData{Kind: "token", Name: name, Secret: tok, Back: "/admin/admins", Base: h.base(c.r)}})
+}
+
+// base 是浏览器访问后台用的地址（协议加 Host），用在示例命令里。Host 是 public_url 的域名时用 public_url。
+func (h *Handler) base(r *http.Request) string {
+	if pub, _ := h.publicOrigin(); pub != "" {
+		if u, err := url.Parse(pub); err == nil && strings.EqualFold(u.Host, r.Host) {
+			return pub
+		}
+	}
+	return requestBase(r)
+}
+
+// requestBase 是直连时的地址。
+func requestBase(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return (&url.URL{Scheme: scheme, Host: r.Host}).String()
 }
 
 func (h *Handler) tokenDelete(c *ctx) error {
@@ -134,15 +155,19 @@ func (h *Handler) sessionRevoke(c *ctx) error {
 // ---- 系统
 
 type systemData struct {
-	Version, Go, ConfigPath, StoreDriver, StorePath, Admin, Metrics string
-	Started, Built                                                  time.Time
-	Uptime                                                          string
-	MemLimit, HeapInuse, Sys                                        uint64
-	Goroutines, Procs                                               int
-	Writable, Pprof                                                 bool
-	Reload                                                          *app.ReloadStatus
-	Dropped                                                         uint64
-	Config                                                          string
+	Version, Go, ConfigPath, StoreDriver, StorePath string
+	Started, Built                                  time.Time
+	Uptime                                          string
+	MemLimit, HeapInuse, Sys                        uint64
+	Goroutines, Procs                               int
+	Writable                                        bool
+	Reload                                          *app.ReloadStatus
+	Dropped                                         uint64
+	Config                                          string
+	// 管理入口（后台、API、指标）
+	MgmtAddr, PullAddr  string // MgmtAddr 为空表示和拉取入口共用端口
+	Allow, ProxiedAllow string
+	Metrics, Pprof      bool
 }
 
 func (h *Handler) systemPage(c *ctx) error {
@@ -152,10 +177,13 @@ func (h *Handler) systemPage(c *ctx) error {
 	runtime.ReadMemStats(&ms)
 	d := systemData{
 		Version: Version(), Go: runtime.Version(), ConfigPath: h.app.ConfigPath(), StoreDriver: cfg.Admin.Store.Driver,
-		StorePath: cfg.Admin.Store.Path, Admin: cfg.Listen.Admin, Metrics: cfg.Listen.Metrics,
-		Started: h.app.Started, Built: rt.Built, Uptime: fmtDur(c.lang, c.now.Sub(h.app.Started)),
+		StorePath: cfg.Admin.Store.Path,
+		Started:   h.app.Started, Built: rt.Built, Uptime: fmtDur(c.lang, c.now.Sub(h.app.Started)),
 		HeapInuse: ms.HeapInuse, Sys: ms.Sys, Goroutines: runtime.NumGoroutine(), Procs: runtime.GOMAXPROCS(0),
-		Writable: h.app.Store.Writable(), Pprof: cfg.Metrics.Pprof, Reload: h.app.LastReload(), Dropped: h.app.AccessLogDropped(),
+		Writable: h.app.Store.Writable(), Reload: h.app.LastReload(), Dropped: h.app.AccessLogDropped(),
+		MgmtAddr: cfg.Listen.Admin, PullAddr: cmp.Or(cfg.Listen.HTTP, cfg.Listen.HTTPS),
+		Allow: strings.Join(cfg.Admin.Allow, ", "), ProxiedAllow: strings.Join(cfg.Admin.ProxiedAllow, ", "),
+		Metrics: cfg.Metrics.Enabled, Pprof: cfg.Metrics.Enabled && cfg.Metrics.Pprof,
 	}
 	if l := debug.SetMemoryLimit(-1); l > 0 && l < 1<<62 {
 		d.MemLimit = uint64(l)

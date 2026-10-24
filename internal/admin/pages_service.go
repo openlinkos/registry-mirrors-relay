@@ -44,7 +44,7 @@ func (h *Handler) redirectHostDelete(c *ctx) error {
 // ---- 入口与用法
 
 type entranceView struct {
-	Name, Hosts, Listen, Upstream, Auth string
+	Name, Hosts, Upstream, Auth, Page string
 }
 
 type snippetView struct {
@@ -52,13 +52,14 @@ type snippetView struct {
 }
 
 type usageData struct {
-	Entrances []entranceView
-	Hosts     []string // 单域名入口的域名，可以选来生成配置
-	Host      string
-	Scheme    string
-	Snippets  []snippetView
-	Fixed     []entranceView // 固定上游的入口（每个上游一个子域名）
-	Basic     bool
+	Entrances  []entranceView
+	Hosts      []string // 单域名入口的域名，可以选来生成配置
+	Host       string
+	Scheme     string
+	Snippets   []snippetView
+	Fixed      []entranceView // 固定上游的入口（每个上游一个子域名）
+	Basic      bool
+	ShowStatus bool // 用法页上显示服务状态（site.show_status）
 }
 
 var snippetHostRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$`)
@@ -66,12 +67,9 @@ var snippetHostRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1
 func (h *Handler) usagePage(c *ctx) error {
 	rt := h.app.Runtime()
 	cfg := rt.Config
-	d := usageData{Scheme: "https"}
+	d := usageData{Scheme: "https", ShowStatus: rt.Site.ShowStatus}
 	for _, e := range cfg.Entrances {
-		ev := entranceView{Name: e.Name, Hosts: strings.Join(e.Hosts, ", "), Listen: e.Listen, Upstream: e.Upstream, Auth: e.Auth}
-		if ev.Listen == "" {
-			ev.Listen = cfg.Listen.HTTP
-		}
+		ev := entranceView{Name: e.Name, Hosts: strings.Join(e.Hosts, ", "), Upstream: e.Upstream, Auth: e.Auth, Page: e.Page}
 		d.Entrances = append(d.Entrances, ev)
 		if e.Auth == "basic" {
 			d.Basic = true

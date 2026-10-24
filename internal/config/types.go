@@ -26,10 +26,11 @@ type Config struct {
 
 // Listen 是各个监听地址，留空表示不开。
 type Listen struct {
-	HTTP    string `yaml:"http"`    // 拉取入口（明文），放在 CDN 或反向代理之后时用
-	HTTPS   string `yaml:"https"`   // 拉取入口（TLS），tls.mode 不为 off 时用
-	Admin   string `yaml:"admin"`   // 管理后台，默认只在本机
-	Metrics string `yaml:"metrics"` // Prometheus 指标，默认只在本机
+	HTTP  string `yaml:"http"`  // 拉取入口（明文），放在 CDN 或反向代理之后时用
+	HTTPS string `yaml:"https"` // 拉取入口（TLS），tls.mode 不为 off 时用
+	// Admin 是单独的管理端口：管理后台、管理 API 和指标都在这里，拉取端口上就不再提供。
+	// 留空（默认）时它们和拉取入口共用端口，只回应本机或内网直连的请求，见 admin.allow。
+	Admin string `yaml:"admin"`
 }
 
 // TLS 决定 HTTPS 入口的证书来源。
@@ -66,14 +67,13 @@ type Site struct {
 	ShowStatus bool `yaml:"show_status"`
 }
 
-// Entrance 是一个拉取入口。
-//   - 写了 Upstream：这个入口固定转发到该上游（每个上游一个子域名，或每个上游一个端口）。
+// Entrance 是一个拉取入口，按 Host 匹配。
+//   - 写了 Upstream：这个入口固定转发到该上游（每个上游一个子域名）。
 //   - 没写 Upstream：单域名入口，按路径前缀（/v2/ghcr.io/...）、containerd 的 ns 参数选上游，
 //     都没有时用 DefaultUpstream（Docker 的 registry-mirrors 发来的就是这种请求）。
 type Entrance struct {
 	Name            string   `yaml:"name"`
-	Hosts           []string `yaml:"hosts"`  // 匹配的 Host（不含端口），"*" 匹配任意 Host
-	Listen          string   `yaml:"listen"` // 按端口区分时的独立监听地址，如 ":5003"；留空表示用 listen.http/https
+	Hosts           []string `yaml:"hosts"` // 匹配的 Host（不含端口），"*" 匹配任意 Host
 	Upstream        string   `yaml:"upstream"`
 	DefaultUpstream string   `yaml:"default_upstream"`
 	Auth            string   `yaml:"auth"` // none | basic
@@ -190,8 +190,15 @@ type Proxy struct {
 
 // Admin 是管理后台。
 type Admin struct {
-	// PublicURL 是从浏览器访问后台的地址，用于 Cookie 和来源检查。留空时只接受回环地址访问。
-	PublicURL    string       `yaml:"public_url"`
+	// PublicURL 是经反向代理访问后台时的地址，用于 Cookie、来源检查和 proxied_allow。
+	PublicURL string `yaml:"public_url"`
+	// Allow：直连（请求里没有任何代理头）时，允许打开管理后台、管理 API 和指标的对端地址。
+	// 默认 loopback 和 private_ranges：kubectl port-forward、SSH 隧道、集群里的 Prometheus 都能用，
+	// 经 CDN、反向代理来的请求一律当作不存在（404）。写成空列表表示关掉。
+	Allow []string `yaml:"allow"`
+	// ProxiedAllow：经反向代理访问后台时，允许的客户端地址（取自受信任代理的 X-Forwarded-For）。
+	// 默认为空，即不允许经代理访问；要用时还得写 public_url 和 client_ip.trusted_proxies。
+	ProxiedAllow []string     `yaml:"proxied_allow"`
 	Store        Store        `yaml:"store"`
 	InitialAdmin InitialAdmin `yaml:"initial_admin"`
 	// APITokens 是写在配置里的管理 API 令牌（适合自动化和 k8s Secret）。也可以在后台创建，存进运营数据库。
@@ -234,7 +241,8 @@ type AccessLog struct {
 	Keep    int    `yaml:"keep"`     // 保留几个旧文件
 }
 
-// Metrics 是指标和调试接口。
+// Metrics 是 Prometheus 指标和调试接口，和管理后台在同一个入口（同样受 admin.allow 限制）。
 type Metrics struct {
-	Pprof bool `yaml:"pprof"` // 在指标监听上开 /debug/pprof
+	Enabled bool `yaml:"enabled"` // 提供 /metrics，默认关
+	Pprof   bool `yaml:"pprof"`   // 再提供 /debug/pprof/，要先开 enabled
 }

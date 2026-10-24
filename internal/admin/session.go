@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// 会话的期限，和 Origin 的后台一样。
+// 会话的期限。
 const (
 	sessionIdle   = 30 * time.Minute // 这么久没有操作就要重新登录
 	sessionMax    = 12 * time.Hour   // 从登录起最长这么久

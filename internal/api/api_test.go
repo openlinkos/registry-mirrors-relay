@@ -93,6 +93,9 @@ func TestAuthAndRoles(t *testing.T) {
 	if code, _, _ := e.call(t, "GET", "/status", viewerTok, nil); code != 200 {
 		t.Fatalf("viewer 可以读：%d", code)
 	}
+	if code, m, _ := e.call(t, "GET", "/status/report", viewerTok, nil); code != 200 || m["status"] == nil || m["upstreams"] == nil {
+		t.Fatalf("服务状态报告：%d %v", code, m)
+	}
 	if code, _, _ := e.call(t, "POST", "/bans", viewerTok, map[string]string{"cidr": "198.51.100.7", "duration": "1h"}); code != 403 {
 		t.Fatalf("viewer 不能写：%d", code)
 	}

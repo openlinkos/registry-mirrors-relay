@@ -86,7 +86,7 @@ func main() {
 	_ = relayLn.Close()
 
 	cfg := fmt.Sprintf(`data_dir: %q
-listen: {http: %q, admin: "", metrics: ""}
+listen: {http: %q}
 entrances:
   - hosts: ["*"]
     upstream: bench.test

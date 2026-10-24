@@ -14,7 +14,7 @@ func TestHistory(t *testing.T) {
 	h.Record("docker.io", false, 0, now.Add(-time.Minute))
 	h.Record("docker.io", true, 50*time.Millisecond, now.Add(-3*time.Hour))
 	h.Record("docker.io", true, 50*time.Millisecond, now.Add(-25*time.Hour)) // 超出 24 小时，被同一格的新数据挤掉或不显示
-	hs := h.hours("docker.io", now)
+	hs := h.Hours("docker.io", now)
 	if len(hs) != Hours || hs[Hours-1].Start != now.Truncate(time.Hour).Unix() || hs[0].Start != now.Truncate(time.Hour).Add(-23*time.Hour).Unix() {
 		t.Fatalf("应返回 24 个整点，最后一个是当前小时：%+v", hs[Hours-1])
 	}
@@ -31,7 +31,7 @@ func TestHistory(t *testing.T) {
 	if total != 3 {
 		t.Fatalf("24 小时以前的数据不应出现：共 %d 次", total)
 	}
-	if hs := h.hours("ghcr.io", now); len(hs) != Hours || hs[0].Total != 0 {
+	if hs := h.Hours("ghcr.io", now); len(hs) != Hours || hs[0].Total != 0 {
 		t.Fatal("没有记录的上游应返回 24 个空格")
 	}
 }

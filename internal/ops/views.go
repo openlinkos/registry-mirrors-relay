@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/status"
 	"github.com/openlinkos/registry-mirrors-relay/internal/store"
 	"github.com/openlinkos/registry-mirrors-relay/internal/upstream"
 )
@@ -164,6 +165,7 @@ type UpstreamView struct {
 	Credentials   bool             `json:"credentials"`
 	Health        *upstream.Health `json:"health,omitempty"`
 	Quota         *upstream.Quota  `json:"quota,omitempty"`
+	Hours         []status.Hour    `json:"hours"` // 近 24 小时每小时的探测结果，旧的在前
 }
 
 // Upstreams 列出启用的上游，按名字排序。
@@ -182,6 +184,7 @@ func (o *Ops) Upstreams() []UpstreamView {
 			Name: n, Registry: c.Registry, BreakerOpen: rt.Pool.Get(n).BreakerOpen(), RedirectHosts: hosts,
 			AddedHosts: append([]string{}, rt.Data.ExtraRedirectHosts[n]...), UnlistedHosts: unlisted[n],
 			Unlisted: c.UnlistedRedirect, Credentials: c.Credentials != nil, Quota: rt.Pool.Get(n).Quota(),
+			Hours: o.app.ProbeHours(n),
 		}
 		if h, ok := health[n]; ok {
 			v.Health = &h
@@ -245,12 +248,14 @@ type SiteView struct {
 	Source    string            `json:"source"` // config | store
 	Updated   time.Time         `json:"updated,omitzero"`
 	UpdatedBy string            `json:"updated_by,omitempty"`
+	// ShowStatus：用法页是否显示服务状态，只来自配置文件（site.show_status）
+	ShowStatus bool `json:"show_status"`
 }
 
 // Site 返回生效的站点信息。
 func (o *Ops) Site() SiteView {
 	rt := o.app.Runtime()
-	v := SiteView{Name: rt.Site.Name, Operator: rt.Site.Operator, Links: rt.Site.Links, Source: "config"}
+	v := SiteView{Name: rt.Site.Name, Operator: rt.Site.Operator, Links: rt.Site.Links, Source: "config", ShowStatus: rt.Site.ShowStatus}
 	if s := rt.Data.Site; s != nil {
 		v.Source, v.Updated, v.UpdatedBy = "store", s.Updated, s.UpdatedBy
 	}
