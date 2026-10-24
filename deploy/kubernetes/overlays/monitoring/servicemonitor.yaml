@@ -7,6 +7,6 @@ spec:
     matchLabels:
       app.kubernetes.io/name: registry-mirrors-relay
   endpoints:
-    - port: metrics
+    - port: http
       path: /metrics
       interval: 30s

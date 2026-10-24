@@ -90,7 +90,7 @@ chart >"$work/c-base.yaml"
 compare "base：Pod 模板" "$podspec" "$work/k-base.yaml" "$work/c-base.yaml" Deployment
 compare "base：Deployment" "$workload" "$work/k-base.yaml" "$work/c-base.yaml" Deployment
 compare "base：配置" "$config" "$work/k-base.yaml" "$work/c-base.yaml"
-compare "base：端口（chart 把指标拆成单独的 Service）" "$ports" "$work/k-base.yaml" "$work/c-base.yaml"
+compare "base：端口" "$ports" "$work/k-base.yaml" "$work/c-base.yaml"
 compare "base：PDB" 'select(.kind == "PodDisruptionBudget") | .spec.minAvailable' "$work/k-base.yaml" "$work/c-base.yaml"
 kz deploy/kubernetes/overlays/single-writable >"$work/k-w.yaml"
 chart --set mode=writable >"$work/c-w.yaml"
@@ -106,6 +106,7 @@ compare "gateway-api：HTTPRoute 规则" 'select(.kind == "HTTPRoute") | .spec.r
 kz deploy/kubernetes/overlays/monitoring >"$work/k-mon.yaml"
 chart -f "$CHART"/test-values/monitoring.yaml >"$work/c-mon.yaml"
 compare "monitoring：ServiceMonitor" 'select(.kind == "ServiceMonitor") | .spec.endpoints | ... comments="" | ... style="" | sort_keys(..)' "$work/k-mon.yaml" "$work/c-mon.yaml"
+compare "monitoring：配置（打开指标）" "$config" "$work/k-mon.yaml" "$work/c-mon.yaml"
 if cmp -s deploy/kubernetes/overlays/monitoring/dashboard.json "$CHART"/files/dashboard.json; then ok "Grafana 面板"; else bad "两份 dashboard.json 不一致"; fi
 app="$("$YQ" '.appVersion' "$CHART"/Chart.yaml)"
 tag="$("$YQ" '.images[0].newTag' deploy/kubernetes/base/kustomization.yaml)"

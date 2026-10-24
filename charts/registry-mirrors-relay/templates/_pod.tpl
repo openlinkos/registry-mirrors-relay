@@ -57,10 +57,10 @@ spec:
       ports:
         - name: http
           containerPort: {{ .Values.containerPorts.http }}
+        {{- if .Values.admin.separatePort }}
         - name: admin
           containerPort: {{ .Values.containerPorts.admin }}
-        - name: metrics
-          containerPort: {{ .Values.containerPorts.metrics }}
+        {{- end }}
       {{- if or .Values.admin.existingSecret .Values.extraEnv }}
       env:
         {{- if .Values.admin.existingSecret }}

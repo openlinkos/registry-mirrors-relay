@@ -1,0 +1,3 @@
+# 0.2.0 去掉了指标端口
+containerPorts:
+  metrics: 9180

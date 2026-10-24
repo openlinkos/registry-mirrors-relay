@@ -3,4 +3,5 @@ image:
 service:
   type: NodePort
   nodePort: 30080
+  externalTrafficPolicy: Local
 configRollout: restartOnly

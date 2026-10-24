@@ -8,19 +8,12 @@ spec:
       app.kubernetes.io/name: registry-mirrors-relay
   policyTypes: [Ingress, Egress]
   ingress:
-    # 拉取入口：节点上的 containerd、集群里的 Pod、Ingress 或 Gateway 都会连
+    # 拉取入口（也是管理后台和指标的入口）：节点上的 containerd、集群里的 Pod、Ingress、Gateway、Prometheus 都会连。
+    # 管理路径由 relay 自己把关（只接受不经代理的直连）；NetworkPolicy 不能按路径过滤。
+    # kubectl port-forward 不经过 NetworkPolicy
     - ports:
         - port: 8080
           protocol: TCP
-    # 指标：只给监控所在的命名空间（按实际情况改）
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-      ports:
-        - port: 9180
-          protocol: TCP
-    # 管理后台（9090）不放行：kubectl port-forward 不经过 NetworkPolicy
   egress:
     # DNS
     - to:

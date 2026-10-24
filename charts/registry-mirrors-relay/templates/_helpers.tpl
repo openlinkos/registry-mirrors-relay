@@ -107,42 +107,74 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 {{- end -}}
 {{- range $e := index $c "entrances" | default list -}}
-{{- if index $e "listen" -}}
-{{- fail "entrances with their own listen port are not supported by the chart; route by host name instead" -}}
+{{- if hasKey $e "listen" -}}
+{{- fail "entrances[].listen was removed in 0.2.0; route by host name instead" -}}
 {{- end -}}
+{{- end -}}
+{{- if hasKey .Values "adminService" -}}
+{{- fail "adminService was removed in 0.2.0: the admin console is on the pull port; set admin.separatePort: true (and admin.service.port) for its own Service" -}}
+{{- end -}}
+{{- if hasKey .Values.metrics "service" -}}
+{{- fail "metrics.service was removed in 0.2.0: set metrics.enabled; metrics are scraped from the pull port, or the admin port with admin.separatePort" -}}
+{{- end -}}
+{{- if hasKey .Values.containerPorts "metrics" -}}
+{{- fail "containerPorts.metrics was removed in 0.2.0: metrics are served on the management entrance" -}}
+{{- end -}}
+{{- $m := index $c "metrics" | default dict -}}
+{{- if and .Values.metrics.serviceMonitor.enabled (hasKey $m "enabled") (not (index $m "enabled")) -}}
+{{- fail "metrics.serviceMonitor.enabled needs metrics; config.metrics.enabled is false" -}}
+{{- end -}}
+{{- if and (not .Values.admin.separatePort) (has .Values.service.type (list "NodePort" "LoadBalancer")) (ne .Values.service.externalTrafficPolicy "Local") -}}
+{{- fail (printf "service.type %s without externalTrafficPolicy: Local makes outside clients look like cluster addresses, and the admin console shares the pull port; set service.externalTrafficPolicy: Local or admin.separatePort: true" .Values.service.type) -}}
 {{- end -}}
 {{- end -}}
 
-{{/* 生效的配置：用户的 config，加上 chart 定下的监听、数据目录和运营数据的存放方式 */}}
+{{/* 管理入口（后台、API、指标）在哪个端口：共用拉取端口时是 http */}}
+{{- define "rmr.mgmtPort" -}}
+{{- ternary "admin" "http" .Values.admin.separatePort -}}
+{{- end -}}
+
+{{/* 生效的配置：用户的 config，加上 chart 定下的监听、数据目录、运营数据的存放方式和指标开关 */}}
 {{- define "rmr.configMap" -}}
 {{- include "rmr.validate" . -}}
 {{- $cfg := deepCopy (.Values.config | default dict) -}}
 {{- $admin := deepCopy (index $cfg "admin" | default dict) -}}
 {{- $_ := set $admin "store" (dict "driver" (ternary "bolt" "none" (eq .Values.mode "writable"))) -}}
-{{- $owned := dict
-  "data_dir" "/var/lib/registry-mirrors-relay"
-  "listen" (dict
-    "http" (printf ":%v" .Values.containerPorts.http)
-    "admin" (printf ":%v" .Values.containerPorts.admin)
-    "metrics" (printf ":%v" .Values.containerPorts.metrics))
-  "admin" $admin -}}
+{{- $listen := dict "http" (printf ":%v" .Values.containerPorts.http) -}}
+{{- if .Values.admin.separatePort -}}
+{{- $_ := set $listen "admin" (printf ":%v" .Values.containerPorts.admin) -}}
+{{- end -}}
+{{- $owned := dict "data_dir" "/var/lib/registry-mirrors-relay" "listen" $listen "admin" $admin -}}
+{{- if or .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled -}}
+{{- $metrics := deepCopy (index $cfg "metrics" | default dict) -}}
+{{- $_ := set $metrics "enabled" true -}}
+{{- $_ := set $owned "metrics" $metrics -}}
+{{- end -}}
 {{- toYaml (mustMergeOverwrite $cfg $owned) -}}
 {{- end -}}
 
 {{/*
 滚动更新用的 checksum。restartOnly 只看要重启才能生效的字段，和 internal/app/app.go 的 restartNeeded 对应
-（listen、tls、data_dir、admin.store、log.access、limits.tracked_clients；按端口的入口 chart 不支持）。
+（listen、tls、data_dir、admin.store、log.access、log.level、timeouts 的 read_header/idle/shutdown_grace、
+proxy.buffer_size、limits.tracked_clients）。
 */}}
 {{- define "rmr.configChecksum" -}}
 {{- $cfg := fromYaml (include "rmr.configMap" .) -}}
 {{- if eq .Values.configRollout "restartOnly" -}}
 {{- $log := index $cfg "log" | default dict -}}
 {{- $limits := index $cfg "limits" | default dict -}}
+{{- $timeouts := index $cfg "timeouts" | default dict -}}
+{{- $proxy := index $cfg "proxy" | default dict -}}
 {{- $keys := dict
   "listen" (index $cfg "listen")
   "data_dir" (index $cfg "data_dir")
   "store" (index (index $cfg "admin") "store")
   "access_log" (index $log "access")
+  "log_level" (index $log "level")
+  "read_header" (index $timeouts "read_header")
+  "idle" (index $timeouts "idle")
+  "shutdown_grace" (index $timeouts "shutdown_grace")
+  "buffer_size" (index $proxy "buffer_size")
   "tracked_clients" (index $limits "tracked_clients") -}}
 {{- toYaml $keys | sha256sum -}}
 {{- else -}}

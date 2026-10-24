@@ -1,7 +1,4 @@
 {{- if .Values.metrics.serviceMonitor.enabled }}
-{{- if not .Values.metrics.service.enabled }}
-{{- fail "metrics.serviceMonitor.enabled needs metrics.service.enabled" }}
-{{- end }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -15,9 +12,9 @@ spec:
   selector:
     matchLabels:
       {{- include "rmr.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: metrics
+      app.kubernetes.io/component: {{ ternary "admin" "relay" .Values.admin.separatePort }}
   endpoints:
-    - port: metrics
+    - port: {{ include "rmr.mgmtPort" . }}
       path: /metrics
       interval: {{ .Values.metrics.serviceMonitor.interval }}
       {{- with .Values.metrics.serviceMonitor.relabelings }}

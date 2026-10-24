@@ -13,11 +13,17 @@ openssl rand -base64 18 > admin-password
 kubectl -n registry-mirror create secret generic registry-mirrors-relay-admin --from-file=password=admin-password
 
 helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay \
-  --namespace registry-mirror --version 0.1.3 \
+  --namespace registry-mirror --version 0.2.0 \
   --set admin.existingSecret=registry-mirrors-relay-admin
 ```
 
-Open the admin console with `kubectl -n registry-mirror port-forward svc/registry-mirrors-relay-admin 9090` and `http://127.0.0.1:9090/admin/`.
+Open the admin console with `kubectl -n registry-mirror port-forward svc/registry-mirrors-relay 8080:80` and `http://127.0.0.1:8080/admin/`.
+
+## Admin console, admin API and metrics
+
+They share the pull port by default and answer only direct connections from loopback and private addresses (`config.admin.allow`): `kubectl port-forward` and Prometheus scraping the pods work, while anything that comes through an Ingress, a Gateway or a CDN carries forwarding headers and gets 404. Metrics are off unless `metrics.enabled` or `metrics.serviceMonitor.enabled`.
+
+Set `admin.separatePort: true` to move all three to their own port and `<fullname>-admin` Service instead. A NodePort or LoadBalancer pull Service needs either that or `service.externalTrafficPolicy: Local`, because otherwise outside clients arrive with node addresses and look internal; the chart refuses to render the combination.
 
 ## Modes
 
@@ -26,7 +32,7 @@ Open the admin console with `kubectl -n registry-mirror port-forward svc/registr
 
 ## Configuration
 
-`config` is the relay configuration (see [config.example.yaml](https://github.com/openlinkos/registry-mirrors-relay/blob/main/config.example.yaml)) and is rendered into a ConfigMap. The chart sets `data_dir`, `listen` and `admin.store` itself, and rejects `tls`, per-port entrances and secrets written as `value`: mount secrets and reference them with `env` or `file`.
+`config` is the relay configuration (see [config.example.yaml](https://github.com/openlinkos/registry-mirrors-relay/blob/main/config.example.yaml)) and is rendered into a ConfigMap. The chart sets `data_dir`, `listen`, `admin.store` and `metrics.enabled` itself, and rejects `tls` and secrets written as `value`: mount secrets and reference them with `env` or `file`.
 
 ```yaml
 config:
@@ -52,10 +58,10 @@ To let containerd on the nodes pull through the relay, expose it on an address t
 The chart is signed keylessly by this repository's release workflow and has a build provenance attestation:
 
 ```bash
-cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.1.3 \
+cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.2.0 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.1.3 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.2.0 -R openlinkos/registry-mirrors-relay
 ```
 
 ## Requirements
@@ -68,16 +74,15 @@ Kubernetes: `>=1.30.0-0`
 |-----|------|---------|-------------|
 | admin.existingSecret | string | `""` | Name of an existing Secret holding the first administrator's password. There is no default password. With `writable` the administrator must change it at the first sign-in, after which the Secret can be deleted. With `readonly` this is the only administrator and the password stays valid. |
 | admin.existingSecretKey | string | `"password"` | Key in that Secret. |
+| admin.separatePort | bool | `false` | Serve the admin console, the admin API and metrics on their own port (`containerPorts.admin`) instead of the pull port. On the pull port they answer only direct connections from loopback and private addresses (`config.admin.allow`), so Ingress and Gateway traffic never reaches them. Turn this on when the pull Service is a NodePort or LoadBalancer without `externalTrafficPolicy: Local`. |
+| admin.service.port | int | `9090` | With `separatePort`: port of the `<fullname>-admin` ClusterIP Service, for `kubectl port-forward`. |
 | admin.username | string | `"admin"` | User name of the first administrator. |
-| adminService.enabled | bool | `true` | A ClusterIP Service for the admin console (`kubectl port-forward`). Never expose it publicly. |
-| adminService.port | int | `9090` | Service port. |
 | affinity | object | `{}` | Affinity. |
 | commonLabels | object | `{}` | Labels added to every resource. |
-| config | object | `{}` | The relay configuration (see config.example.yaml in the repository), rendered into a ConfigMap. The chart sets `data_dir`, `listen` and `admin.store` itself; `tls` and per-port entrances (`entrances[].listen`) are not supported here. Secrets must come from `env` or `file`, never `value`. |
+| config | object | `{}` | The relay configuration (see config.example.yaml in the repository), rendered into a ConfigMap. The chart sets `data_dir`, `listen`, `admin.store` and `metrics.enabled` itself; `tls` is not supported here. Secrets must come from `env` or `file`, never `value`. |
 | configRollout | string | `"always"` | `always`: any configuration change restarts the pods. `restartOnly`: only changes that need a restart do; the rest are hot-reloaded (within about a minute). |
-| containerPorts.admin | int | `9090` | Admin console and API. |
-| containerPorts.http | int | `8080` | Pull entrance. |
-| containerPorts.metrics | int | `9180` | Prometheus metrics. |
+| containerPorts.admin | int | `9090` | Management port with `admin.separatePort`. |
+| containerPorts.http | int | `8080` | Pull entrance; also the admin console, admin API and metrics unless `admin.separatePort`. |
 | dataDir.sizeLimit | string | `"64Mi"` | sizeLimit of the emptyDir used for the data directory in `readonly` mode. |
 | extraEnv | list | `[]` | Extra environment variables. |
 | extraEnvFrom | list | `[]` | Extra environment sources. |
@@ -101,9 +106,8 @@ Kubernetes: `>=1.30.0-0`
 | livenessProbe | object | `{"failureThreshold":6,"httpGet":{"path":"/healthz","port":"http"},"periodSeconds":10}` | Liveness probe. |
 | metrics.dashboard.enabled | bool | `false` | Create a ConfigMap with a Grafana dashboard. |
 | metrics.dashboard.labels | object | `{"grafana_dashboard":"1"}` | Labels for the Grafana sidecar. |
-| metrics.service.enabled | bool | `true` | A ClusterIP Service for the metrics port. |
-| metrics.service.port | int | `9180` | Service port. |
-| metrics.serviceMonitor.enabled | bool | `false` | Create a Prometheus Operator ServiceMonitor. |
+| metrics.enabled | bool | `false` | Serve Prometheus metrics at `/metrics` on the management entrance (the pull port, or the admin port with `admin.separatePort`). Turned on by `serviceMonitor.enabled` as well. |
+| metrics.serviceMonitor.enabled | bool | `false` | Create a Prometheus Operator ServiceMonitor. Prometheus must scrape the pods directly from a private address. |
 | metrics.serviceMonitor.interval | string | `"30s"` | Scrape interval. |
 | metrics.serviceMonitor.labels | object | `{}` | Extra labels, e.g. for the Prometheus selector. |
 | metrics.serviceMonitor.relabelings | list | `[]` | Relabelings. |
@@ -112,10 +116,10 @@ Kubernetes: `>=1.30.0-0`
 | networkPolicy.dnsTo | list | `[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"kube-system"}}}]` | Peers serving DNS. |
 | networkPolicy.egressExceptIPv4 | list | `["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","100.64.0.0/10","169.254.0.0/16","127.0.0.0/8"]` | IPv4 ranges excluded from HTTPS egress. |
 | networkPolicy.egressExceptIPv6 | list | `["fc00::/7","fe80::/10","::1/128"]` | IPv6 ranges excluded from HTTPS egress. |
-| networkPolicy.enabled | bool | `false` | Create a NetworkPolicy: ingress to the pull entrance and metrics, egress to DNS and public HTTPS only. |
+| networkPolicy.enabled | bool | `false` | Create a NetworkPolicy: ingress to the pull port (and the admin port from `metricsFrom` with `admin.separatePort`), egress to DNS and public HTTPS only. |
 | networkPolicy.extraEgress | list | `[]` | Extra egress rules. |
 | networkPolicy.extraIngress | list | `[]` | Extra ingress rules. |
-| networkPolicy.metricsFrom | list | `[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"monitoring"}}}]` | Peers allowed to scrape metrics. |
+| networkPolicy.metricsFrom | list | `[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"monitoring"}}}]` | With `admin.separatePort`: peers allowed to reach the admin port, e.g. Prometheus. |
 | nodeSelector | object | `{}` | Node selector. |
 | pdb.enabled | bool | `true` | Create a PodDisruptionBudget in `readonly` mode with more than one replica. |
 | pdb.minAvailable | int | `1` | minAvailable. |

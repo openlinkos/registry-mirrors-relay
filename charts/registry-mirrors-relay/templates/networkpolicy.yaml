@@ -15,14 +15,17 @@ spec:
     - ports:
         - port: {{ .Values.containerPorts.http }}
           protocol: TCP
+    {{- if .Values.admin.separatePort }}
     {{- with .Values.networkPolicy.metricsFrom }}
+    # 单独的管理端口：只给 metricsFrom（例如 Prometheus）。kubectl port-forward 不经过 NetworkPolicy
     - from:
         {{- toYaml . | nindent 8 }}
       ports:
-        - port: {{ $.Values.containerPorts.metrics }}
+        - port: {{ $.Values.containerPorts.admin }}
           protocol: TCP
     {{- end }}
-    # 管理后台不放行：kubectl port-forward 不经过 NetworkPolicy
+    {{- end }}
+    # 共用端口时管理路径由 relay 自己把关（只接受不经代理的直连）：NetworkPolicy 不能按路径过滤
     {{- with .Values.networkPolicy.extraIngress }}
     {{- toYaml . | nindent 4 }}
     {{- end }}

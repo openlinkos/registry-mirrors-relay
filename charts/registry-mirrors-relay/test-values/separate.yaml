@@ -1,0 +1,13 @@
+# 单独的管理端口：NodePort 也不用 externalTrafficPolicy: Local；ServiceMonitor 抓 admin 口，NetworkPolicy 放行 metricsFrom
+admin:
+  separatePort: true
+service:
+  type: NodePort
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+networkPolicy:
+  enabled: true
+config:
+  metrics: {pprof: true}

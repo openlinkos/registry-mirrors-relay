@@ -20,8 +20,8 @@ ARG TARGETPLATFORM
 COPY --from=files /out/ /
 COPY --chmod=0755 $TARGETPLATFORM/registry-mirrors-relay /usr/local/bin/registry-mirrors-relay
 USER 65532:65532
-# 8080 拉取入口；9090 管理后台（宿主机上只映射到 127.0.0.1）；9180 指标
-EXPOSE 8080 9090 9180
+# 8080 拉取入口；9090 管理后台、管理 API 和指标（宿主机上只映射到 127.0.0.1）
+EXPOSE 8080 9090
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["/usr/local/bin/registry-mirrors-relay", "probe"]
 ENTRYPOINT ["/usr/local/bin/registry-mirrors-relay"]
 CMD ["serve"]

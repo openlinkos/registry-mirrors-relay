@@ -2,9 +2,9 @@
 data_dir: /var/lib/registry-mirrors-relay
 
 listen:
+  # 拉取入口。管理后台（/admin/）也在这个端口，只接受不经代理的直连（kubectl port-forward），
+  # 经 Ingress、Gateway 来的请求是 404。指标默认关，monitoring overlay 会打开
   http: ":8080"
-  admin: ":9090"     # 只通过 kubectl port-forward 访问
-  metrics: ":9180"
 
 admin:
   # 多副本时运营数据只读：账号、规则、封禁都写在这个文件里，后台只能查看

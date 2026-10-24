@@ -2,9 +2,7 @@
 data_dir: /var/lib/registry-mirrors-relay
 
 listen:
-  http: ":8080"
-  admin: ":9090"     # 只通过 kubectl port-forward 访问
-  metrics: ":9180"
+  http: ":8080"      # 管理后台也在这个端口，只通过 kubectl port-forward 访问
 
 admin:
   store: {driver: bolt}

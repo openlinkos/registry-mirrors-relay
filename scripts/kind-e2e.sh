@@ -31,9 +31,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# admin_login：经 port-forward 用 Secret 里的口令登录，输出登录后跳到的地址
+# admin_login [Service] [端口]：经 port-forward 用 Secret 里的口令登录，输出登录后跳到的地址。
+# 默认是三合一：后台在拉取入口的 Service（80 口）上。
 admin_login() {
-  kubectl -n "$NS" port-forward svc/registry-mirrors-relay-admin 19090:9090 >/dev/null 2>&1 &
+  kubectl -n "$NS" port-forward "svc/${1:-registry-mirrors-relay}" "19090:${2:-80}" >/dev/null 2>&1 &
   pf=$!
   for _ in $(seq 1 30); do curl -fs -o /dev/null http://127.0.0.1:19090/admin/login && break; sleep 1; done
   curl -s -o /dev/null -w '%{redirect_url}' -H 'Origin: http://127.0.0.1:19090' \
@@ -118,7 +119,18 @@ fi
 
 echo "管理后台"
 loc="$(admin_login)"
-if [ "$loc" = "http://127.0.0.1:19090/admin/" ]; then ok "用 Secret 里的口令登录管理后台"; else bad "登录后跳到了 $loc"; fi
+if [ "$loc" = "http://127.0.0.1:19090/admin/" ]; then ok "经 port-forward 用 Secret 里的口令登录管理后台（和拉取共用端口）"; else bad "登录后跳到了 $loc"; fi
+# 集群里的 Pod 直连：能打开后台；带 X-Forwarded-For（像经过 Ingress、CDN）就是 404；指标默认关
+svc=http://registry-mirrors-relay.$NS.svc
+kubectl -n pull run mgmt-check --image=docker.io/library/busybox:1.37 --restart=Never --command -- sh -c \
+  "wget -q -O /dev/null $svc/admin/login && echo direct=200 || echo direct=fail
+   wget -q -O /dev/null --header 'X-Forwarded-For: 198.51.100.7' $svc/admin/login && echo proxied=200 || echo proxied=fail
+   wget -q -O /dev/null $svc/metrics && echo metrics=200 || echo metrics=fail" >/dev/null
+kubectl -n pull wait --for=jsonpath='{.status.phase}'=Succeeded pod/mgmt-check --timeout=120s >/dev/null || true
+out="$(kubectl -n pull logs mgmt-check 2>/dev/null)"
+case "$out" in *direct=200*) ok "集群里的 Pod 直连能打开后台" ;; *) bad "集群里的 Pod 直连打不开后台：$out" ;; esac
+case "$out" in *proxied=fail*) ok "带 X-Forwarded-For 的后台请求是 404" ;; *) bad "带 X-Forwarded-For 的后台请求没有被拒绝：$out" ;; esac
+case "$out" in *metrics=fail*) ok "指标默认关" ;; *) bad "指标默认应关：$out" ;; esac
 
 if [ "$INSTALL" = helm ]; then
   echo "升级成 mode=writable"
@@ -139,6 +151,30 @@ if [ "$INSTALL" = helm ]; then
   fi
   loc="$(admin_login)"
   if [ "$loc" = "http://127.0.0.1:19090/admin/account" ]; then ok "可写模式下第一次登录要求改口令"; else bad "登录后跳到了 $loc"; fi
+
+  echo "管理入口拆到单独的端口"
+  if "$HELM" upgrade relay charts/registry-mirrors-relay -n "$NS" -f deploy/test/kind/values.yaml --set mode=writable \
+    --set admin.separatePort=true --set metrics.enabled=true --wait --timeout 180s >/dev/null &&
+    kubectl -n "$NS" rollout status statefulset/registry-mirrors-relay --timeout=180s >/dev/null; then
+    ok "升级成 admin.separatePort=true"
+  else
+    bad "升级失败"
+  fi
+  loc="$(admin_login registry-mirrors-relay-admin 9090)"
+  if [ "$loc" = "http://127.0.0.1:19090/admin/account" ]; then ok "后台在 -admin 的 9090 上"; else bad "-admin 登录后跳到了 $loc"; fi
+  kubectl -n "$NS" port-forward svc/registry-mirrors-relay 19091:80 >/dev/null 2>&1 &
+  pf=$!
+  for _ in $(seq 1 30); do curl -s -o /dev/null http://127.0.0.1:19091/healthz && break; sleep 1; done
+  code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:19091/admin/login)"
+  kill "$pf" 2>/dev/null || true
+  pf=""
+  if [ "$code" = 404 ]; then ok "拉取端口上不再有后台"; else bad "拉取端口的 /admin/login 返回 $code"; fi
+  kubectl -n "$NS" port-forward svc/registry-mirrors-relay-admin 19092:9090 >/dev/null 2>&1 &
+  pf=$!
+  for _ in $(seq 1 30); do curl -s -o /dev/null http://127.0.0.1:19092/admin/login && break; sleep 1; done
+  if curl -fs http://127.0.0.1:19092/metrics | grep -q '^relay_'; then ok "指标在 -admin 的 9090 上"; else bad "-admin 上抓不到指标"; fi
+  kill "$pf" 2>/dev/null || true
+  pf=""
 fi
 
 if [ "$fail" = 0 ]; then echo "全部通过"; else echo "有检查失败"; fi

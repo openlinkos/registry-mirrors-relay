@@ -1,0 +1,7 @@
+# 开了 ServiceMonitor 又在 config 里关掉指标
+metrics:
+  serviceMonitor:
+    enabled: true
+config:
+  metrics:
+    enabled: false

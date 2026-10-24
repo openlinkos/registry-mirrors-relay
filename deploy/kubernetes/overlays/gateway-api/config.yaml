@@ -2,9 +2,7 @@
 data_dir: /var/lib/registry-mirrors-relay
 
 listen:
-  http: ":8080"
-  admin: ":9090"
-  metrics: ":9180"
+  http: ":8080"      # 经 Gateway 来的管理请求是 404，后台只通过 kubectl port-forward 访问
 
 client_ip:
   # 信任集群内（Gateway 的 Pod）发来的 X-Forwarded-For。集群的 Pod 网段不在私有地址段里时，改成实际的网段。

@@ -17,7 +17,13 @@ helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mir
   --set admin.existingSecret=registry-mirrors-relay-admin
 ```
 
-Open the admin console with `kubectl -n registry-mirror port-forward svc/registry-mirrors-relay-admin 9090` and `http://127.0.0.1:9090/admin/`.
+Open the admin console with `kubectl -n registry-mirror port-forward svc/registry-mirrors-relay 8080:80` and `http://127.0.0.1:8080/admin/`.
+
+## Admin console, admin API and metrics
+
+They share the pull port by default and answer only direct connections from loopback and private addresses (`config.admin.allow`): `kubectl port-forward` and Prometheus scraping the pods work, while anything that comes through an Ingress, a Gateway or a CDN carries forwarding headers and gets 404. Metrics are off unless `metrics.enabled` or `metrics.serviceMonitor.enabled`.
+
+Set `admin.separatePort: true` to move all three to their own port and `<fullname>-admin` Service instead. A NodePort or LoadBalancer pull Service needs either that or `service.externalTrafficPolicy: Local`, because otherwise outside clients arrive with node addresses and look internal; the chart refuses to render the combination.
 
 ## Modes
 
@@ -26,7 +32,7 @@ Open the admin console with `kubectl -n registry-mirror port-forward svc/registr
 
 ## Configuration
 
-`config` is the relay configuration (see [config.example.yaml](https://github.com/openlinkos/registry-mirrors-relay/blob/main/config.example.yaml)) and is rendered into a ConfigMap. The chart sets `data_dir`, `listen` and `admin.store` itself, and rejects `tls`, per-port entrances and secrets written as `value`: mount secrets and reference them with `env` or `file`.
+`config` is the relay configuration (see [config.example.yaml](https://github.com/openlinkos/registry-mirrors-relay/blob/main/config.example.yaml)) and is rendered into a ConfigMap. The chart sets `data_dir`, `listen`, `admin.store` and `metrics.enabled` itself, and rejects `tls` and secrets written as `value`: mount secrets and reference them with `env` or `file`.
 
 ```yaml
 config:

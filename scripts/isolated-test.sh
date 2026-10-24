@@ -3,7 +3,8 @@
 # 被引去直连上游（认证、重定向都由 relay 在服务端处理）。拉到的 digest 和直接从上游取的比对。
 #
 # 覆盖的客户端：经典存储和 containerd 存储的 Docker、skopeo、crane、ctr。
-# 覆盖的写法：每个上游一个端口的入口；单域名入口的根路径（daemon.json 的 registry-mirrors）、路径前缀、ns（ctr + hosts.toml）。
+# 覆盖的写法：每个上游一个域名的入口（*.relay.test，网络别名）；单域名入口的根路径（daemon.json 的 registry-mirrors）、
+# 路径前缀、ns（ctr + hosts.toml）。另外检查和拉取共用端口的管理后台、指标只接受不经代理的直连。
 #
 # 用法：scripts/isolated-test.sh <relay 的 linux 二进制>
 #       IMAGE=<镜像> scripts/isolated-test.sh     # 测试发布的镜像本身：用镜像的入口、默认配置路径和 HEALTHCHECK
@@ -59,14 +60,17 @@ else
     -v "$work/relay:/relay:ro" -v "$CFG:/config.yaml:ro" -v "$work/logs:/logs" \
     "$BASE" /relay serve -config /config.yaml >/dev/null
 fi
-docker network connect --alias "$RELAY" "$NET" "$RELAY"
+HOSTS="docker.relay.test gcr.relay.test ghcr.relay.test k8s.relay.test quay.relay.test"
+aliases=(--alias "$RELAY")
+for h in $HOSTS; do aliases+=(--alias "$h"); done
+docker network connect "${aliases[@]}" "$NET" "$RELAY"
 for _ in $(seq 1 30); do
   docker exec "$RELAY" "$RBIN" probe -url http://127.0.0.1:5000/healthz 2>/dev/null && break
   sleep 1
 done
 
-# 两个 Docker：经典存储、containerd 存储。都把单域名入口配成 registry-mirrors，五个端口都允许明文
-insecure="$(for p in 5000 5001 5002 5003 5004 5005; do printf '"%s:%s",' "$RELAY" "$p"; done)"
+# 两个 Docker：经典存储、containerd 存储。都把单域名入口配成 registry-mirrors，所有入口都允许明文
+insecure="$(for h in "$RELAY" $HOSTS; do printf '"%s:5000",' "$h"; done)"
 mkdir -p "$work/classic" "$work/ctrd"
 printf '{"features":{"containerd-snapshotter":false},"registry-mirrors":["http://%s:5000"],"insecure-registries":[%s]}\n' "$RELAY" "${insecure%,}" >"$work/classic/daemon.json"
 printf '{"registry-mirrors":["http://%s:5000"],"insecure-registries":[%s]}\n' "$RELAY" "${insecure%,}" >"$work/ctrd/daemon.json"
@@ -80,20 +84,20 @@ done
 direct() { echo "sha256:$(docker run --rm "$SK" inspect --raw "docker://$1" 2>/dev/null | sha256sum | cut -d' ' -f1)"; }
 dpull() { docker exec "$P-$1" docker pull "$2" 2>&1 | sed -n 's/^Digest: //p'; }
 
-echo "每个上游一个端口：两种 Docker、skopeo（完整下载）、crane"
-PORT_CASES=(
-  "5001 library/hello-world:latest docker.io/library/hello-world:latest"
-  "5001 library/alpine:3.22 docker.io/library/alpine:3.22"
-  "5002 distroless/static:nonroot gcr.io/distroless/static:nonroot"
-  "5003 containerd/busybox:1.36 ghcr.io/containerd/busybox:1.36"
-  "5004 pause:3.10 registry.k8s.io/pause:3.10"
-  "5004 coredns/coredns:v1.12.0 registry.k8s.io/coredns/coredns:v1.12.0"
-  "5005 prometheus/busybox:latest quay.io/prometheus/busybox:latest"
+echo "每个上游一个域名：两种 Docker、skopeo（完整下载）、crane"
+HOST_CASES=(
+  "docker.relay.test library/hello-world:latest docker.io/library/hello-world:latest"
+  "docker.relay.test library/alpine:3.22 docker.io/library/alpine:3.22"
+  "gcr.relay.test distroless/static:nonroot gcr.io/distroless/static:nonroot"
+  "ghcr.relay.test containerd/busybox:1.36 ghcr.io/containerd/busybox:1.36"
+  "k8s.relay.test pause:3.10 registry.k8s.io/pause:3.10"
+  "k8s.relay.test coredns/coredns:v1.12.0 registry.k8s.io/coredns/coredns:v1.12.0"
+  "quay.relay.test prometheus/busybox:latest quay.io/prometheus/busybox:latest"
 )
-for c in "${PORT_CASES[@]}"; do
-  read -r port name up <<<"$c"
+for c in "${HOST_CASES[@]}"; do
+  read -r host name up <<<"$c"
   want="$(direct "$up")"
-  ref="$RELAY:$port/$name"
+  ref="$host:5000/$name"
   for d in classic ctrd; do
     got="$(dpull "$d" "$ref")"
     [ "$got" = "$want" ] && ok "$d $ref" || bad "$d $ref：'$got'，上游 '$want'"
@@ -147,6 +151,16 @@ hops="$(jq -r '[.redirect1, .redirect2, .redirect3] | map(select(. != null)) | j
 [ "$ns" -gt 0 ] && ok "收到 $ns 个带 ns=ghcr.io 的请求" || bad "没有收到带 ns 的请求"
 echo "  服务端跟随的跳转："
 printf '%s\n' "$hops" | sed 's/^/    /'
+
+echo "管理后台和指标（和拉取共用 5000）"
+# 同一网络里的容器直连：能打开后台和指标；带 X-Forwarded-For（像经过反向代理）就是 404
+mg="$(docker run --rm --network "$NET" --entrypoint sh "$CR" -c "
+  wget -q -O /dev/null http://$RELAY:5000/admin/login && echo direct=200 || echo direct=fail
+  wget -q -O /dev/null --header 'X-Forwarded-For: 198.51.100.7' http://$RELAY:5000/admin/login && echo proxied=200 || echo proxied=fail
+  wget -q -O - http://$RELAY:5000/metrics | grep -q '^relay_' && echo metrics=200 || echo metrics=fail" 2>/dev/null)"
+case "$mg" in *direct=200*) ok "直连能打开后台" ;; *) bad "直连打不开后台：$mg" ;; esac
+case "$mg" in *proxied=fail*) ok "带 X-Forwarded-For 的后台请求是 404" ;; *) bad "带 X-Forwarded-For 的后台请求没有被拒绝：$mg" ;; esac
+case "$mg" in *metrics=200*) ok "直连能抓指标" ;; *) bad "抓不到指标：$mg" ;; esac
 
 if [ -n "$IMAGE" ]; then
   echo "镜像"

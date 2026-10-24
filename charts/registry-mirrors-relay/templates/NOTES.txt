@@ -14,10 +14,17 @@ To let containerd on the nodes pull through it, write for each upstream (docker.
     capabilities = ["pull", "resolve"]
 {{- end }}
 
-Admin console (never expose it publicly):
+Admin console{{ if or .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }} and /metrics{{ end }} (direct connections from loopback and private addresses only;
+requests through Ingress, Gateway or a CDN get 404):
+{{- if .Values.admin.separatePort }}
 
-  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "rmr.fullname" . }}-admin {{ .Values.adminService.port }}
-  # then open http://127.0.0.1:{{ .Values.adminService.port }}/admin/
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "rmr.fullname" . }}-admin {{ .Values.admin.service.port }}
+  # then open http://127.0.0.1:{{ .Values.admin.service.port }}/admin/
+{{- else }}
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "rmr.fullname" . }} 8080:{{ .Values.service.port }}
+  # then open http://127.0.0.1:8080/admin/
+{{- end }}
 {{- if .Values.admin.existingSecret }}
 
 The first administrator is "{{ .Values.admin.username }}" with the password from Secret {{ .Values.admin.existingSecret }}.

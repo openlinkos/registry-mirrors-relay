@@ -52,7 +52,13 @@
       "properties": {
         "existingSecret": { "type": "string" },
         "existingSecretKey": { "type": "string", "minLength": 1 },
-        "username": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" }
+        "username": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+        "separatePort": { "type": "boolean" },
+        "service": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "port": { "$ref": "#/definitions/port" } }
+        }
       }
     },
     "containerPorts": {
@@ -61,7 +67,7 @@
       "properties": {
         "http": { "$ref": "#/definitions/port" },
         "admin": { "$ref": "#/definitions/port" },
-        "metrics": { "$ref": "#/definitions/port" }
+        "metrics": { "description": "Removed in 0.2.0: metrics are served on the management entrance" }
       }
     },
     "service": {
@@ -77,23 +83,13 @@
         "loadBalancerSourceRanges": { "type": "array", "items": { "type": "string" } }
       }
     },
-    "adminService": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "enabled": { "type": "boolean" },
-        "port": { "$ref": "#/definitions/port" }
-      }
-    },
+    "adminService": { "description": "Removed in 0.2.0: use admin.separatePort and admin.service.port" },
     "metrics": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "service": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": { "enabled": { "type": "boolean" }, "port": { "$ref": "#/definitions/port" } }
-        },
+        "enabled": { "type": "boolean" },
+        "service": { "description": "Removed in 0.2.0: metrics are served on the management entrance" },
         "serviceMonitor": {
           "type": "object",
           "additionalProperties": false,

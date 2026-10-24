@@ -25,8 +25,8 @@ fullnameOverride: ""
 commonLabels: {}
 
 # -- The relay configuration (see config.example.yaml in the repository), rendered into a ConfigMap.
-# The chart sets `data_dir`, `listen` and `admin.store` itself; `tls` and per-port entrances (`entrances[].listen`)
-# are not supported here. Secrets must come from `env` or `file`, never `value`.
+# The chart sets `data_dir`, `listen`, `admin.store` and `metrics.enabled` itself; `tls` is not supported here.
+# Secrets must come from `env` or `file`, never `value`.
 config: {}
 
 # -- `always`: any configuration change restarts the pods.
@@ -42,14 +42,20 @@ admin:
   existingSecretKey: password
   # -- User name of the first administrator.
   username: admin
+  # -- Serve the admin console, the admin API and metrics on their own port (`containerPorts.admin`) instead of
+  # the pull port. On the pull port they answer only direct connections from loopback and private addresses
+  # (`config.admin.allow`), so Ingress and Gateway traffic never reaches them. Turn this on when the pull Service is a
+  # NodePort or LoadBalancer without `externalTrafficPolicy: Local`.
+  separatePort: false
+  service:
+    # -- With `separatePort`: port of the `<fullname>-admin` ClusterIP Service, for `kubectl port-forward`.
+    port: 9090
 
 containerPorts:
-  # -- Pull entrance.
+  # -- Pull entrance; also the admin console, admin API and metrics unless `admin.separatePort`.
   http: 8080
-  # -- Admin console and API.
+  # -- Management port with `admin.separatePort`.
   admin: 9090
-  # -- Prometheus metrics.
-  metrics: 9180
 
 service:
   # -- Service type for the pull entrance. Use NodePort or LoadBalancer when node containerd should pull through it.
@@ -67,20 +73,12 @@ service:
   # -- loadBalancerSourceRanges for LoadBalancer.
   loadBalancerSourceRanges: []
 
-adminService:
-  # -- A ClusterIP Service for the admin console (`kubectl port-forward`). Never expose it publicly.
-  enabled: true
-  # -- Service port.
-  port: 9090
-
 metrics:
-  service:
-    # -- A ClusterIP Service for the metrics port.
-    enabled: true
-    # -- Service port.
-    port: 9180
+  # -- Serve Prometheus metrics at `/metrics` on the management entrance (the pull port, or the admin port with
+  # `admin.separatePort`). Turned on by `serviceMonitor.enabled` as well.
+  enabled: false
   serviceMonitor:
-    # -- Create a Prometheus Operator ServiceMonitor.
+    # -- Create a Prometheus Operator ServiceMonitor. Prometheus must scrape the pods directly from a private address.
     enabled: false
     # -- Scrape interval.
     interval: 30s
@@ -120,9 +118,10 @@ httpRoute:
     backendRequest: 0s
 
 networkPolicy:
-  # -- Create a NetworkPolicy: ingress to the pull entrance and metrics, egress to DNS and public HTTPS only.
+  # -- Create a NetworkPolicy: ingress to the pull port (and the admin port from `metricsFrom` with
+  # `admin.separatePort`), egress to DNS and public HTTPS only.
   enabled: false
-  # -- Peers allowed to scrape metrics.
+  # -- With `admin.separatePort`: peers allowed to reach the admin port, e.g. Prometheus.
   metricsFrom:
     - namespaceSelector:
         matchLabels:

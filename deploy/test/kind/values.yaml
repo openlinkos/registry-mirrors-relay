@@ -7,5 +7,6 @@ image:
 service:
   type: NodePort
   nodePort: 30080
+  externalTrafficPolicy: Local
 admin:
   existingSecret: registry-mirrors-relay-admin

@@ -1,0 +1,3 @@
+# 共用端口时 NodePort 要 externalTrafficPolicy: Local，否则外部客户端看起来像集群内的地址
+service:
+  type: NodePort
