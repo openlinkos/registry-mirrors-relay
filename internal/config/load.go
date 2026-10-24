@@ -159,6 +159,9 @@ func normalize(c *Config) {
 		if e.Auth == "" {
 			e.Auth = "none"
 		}
+		if e.Page == "" {
+			e.Page = "public"
+		}
 		if e.Name == "" {
 			switch {
 			case len(e.Hosts) > 0:

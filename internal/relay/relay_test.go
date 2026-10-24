@@ -67,6 +67,13 @@ entrances:
   - hosts: [private.local]
     upstream: registry.test
     auth: basic
+  - hosts: [hidden.local]
+    upstream: registry.test
+    auth: basic
+    page: login
+  - hosts: [bare.local]
+    upstream: registry.test
+    page: off
 upstreams:
   registry.test:
     registry: registry.test
@@ -440,12 +447,31 @@ func TestBasicAuthEntrance(t *testing.T) {
 	if e.logs.last().UserID != "alice" {
 		t.Fatalf("访问日志应记下用户：%+v", e.logs.last())
 	}
-	// 用法页也要登录
-	if resp, _ := e.do(t, http.MethodGet, "private.local", "/", nil); resp.StatusCode != 401 || !strings.HasPrefix(resp.Header.Get("Www-Authenticate"), "Basic ") {
-		t.Fatalf("没登录时用法页应返回 Basic 质询：%d", resp.StatusCode)
+	// 用法页默认谁都能看，只有拉取要登录；site.json 告诉页面这里要登录
+	if resp, body := e.do(t, http.MethodGet, "private.local", "/", nil); resp.StatusCode != 200 || !strings.Contains(string(body), "<html") {
+		t.Fatalf("page 默认 public，没登录也应显示用法页：%d", resp.StatusCode)
 	}
-	if resp, body := e.do(t, http.MethodGet, "private.local", "/", basic("alice", "correct horse")); resp.StatusCode != 200 || !strings.Contains(string(body), "<html") {
-		t.Fatalf("登录后应显示用法页：%d", resp.StatusCode)
+	if resp, body := e.do(t, http.MethodGet, "private.local", "/site.json", nil); resp.StatusCode != 200 || !strings.Contains(string(body), `"login": true`) {
+		t.Fatalf("要登录的入口的 site.json 应带 login: true：%d %s", resp.StatusCode, body)
+	}
+	// page: login：用法页也要登录
+	if resp, _ := e.do(t, http.MethodGet, "hidden.local", "/", nil); resp.StatusCode != 401 || !strings.HasPrefix(resp.Header.Get("Www-Authenticate"), "Basic ") {
+		t.Fatalf("page: login 时没登录应返回 Basic 质询：%d", resp.StatusCode)
+	}
+	if resp, _ := e.do(t, http.MethodGet, "hidden.local", "/status.json", nil); resp.StatusCode != 401 {
+		t.Fatalf("page: login 时 status.json 也要登录：%d", resp.StatusCode)
+	}
+	if resp, body := e.do(t, http.MethodGet, "hidden.local", "/", basic("alice", "correct horse")); resp.StatusCode != 200 || !strings.Contains(string(body), "<html") {
+		t.Fatalf("page: login 时登录后应显示用法页：%d", resp.StatusCode)
+	}
+	// page: off：没有用法页，拉取照常
+	for _, path := range []string{"/", "/site.json", "/status.json"} {
+		if resp, _ := e.do(t, http.MethodGet, "bare.local", path, nil); resp.StatusCode != 404 {
+			t.Fatalf("page: off 时 %s 应返回 404：%d", path, resp.StatusCode)
+		}
+	}
+	if resp, _ := e.do(t, http.MethodGet, "bare.local", "/v2/", nil); resp.StatusCode != 200 {
+		t.Fatalf("page: off 不影响拉取：%d", resp.StatusCode)
 	}
 	// 公开入口不受影响
 	if resp, _ := e.do(t, http.MethodGet, "reg.local", "/v2/", nil); resp.StatusCode != 200 {

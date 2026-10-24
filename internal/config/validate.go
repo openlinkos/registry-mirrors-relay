@@ -248,6 +248,15 @@ func validate(c *Config, res *Result) []error {
 		default:
 			bad("%s 的 auth 只能是 none 或 basic", where)
 		}
+		switch e.Page {
+		case "public", "off":
+		case "login":
+			if e.Auth != "basic" {
+				bad("%s 的 page: login 要和 auth: basic 一起用：没有账号就没有人能看到用法页", where)
+			}
+		default:
+			bad("%s 的 page 只能是 public、login 或 off", where)
+		}
 	}
 
 	// 访问控制

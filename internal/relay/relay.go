@@ -106,19 +106,16 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 		writeError(w, r, http.StatusForbidden, "DENIED", "拒绝访问")
 		return
 	}
-	// 需要登录的入口连用法页也要登录：没登录的人看不出这是一个镜像站
+	if !isV2 {
+		h.page(w, r, e, rt, client, ent)
+		return
+	}
 	var user *access.User
 	if ent.Auth == "basic" {
 		if user = h.basicAuth(w, r, e, rt, client); user == nil {
 			return
 		}
 		e.UserID = user.Name
-	}
-	if !isV2 {
-		if !rt.Web.Serve(w, r) {
-			http.NotFound(w, r)
-		}
-		return
 	}
 	t, perr := rt.Router.Parse(ent, r.URL)
 	if perr != nil {
@@ -181,6 +178,25 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 		return
 	}
 	h.proxy(w, r, e, up, t)
+}
+
+// page 提供用法页、site.json 和 status.json。入口的 page 是 public（默认）时谁都能看，auth: basic 也只管拉取；
+// login 时先要登录（和拉取同一套账号）；off 时不提供，只剩拉取。
+func (h *Handler) page(w http.ResponseWriter, r *http.Request, e *accesslog.Entry, rt *app.Runtime, client netip.Addr, ent *route.Entrance) {
+	switch ent.Page {
+	case "off":
+		http.NotFound(w, r)
+		return
+	case "login":
+		user := h.basicAuth(w, r, e, rt, client)
+		if user == nil {
+			return
+		}
+		e.UserID = user.Name
+	}
+	if !rt.Web.Serve(w, r, ent.Auth == "basic") {
+		http.NotFound(w, r)
+	}
 }
 
 // basicAuth 校验入口要求的登录，失败时写好响应并返回 nil。

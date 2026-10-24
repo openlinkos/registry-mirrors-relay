@@ -73,8 +73,9 @@ func Defaults() *Config {
 		},
 		TLS: TLS{Mode: "off"},
 		Site: Site{
-			Name:  "Registry Mirrors Relay",
-			Links: map[string]string{},
+			Name:       "Registry Mirrors Relay",
+			Links:      map[string]string{},
+			ShowStatus: true,
 		},
 		// 默认一个单域名入口，匹配任意 Host：docker run 起来就能用 IP:端口 拉取
 		Entrances: []Entrance{{Name: "default", Hosts: []string{"*"}}},

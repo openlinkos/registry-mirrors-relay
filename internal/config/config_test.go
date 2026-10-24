@@ -33,8 +33,14 @@ func TestDefaults(t *testing.T) {
 		t.Fatalf("内置上游应有 5 个，实际 %d", len(c.Upstreams))
 	}
 	e := c.Entrances[0]
-	if e.Hosts[0] != "*" || e.DefaultUpstream != "docker.io" || e.Auth != "none" {
+	if e.Hosts[0] != "*" || e.DefaultUpstream != "docker.io" || e.Auth != "none" || e.Page != "public" {
 		t.Fatalf("默认入口不对：%+v", e)
+	}
+	if !c.Site.ShowStatus {
+		t.Fatal("用法页默认显示服务状态")
+	}
+	if !mustParse(t, "site: {name: x}").Config.Site.ShowStatus {
+		t.Fatal("只写了 site 的其他字段时 show_status 仍默认打开")
 	}
 	if c.Admin.Store.Path != filepath.Join("/var/lib/registry-mirrors-relay", "state.db") {
 		t.Fatalf("运营数据库路径不对：%s", c.Admin.Store.Path)
@@ -107,6 +113,16 @@ upstreams:
 entrances:
   - hosts: [gcr.example.com]
     upstream: gcr.io
+`,
+		"page 写错": `
+entrances:
+  - hosts: [a.example.com]
+    page: hidden
+`,
+		"page: login 但不要求登录": `
+entrances:
+  - hosts: [a.example.com]
+    page: login
 `,
 	}
 	for name, y := range cases {

@@ -41,6 +41,7 @@ type Entrance struct {
 	Upstream        string // 固定上游；为空表示单域名入口
 	DefaultUpstream string
 	Auth            string
+	Page            string // 用法页：public | login | off
 }
 
 // Target 是解析后的请求。
@@ -99,7 +100,7 @@ func New(cfg *config.Config) *Router {
 		r.library[name] = u.LibraryPrefix
 	}
 	for _, ce := range cfg.Entrances {
-		e := &Entrance{Name: ce.Name, Upstream: ce.Upstream, DefaultUpstream: ce.DefaultUpstream, Auth: ce.Auth}
+		e := &Entrance{Name: ce.Name, Upstream: ce.Upstream, DefaultUpstream: ce.DefaultUpstream, Auth: ce.Auth, Page: ce.Page}
 		key := MainListener
 		if ce.Listen != "" {
 			key = ce.Listen

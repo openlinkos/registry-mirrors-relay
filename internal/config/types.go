@@ -61,6 +61,9 @@ type Site struct {
 	Name     string            `yaml:"name"`
 	Operator string            `yaml:"operator"`
 	Links    map[string]string `yaml:"links"` // home、status、terms、privacy、abuse、source
+	// ShowStatus：用法页上显示服务状态（各上游的连通性、近 24 小时的可用率），数据来自 /status.json。
+	// 只有公开也无妨的内容：不含错误原文、地址、额度和请求量。
+	ShowStatus bool `yaml:"show_status"`
 }
 
 // Entrance 是一个拉取入口。
@@ -74,6 +77,9 @@ type Entrance struct {
 	Upstream        string   `yaml:"upstream"`
 	DefaultUpstream string   `yaml:"default_upstream"`
 	Auth            string   `yaml:"auth"` // none | basic
+	// Page：浏览器打开这个入口时的用法页。public（默认）谁都能看，auth: basic 时也只有拉取要登录；
+	// login 也要登录（只能和 auth: basic 一起用）；off 不提供用法页。
+	Page string `yaml:"page"`
 }
 
 // Upstream 是一个上游 registry。名字（map 的键）是镜像地址里的写法，如 docker.io、ghcr.io。
