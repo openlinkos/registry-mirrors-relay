@@ -46,6 +46,8 @@ echo "构建镜像，创建集群（安装方式：$INSTALL）"
 scripts/build-image.sh "$IMAGE" >/dev/null
 kind create cluster --name "$CLUSTER" --wait 120s >/dev/null
 kind load docker-image "$IMAGE" --name "$CLUSTER" >/dev/null
+# 刚建好的集群里 CoreDNS 可能还没就绪，helm test 要按 Service 名解析
+kubectl -n kube-system rollout status deploy/coredns --timeout=120s >/dev/null
 
 echo "部署"
 kubectl create namespace "$NS" >/dev/null
@@ -66,9 +68,7 @@ else
   kubectl -n "$NS" get events
   exit 1
 fi
-if [ "$INSTALL" = helm ]; then
-  if "$HELM" test relay -n "$NS" >/dev/null; then ok "helm test"; else bad "helm test"; fi
-else
+if [ "$INSTALL" = kustomize ]; then
   echo "其他部署方式在 API Server 上校验（不需要额外 CRD 的）"
   kubectl create namespace dryrun >/dev/null
   for d in deploy/kubernetes/overlays/single-writable deploy/kubernetes/overlays/networkpolicy; do
@@ -104,6 +104,17 @@ for want in 'library/busybox/manifests/1.37' 'containerd/busybox/manifests/1.36'
   if grep -F "$want" "$work/logs" | grep -q '"status":200'; then ok "relay 处理了 $want"; else bad "日志里没有 $want"; fi
 done
 if grep -F 'ns=ghcr.io' "$work/logs" | grep -q '/blobs/'; then ok "镜像层经 relay 下载（带 ns=ghcr.io）"; else bad "没有经 relay 下载 ghcr.io 的镜像层"; fi
+
+if [ "$INSTALL" = helm ]; then
+  echo "helm test"
+  if "$HELM" test relay -n "$NS" --logs >"$work/test" 2>&1; then
+    ok "helm test"
+  else
+    bad "helm test"
+    cat "$work/test"
+    kubectl -n "$NS" logs registry-mirrors-relay-test || true
+  fi
+fi
 
 echo "管理后台"
 loc="$(admin_login)"

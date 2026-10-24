@@ -338,6 +338,11 @@ func TestPostChecks(t *testing.T) {
 	form := func() url.Values {
 		return url.Values{"_csrf": {s.csrf}, "cidr": {"198.51.100.7"}, "duration": {"1h"}}
 	}
+	// 改掉第一个字符；原来就是 x 时改成 y，否则改出来的还是同一个令牌
+	wrong := "x" + s.csrf[1:]
+	if wrong == s.csrf {
+		wrong = "y" + s.csrf[1:]
+	}
 	cases := []struct {
 		name string
 		hdr  map[string]string
@@ -348,7 +353,7 @@ func TestPostChecks(t *testing.T) {
 		{"外来 Origin", map[string]string{"Origin": "http://evil.example"}, form(), 403},
 		{"跨站", map[string]string{"Sec-Fetch-Site": "cross-site"}, form(), 403},
 		{"没有 CSRF", nil, url.Values{"cidr": {"198.51.100.7"}, "duration": {"1h"}}, 403},
-		{"错误的 CSRF", nil, url.Values{"_csrf": {"x" + s.csrf[1:]}, "cidr": {"198.51.100.7"}, "duration": {"1h"}}, 403},
+		{"错误的 CSRF", nil, url.Values{"_csrf": {wrong}, "cidr": {"198.51.100.7"}, "duration": {"1h"}}, 403},
 		{"不是表单", map[string]string{"Content-Type": "application/json"}, form(), 415},
 	}
 	for _, c := range cases {
