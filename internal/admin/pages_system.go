@@ -122,10 +122,11 @@ func (h *Handler) base(r *http.Request) string {
 	return requestBase(r)
 }
 
-// requestBase 是直连时的地址。
+// requestBase 是这次访问的地址。经终止 TLS 的反向代理来的请求到这里是明文，按 X-Forwarded-Proto 判断，
+// 只是用来显示，不涉及安全。
 func requestBase(r *http.Request) string {
 	scheme := "http"
-	if r.TLS != nil {
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 		scheme = "https"
 	}
 	return (&url.URL{Scheme: scheme, Host: r.Host}).String()
@@ -167,6 +168,7 @@ type systemData struct {
 	// 管理入口（后台、API、指标）
 	MgmtAddr, PullAddr  string // MgmtAddr 为空表示和拉取入口共用端口
 	Allow, ProxiedAllow string
+	Public              bool // 后台和 API 对所有地址开放（admin.public）
 	Metrics, Pprof      bool
 }
 
@@ -182,7 +184,7 @@ func (h *Handler) systemPage(c *ctx) error {
 		HeapInuse: ms.HeapInuse, Sys: ms.Sys, Goroutines: runtime.NumGoroutine(), Procs: runtime.GOMAXPROCS(0),
 		Writable: h.app.Store.Writable(), Reload: h.app.LastReload(), Dropped: h.app.AccessLogDropped(),
 		MgmtAddr: cfg.Listen.Admin, PullAddr: cmp.Or(cfg.Listen.HTTP, cfg.Listen.HTTPS),
-		Allow: strings.Join(cfg.Admin.Allow, ", "), ProxiedAllow: strings.Join(cfg.Admin.ProxiedAllow, ", "),
+		Allow: strings.Join(cfg.Admin.Allow, ", "), ProxiedAllow: strings.Join(cfg.Admin.ProxiedAllow, ", "), Public: cfg.Admin.Public,
 		Metrics: cfg.Metrics.Enabled, Pprof: cfg.Metrics.Enabled && cfg.Metrics.Pprof,
 	}
 	if l := debug.SetMemoryLimit(-1); l > 0 && l < 1<<62 {

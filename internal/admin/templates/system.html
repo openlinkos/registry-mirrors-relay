@@ -22,6 +22,7 @@
       <dt>{{.T "system.lastReload"}}</dt><dd>{{with $d.Reload}}{{time .Time}}{{if .Err}} · {{$.T "system.failed"}}{{end}}{{else}}—{{end}}</dd>
       <dt>{{.T "system.store"}}</dt><dd class="ol-mono ol-break">{{$d.StoreDriver}}{{if eq $d.StoreDriver "bolt"}} · {{$d.StorePath}}{{end}}{{if not $d.Writable}} · {{.T "system.readOnly"}}{{end}}</dd>
       <dt>{{.T "system.mgmt"}}</dt><dd>{{if $d.MgmtAddr}}{{.T "system.mgmtSeparate" "addr" $d.MgmtAddr}}{{else}}{{.T "system.mgmtShared" "addr" $d.PullAddr}}{{end}}</dd>
+      <dt>{{.T "system.mgmtPublic"}}</dt><dd>{{if $d.Public}}{{.T "system.mgmtPublicOn"}}{{else}}{{.T "system.mgmtPublicOff"}}{{end}}</dd>
       <dt>{{.T "system.mgmtAllow"}}</dt><dd class="ol-mono ol-break">{{if $d.Allow}}{{$d.Allow}}{{else}}{{.T "system.mgmtNone"}}{{end}}</dd>
       <dt>{{.T "system.mgmtProxied"}}</dt><dd class="ol-mono ol-break">{{if $d.ProxiedAllow}}{{$d.ProxiedAllow}}{{else}}{{.T "system.mgmtProxiedOff"}}{{end}}</dd>
       <dt>{{.T "system.metrics"}}</dt><dd>{{if $d.Metrics}}{{.T "system.metricsOn"}}{{else}}{{.T "system.metricsOff"}}{{end}}</dd>

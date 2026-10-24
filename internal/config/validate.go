@@ -346,7 +346,15 @@ func validate(c *Config, res *Result) []error {
 		}
 	}
 	if len(c.Admin.Allow) == 0 && len(c.Admin.ProxiedAllow) == 0 {
-		warn("admin.allow 为空：管理后台、管理 API 和指标都关掉了，谁也打不开")
+		if c.Admin.Public {
+			warn("admin.allow 为空：指标和 pprof 谁也打不开")
+		} else {
+			warn("admin.allow 为空：管理后台、管理 API 和指标都关掉了，谁也打不开")
+		}
+	}
+	if c.Admin.Public && c.TLS.Mode == "off" && len(trusted) == 0 && !strings.HasPrefix(c.Admin.PublicURL, "https://") {
+		warn("管理后台对所有地址开放（admin.public），但服务本身没有 HTTPS，也没写反向代理（client_ip.trusted_proxies）：" +
+			"口令会明文经过网络。请放在 HTTPS 之后，或者写 admin.public: false 只让本机和内网打开")
 	}
 	if len(c.Admin.ProxiedAllow) > 0 {
 		if c.Admin.PublicURL == "" {

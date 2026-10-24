@@ -190,14 +190,18 @@ type Proxy struct {
 
 // Admin 是管理后台。
 type Admin struct {
-	// PublicURL 是经反向代理访问后台时的地址，用于 Cookie、来源检查和 proxied_allow。
+	// PublicURL 是后台的正式地址（可选），用于 Cookie、来源检查和 proxied_allow。
 	PublicURL string `yaml:"public_url"`
-	// Allow：直连（请求里没有任何代理头）时，允许打开管理后台、管理 API 和指标的对端地址。
+	// Public：管理后台和管理 API 对所有地址开放（默认），经 CDN、反向代理也能打开，靠登录保护：
+	// 口令 bcrypt、登录限速、CSRF 检查、敏感操作要再次输入口令。写 false 时只回应 Allow、ProxiedAllow 里的地址。
+	// 指标和 pprof 没有登录，不受它影响，一直按 Allow、ProxiedAllow。
+	Public bool `yaml:"public"`
+	// Allow：直连（请求里没有任何代理头）时放行的对端地址。用于指标、pprof，以及 public: false 时的后台和 API。
 	// 默认 loopback 和 private_ranges：kubectl port-forward、SSH 隧道、集群里的 Prometheus 都能用，
 	// 经 CDN、反向代理来的请求一律当作不存在（404）。写成空列表表示关掉。
 	Allow []string `yaml:"allow"`
-	// ProxiedAllow：经反向代理访问后台时，允许的客户端地址（取自受信任代理的 X-Forwarded-For）。
-	// 默认为空，即不允许经代理访问；要用时还得写 public_url 和 client_ip.trusted_proxies。
+	// ProxiedAllow：经反向代理访问时放行的客户端地址（取自受信任代理的 X-Forwarded-For），用途同 Allow。
+	// 默认为空；要用时还得写 public_url 和 client_ip.trusted_proxies。
 	ProxiedAllow []string `yaml:"proxied_allow"`
 	// ConfigEdit：允许在后台改配置（入口、上游、限流、缓存等，存在运营数据库里，叠加在配置文件之上）。
 	// 默认打开；写 false 时后台的修改一律不生效，只能重置，配置全部以配置文件为准（适合严格的 GitOps）。

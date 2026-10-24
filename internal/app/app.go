@@ -74,6 +74,7 @@ type Runtime struct {
 
 // MgmtPolicy 是管理入口的访问范围，由 mgmt 包使用。
 type MgmtPolicy struct {
+	Public       bool           // 后台和 API 对所有地址开放（admin.public）
 	Allow        []netip.Prefix // 直连时允许的对端（admin.allow）
 	ProxiedAllow []netip.Prefix // 经代理时允许的客户端（admin.proxied_allow）
 	PublicHost   string         // admin.public_url 的 Host，经代理访问时只认它
@@ -392,6 +393,7 @@ func (a *App) build(cfg *config.Config, prev *Runtime) (_ *Runtime, err error) {
 		return nil, err
 	}
 	rt.IPs = clientip.New(trusted, cfg.ClientIP.UseXRealIP)
+	rt.Mgmt.Public = cfg.Admin.Public
 	if rt.Mgmt.Allow, err = config.ParsePrefixes(cfg.Admin.Allow); err != nil {
 		return nil, err
 	}

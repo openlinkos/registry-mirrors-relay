@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/app"
+	"github.com/openlinkos/registry-mirrors-relay/internal/config"
 	"github.com/openlinkos/registry-mirrors-relay/internal/store"
 )
 
@@ -100,12 +101,17 @@ func truncate(s string, n int) string {
 // GeneratePassword 生成一个随机口令（26 个字符的 base32，130 位）。
 func GeneratePassword() string { return rand.Text() }
 
-// HostAllowed 判断管理后台和 API 能不能用这个 Host 访问：和 public_url 的主机一致，或者是 DirectHost
-// （本机、SSH 转发、kubectl port-forward、局域网里用 IP 直接打开）。其他域名一律拒绝，防 DNS 重绑定。
-// 谁能连进来由管理入口的访问范围（admin.allow）决定，见 mgmt 包；这里只防浏览器被别的网站利用。
-func HostAllowed(publicURL string, r *http.Request) bool {
+// HostAllowed 判断管理后台和 API 能不能用这个 Host 访问。
+//   - admin.public（默认）：任何域名都行。后台本来就对所有地址开放，DNS 重绑定拿到的也只是登录页，
+//     别的域名下没有会话 Cookie。
+//   - admin.public: false：只接受 public_url 的主机，或者 DirectHost（本机、SSH 转发、kubectl port-forward、
+//     局域网里用 IP 直接打开）。其他域名一律拒绝，防 DNS 重绑定把只在内网的后台暴露给外面的网页。
+func HostAllowed(a config.Admin, r *http.Request) bool {
 	host := strings.ToLower(r.Host)
-	if publicURL != "" {
+	if a.Public {
+		return host != "" && !strings.Contains(host, "%")
+	}
+	if publicURL := a.PublicURL; publicURL != "" {
 		if u, err := url.Parse(publicURL); err == nil && strings.EqualFold(u.Host, host) {
 			return true
 		}

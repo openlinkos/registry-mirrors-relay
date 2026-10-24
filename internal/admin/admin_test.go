@@ -245,7 +245,29 @@ func TestSecurityHeaders(t *testing.T) {
 }
 
 func TestHostCheck(t *testing.T) {
-	e := newEnv(t, envOpts{})
+	// 默认 admin.public：任何域名都能打开；经终止 TLS 的反向代理来的 https 页面可以登录，会话 Cookie 带 Secure
+	pub := newEnv(t, envOpts{})
+	pub.host, pub.origin = "mirror.example.test", "https://mirror.example.test"
+	if r := pub.get("/admin/login"); r.StatusCode != 200 {
+		t.Fatalf("admin.public 时任何域名都能打开：%d", r.StatusCode)
+	}
+	r := pub.do("POST", "/admin/login", url.Values{"username": {"alice"}, "password": {alicePW}}, nil, nil)
+	if c := r.cookie(secureCookie); r.StatusCode != http.StatusSeeOther || c == nil || !c.Secure {
+		t.Fatalf("https 页面登录用 __Host- Cookie：%d %+v", r.StatusCode, r.Cookies())
+	}
+	pub.origin = "http://mirror.example.test"
+	if r := pub.do("POST", "/admin/login", url.Values{"username": {"alice"}, "password": {alicePW}}, nil, nil); r.StatusCode != http.StatusSeeOther || r.cookie(plainCookie) == nil {
+		t.Fatalf("明文 http 页面也能登录（普通 Cookie）：%d", r.StatusCode)
+	}
+	for _, o := range []string{"https://evil.example.test", "https://mirror.example.test.evil.example", "null"} {
+		pub.origin = o
+		if r := pub.do("POST", "/admin/login", url.Values{"username": {"alice"}, "password": {alicePW}}, nil, nil); r.StatusCode != http.StatusForbidden {
+			t.Fatalf("来源 %s 不是这个站点：%d", o, r.StatusCode)
+		}
+	}
+
+	// admin.public: false：只接受 public_url、localhost 和 IP，防 DNS 重绑定
+	e := newEnv(t, envOpts{yaml: "admin: {public: false}\n"})
 	e.host = "admin.evil.example"
 	if r := e.get("/admin/login"); r.StatusCode != http.StatusMisdirectedRequest {
 		t.Fatalf("没配置 public_url 时只接受回环地址：%d", r.StatusCode)

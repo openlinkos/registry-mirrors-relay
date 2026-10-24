@@ -47,6 +47,28 @@ func request(remote, host, path string, hdr map[string]string) *http.Request {
 }
 
 func TestAllowed(t *testing.T) {
+	// 默认 admin.public：后台和 API 谁都能打开（靠登录），指标和 pprof 仍然只给本机、内网的直连
+	open, _ := newApp(t, "metrics: {enabled: true}")
+	for _, c := range []struct {
+		r    *http.Request
+		want bool
+	}{
+		{request("203.0.113.9:5000", "mirror.example.com", "/admin/login", nil), true},
+		{request("10.42.0.1:5000", "mirror.example.com", "/admin/api/v1/status", map[string]string{"X-Forwarded-For": "203.0.113.9"}), true},
+		{request("10.42.0.1:5000", "mirror.example.com", "/metrics", map[string]string{"X-Forwarded-For": "203.0.113.9"}), false},
+		{request("203.0.113.9:5000", "mirror.example.com", "/debug/pprof/", nil), false},
+		{request("10.42.3.7:5000", "10.42.0.9:8080", "/metrics", nil), true},
+	} {
+		if got, reason := Allowed(open.Runtime(), c.r); got != c.want {
+			t.Errorf("public：%s %s：期望 %v，实际 %v（%s）", c.r.RemoteAddr, c.r.URL.Path, c.want, got, reason)
+		}
+	}
+	private, _ := newApp(t, "admin: {public: false}")
+	if ok, _ := Allowed(private.Runtime(), request("203.0.113.9:5000", "mirror.example.com", "/admin/login", nil)); ok {
+		t.Fatal("admin.public: false 时后台按地址放行")
+	}
+
+	// 按地址放行的规则（指标、pprof，以及 public: false 时的后台）
 	plain, _ := newApp(t, "")
 	proxied, _ := newApp(t, `
 client_ip: {trusted_proxies: [10.42.0.0/16]}
@@ -77,17 +99,17 @@ admin:
 		{"经代理：只有 Forwarded 头，取不到客户端", proxied, request("10.42.0.1:5000", "admin.example.com", "/admin/", map[string]string{"Forwarded": "for=198.51.100.7"}), false},
 	}
 	for _, c := range cases {
-		if got, reason := Allowed(c.a.Runtime(), c.r); got != c.want {
+		if got, reason := Gated(c.a.Runtime(), c.r); got != c.want {
 			t.Errorf("%s：期望 %v，实际 %v（%s）", c.name, c.want, got, reason)
 		}
 	}
 	old := request("127.0.0.1:5000", "127.0.0.1:8080", "/admin/", nil)
 	old.Proto, old.ProtoMajor, old.ProtoMinor = "HTTP/1.0", 1, 0
-	if ok, _ := Allowed(plain.Runtime(), old); ok {
+	if ok, _ := Gated(plain.Runtime(), old); ok {
 		t.Fatal("HTTP/1.0 当作经过代理（nginx 默认的 proxy_pass），不放行")
 	}
 	closed, _ := newApp(t, "admin: {allow: []}")
-	if ok, _ := Allowed(closed.Runtime(), request("127.0.0.1:5000", "127.0.0.1:8080", "/admin/", nil)); ok {
+	if ok, _ := Gated(closed.Runtime(), request("127.0.0.1:5000", "127.0.0.1:8080", "/metrics", nil)); ok {
 		t.Fatal("admin.allow 为空时谁都进不来")
 	}
 }
@@ -108,7 +130,7 @@ func serve(h http.Handler, r *http.Request) (int, string) {
 }
 
 func TestShared(t *testing.T) {
-	a, path := newApp(t, "")
+	a, path := newApp(t, "admin: {public: false}\n")
 	h, err := New(a, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
@@ -118,6 +140,15 @@ func TestShared(t *testing.T) {
 
 	if code, body := serve(s, request("127.0.0.1:5000", "127.0.0.1:8080", "/admin/login", nil)); code != 200 || !strings.Contains(body, "<html") {
 		t.Fatalf("本机直连应能打开登录页：%d", code)
+	}
+	// 默认 admin.public：公网经代理也能打开登录页
+	pub, _ := newApp(t, "")
+	ph, err := New(pub, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, body := serve(ph.Shared(&pull{}), request("10.42.0.1:5000", "mirror.example.com", "/admin/login", map[string]string{"X-Forwarded-For": "203.0.113.9"})); code != 200 || !strings.Contains(body, "<html") {
+		t.Fatalf("admin.public 时经代理也能打开登录页：%d", code)
 	}
 	// 被拒绝时交给拉取入口，404 和任何未知路径一样，访问日志里写明原因
 	code, body := serve(s, request("203.0.113.9:5000", "mirror.example.com", "/admin/login", nil))
@@ -166,7 +197,8 @@ func TestShared(t *testing.T) {
 }
 
 func TestStandalone(t *testing.T) {
-	a, _ := newApp(t, `listen: {admin: "127.0.0.1:9090"}`)
+	a, _ := newApp(t, `listen: {admin: "127.0.0.1:9090"}
+admin: {public: false}`)
 	h, err := New(a, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)

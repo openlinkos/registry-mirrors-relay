@@ -1,7 +1,8 @@
 // Package mgmt 是管理入口：网页后台（/admin/）、管理 API（/admin/api/v1/）、Prometheus 指标（/metrics）
 // 和 pprof（/debug/pprof/）。默认和拉取入口共用端口；写了 listen.admin 时只在那个端口提供。
 //
-// 这些路径只回应两种请求，其余一律当作不存在（404）：
+// 后台和管理 API 默认（admin.public）对所有请求开放，靠登录保护。指标和 pprof 没有登录，
+// 以及 admin.public: false 时的后台和 API，只回应两种请求，其余一律当作不存在（404）：
 //   - 直连：请求里没有任何代理头（见 clientip.Proxied），并且 TCP 对端在 admin.allow 里（默认本机和内网）。
 //     kubectl port-forward、SSH 隧道、集群里的 Prometheus 都是这种；经 CDN、反向代理来的请求都带代理头，进不来。
 //   - 有意经代理：写了 admin.proxied_allow 和 admin.public_url，Host 是 public_url 的域名，TCP 对端是受信任的代理，
@@ -57,7 +58,7 @@ func New(a *app.App, log *slog.Logger) (*Handler, error) {
 func (h *Handler) enabled(path string) bool {
 	m := h.app.Runtime().Config.Metrics
 	switch {
-	case path == "/admin" || strings.HasPrefix(path, "/admin/"):
+	case console(path):
 		return true
 	case path == "/metrics":
 		return m.Enabled
@@ -67,8 +68,19 @@ func (h *Handler) enabled(path string) bool {
 	return false
 }
 
-// Allowed 判断请求能不能进管理入口。不能时 reason 说明原因（写进访问日志）。
+// console 判断路径是不是后台或管理 API（有登录保护的部分）。
+func console(path string) bool { return path == "/admin" || strings.HasPrefix(path, "/admin/") }
+
+// Allowed 判断请求能不能进管理入口：admin.public 时后台和 API 都放行，其余按 Gated。不能时 reason 说明原因（写进访问日志）。
 func Allowed(rt *app.Runtime, r *http.Request) (ok bool, reason string) {
+	if rt.Mgmt.Public && console(r.URL.Path) {
+		return true, ""
+	}
+	return Gated(rt, r)
+}
+
+// Gated 是按地址放行的规则：直连看 admin.allow，经代理看 admin.proxied_allow。
+func Gated(rt *app.Runtime, r *http.Request) (ok bool, reason string) {
 	p := rt.Mgmt
 	if !clientip.Proxied(r) {
 		if contains(p.Allow, clientip.Remote(r)) {
@@ -125,7 +137,7 @@ func (h *Handler) Shared(next http.Handler) http.Handler {
 func (h *Handler) Standalone(log *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
-			if ok, _ := Allowed(h.app.Runtime(), r); ok {
+			if ok, _ := Gated(h.app.Runtime(), r); ok || h.app.Runtime().Mgmt.Public {
 				http.Redirect(w, r, "/admin/", http.StatusSeeOther)
 				return
 			}

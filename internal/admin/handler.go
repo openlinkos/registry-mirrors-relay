@@ -162,8 +162,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for k, v := range securityHeaders(h.publicHTTPS()) {
 		hd.Set(k, v)
 	}
-	if !ops.HostAllowed(h.publicURL(), r) {
-		http.Error(w, "The admin UI answers only at admin.public_url or on loopback addresses. 管理后台只接受 admin.public_url 或回环地址访问。", http.StatusMisdirectedRequest)
+	if !ops.HostAllowed(h.app.Runtime().Config.Admin, r) {
+		http.Error(w, "With admin.public: false the admin UI answers only at admin.public_url, localhost or an IP address. 管理后台只接受 admin.public_url、localhost 或 IP 访问。", http.StatusMisdirectedRequest)
 		return
 	}
 	c := &ctx{h: h, w: w, r: r, now: h.now(), ip: h.clientAddr(r)}
@@ -311,7 +311,9 @@ func (h *Handler) dispatch(c *ctx) error {
 }
 
 // checkOrigin 是每个 POST 的跨站检查：拒绝 Sec-Fetch-Site: cross-site，并要求 Origin 是允许的来源之一：
-// public_url 的来源，或者用 localhost、IP 直接访问时的 <协议>://<Host>。
+// public_url 的来源，或者这次访问的 <协议>://<Host>（admin.public: false 时只限 localhost、IP）。
+// 协议也认 https：经终止 TLS 的反向代理（CDN、Ingress）来的请求到这里是明文，浏览器那边是 https 页面；
+// 同一个 Host 的 https 页面一定是这个站点自己的。Origin 是 https 时会话 Cookie 带 Secure。
 // mustChangeAllowed 是必须先改口令的会话能打开的页面。
 var mustChangeAllowed = map[string]bool{
 	"/admin/account": true, "/admin/account/password": true, "/admin/logout": true, "/admin/reauth": true,
@@ -330,12 +332,21 @@ func (h *Handler) checkOrigin(c *ctx) error {
 		c.secure = https
 		return nil
 	}
-	scheme := "http://"
-	if r.TLS != nil {
-		scheme = "https://"
+	host := strings.ToLower(r.Host)
+	if pub, https := h.publicOrigin(); https && pub == "https://"+host {
+		return fail(http.StatusForbidden, "error.origin") // public_url 是 https 时，同一个域名的 http 页面不算
 	}
-	if ops.DirectHost(r.Host) && origin == scheme+strings.ToLower(r.Host) {
+	if !h.app.Runtime().Mgmt.Public && !ops.DirectHost(host) {
+		return fail(http.StatusForbidden, "error.origin")
+	}
+	switch origin {
+	case "https://" + host:
+		c.secure = true
 		return nil
+	case "http://" + host:
+		if r.TLS == nil {
+			return nil
+		}
 	}
 	return fail(http.StatusForbidden, "error.origin")
 }
@@ -364,11 +375,11 @@ func (c *ctx) parseForm() error {
 	return nil
 }
 
-// sessionFrom 找请求带的会话。https 的 public_url 下只认 __Host- Cookie：同一个上级域名下的兄弟站点
-// 可以替这个主机种普通 Cookie（会话固定攻击），但种不了 __Host- 的。用 localhost、IP 直接访问时两种都认。
+// sessionFrom 找请求带的会话。访问 https 的 public_url 时只认 __Host- Cookie：同一个上级域名下的兄弟站点
+// 可以替这个主机种普通 Cookie，但种不了 __Host- 的。其他时候两种都认。
 func (h *Handler) sessionFrom(r *http.Request, now time.Time) *session {
 	names := []string{secureCookie, plainCookie}
-	if pub, https := h.publicOrigin(); pub != "" && https && !ops.DirectHost(r.Host) {
+	if pub, https := h.publicOrigin(); https && strings.EqualFold(strings.TrimPrefix(pub, "https://"), r.Host) {
 		names = names[:1]
 	}
 	for _, n := range names {
@@ -383,7 +394,7 @@ func sessionCookie(value string, secure bool, maxAge int) *http.Cookie {
 	if secure {
 		return &http.Cookie{Name: secureCookie, Value: value, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: maxAge}
 	}
-	// 明文 http 只在回环地址上（本机、SSH 转发），浏览器不接受这里的 Secure Cookie（Safari），也没有意义
+	// 明文 http 的页面：浏览器不接受 Secure Cookie（Safari），也没有意义
 	return &http.Cookie{Name: plainCookie, Value: value, Path: "/admin", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: maxAge} //nolint:gosec // 见上
 }
 

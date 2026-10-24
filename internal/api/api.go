@@ -5,7 +5,7 @@
 //   - 用 Authorization: Bearer <令牌> 认证（令牌来自配置的 admin.api_tokens 或在后台创建，只存 SHA-256）；
 //     网页后台的会话也能用，写操作要带 X-CSRF-Token（见 Options.Session）；
 //   - viewer 只能读，写操作要 admin；所有写操作记审计；
-//   - Host 只接受 admin.public_url 的主机或回环地址（不对返回 421），防 DNS 重绑定；
+//   - admin.public: false 时 Host 只接受 admin.public_url 的主机、localhost 或 IP（不对返回 421），防 DNS 重绑定；
 //   - 认证失败按 IP 限次数；请求体最多 64 KiB，只接受 JSON。
 package api
 
@@ -111,8 +111,8 @@ func (x *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
-	if !ops.HostAllowed(x.app.Runtime().Config.Admin.PublicURL, r) {
-		writeErr(w, http.StatusMisdirectedRequest, "请用 admin.public_url 或回环地址访问管理后台")
+	if !ops.HostAllowed(x.app.Runtime().Config.Admin, r) {
+		writeErr(w, http.StatusMisdirectedRequest, "请用 admin.public_url、localhost 或 IP 访问管理后台")
 		return
 	}
 	if r.Body != nil {

@@ -319,8 +319,8 @@ func TestRemovedKeys(t *testing.T) {
 
 func TestManagementSettings(t *testing.T) {
 	c := mustParse(t, "").Config
-	if c.Listen.Admin != "" || c.Metrics.Enabled || strings.Join(c.Admin.Allow, ",") != "loopback,private_ranges" || len(c.Admin.ProxiedAllow) != 0 {
-		t.Fatalf("默认三合一、指标关、只允许本机和内网直连：%+v %+v %+v", c.Listen, c.Metrics, c.Admin.Allow)
+	if c.Listen.Admin != "" || c.Metrics.Enabled || !c.Admin.Public || strings.Join(c.Admin.Allow, ",") != "loopback,private_ranges" || len(c.Admin.ProxiedAllow) != 0 {
+		t.Fatalf("默认三合一、后台公开、指标关、指标只给本机和内网直连：%+v %+v %+v", c.Listen, c.Metrics, c.Admin)
 	}
 	cases := map[string]string{
 		"proxied_allow 没有 public_url":      "admin: {proxied_allow: [198.51.100.0/24]}",
@@ -333,7 +333,9 @@ func TestManagementSettings(t *testing.T) {
 	}
 	mustParse(t, "client_ip: {trusted_proxies: [10.0.0.0/8]}\nadmin: {public_url: \"https://a.example.com\", proxied_allow: [198.51.100.0/24]}")
 	for y, want := range map[string]string{
-		"admin: {allow: []}":                        "关掉了",
+		"admin: {allow: [], public: false}":         "关掉了",
+		"admin: {allow: []}":                        "指标和 pprof 谁也打不开",
+		"listen: {http: \":8080\"}":                 "明文",
 		"metrics: {pprof: true}":                    "metrics.enabled",
 		"admin: {allow: [\"0.0.0.0/0\", \"::/0\"]}": "只靠口令",
 	} {

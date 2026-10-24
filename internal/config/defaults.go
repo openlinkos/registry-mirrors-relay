@@ -114,7 +114,7 @@ func Defaults() *Config {
 			BreakerCooldown:     Duration(10 * time.Second),
 			HealthInterval:      Duration(time.Minute),
 		},
-		Admin: Admin{Store: Store{Driver: "bolt"}, Allow: []string{"loopback", "private_ranges"}, ConfigEdit: true},
+		Admin: Admin{Store: Store{Driver: "bolt"}, Public: true, Allow: []string{"loopback", "private_ranges"}, ConfigEdit: true},
 		Log: Log{
 			Level: "info",
 			Access: AccessLog{

@@ -100,14 +100,14 @@ func TestAuthAndRoles(t *testing.T) {
 	if code, _, _ := e.call(t, "POST", "/bans", viewerTok, map[string]string{"cidr": "198.51.100.7", "duration": "1h"}); code != 403 {
 		t.Fatalf("viewer 不能写：%d", code)
 	}
-	// 用非回环地址访问（Host 不对）
+	// admin.public（默认）时任何域名都行；public: false 时的 421 见 admin 包的 TestHostCheck
 	req, _ := http.NewRequest("GET", e.srv.URL+Prefix+"/status", nil)
-	req.Host = "admin.evil.example"
+	req.Host = "mirror.example.test"
 	req.Header.Set("Authorization", "Bearer "+adminTok)
 	resp, _ := http.DefaultClient.Do(req)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusMisdirectedRequest {
-		t.Fatalf("没配置 public_url 时只接受回环地址：%d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("admin.public 时用域名访问 API：%d", resp.StatusCode)
 	}
 	// 认证失败太多次
 	var last int
