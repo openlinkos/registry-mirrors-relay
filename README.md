@@ -29,14 +29,14 @@ docker run -d --name registry-mirrors-relay --restart unless-stopped \
   -v relay-data:/var/lib/registry-mirrors-relay \
   -v "$PWD/admin-password:/run/secrets/admin_password:ro" \
   -e RELAY_ADMIN_PASSWORD_FILE=/run/secrets/admin_password \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.1.0
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.1.1
 ```
 
 - 拉取：`docker pull 服务器:8080/library/alpine`（明文时要把 `服务器:8080` 加进 Docker 的 `insecure-registries`；正式使用请放在 HTTPS 之后，见[部署](docs/deploy.md)）。
 - 管理后台：`http://127.0.0.1:9090/admin/`，用户名 `admin`，口令是 `admin-password` 里的内容。远程用 `ssh -L 9090:127.0.0.1:9090 服务器`。
 - 「入口与用法」页会按你的域名生成 Docker、containerd、k3s、Podman 的配置。
 
-Docker Compose（CDN 之后、直接用 ACME、Caddy 在前三种）、Kubernetes（kustomize，带多副本、单副本可写、Gateway API、监控、网络策略）和 systemd 的写法见 **[docs/deploy.md](docs/deploy.md)**。
+Docker Compose（CDN 之后、直接用 ACME、Caddy 在前三种）、Kubernetes（kustomize 或 Helm chart，带多副本、单副本可写、Gateway API、监控、网络策略）和 systemd 的写法见 **[docs/deploy.md](docs/deploy.md)**。
 
 ## 支持的用法
 
@@ -77,7 +77,7 @@ Docker Compose（CDN 之后、直接用 ACME、Caddy 在前三种）、Kubernete
 
 ## 发布物与校验
 
-每个版本在 [Releases](https://github.com/openlinkos/registry-mirrors-relay/releases) 提供 linux/amd64、arm64、arm/v7 的二进制和 SBOM，镜像是 `ghcr.io/openlinkos/registry-mirrors-relay`。`SHA256SUMS` 和镜像都用 Sigstore 的 cosign 无密钥签名，并带 GitHub 的构建来源证明，校验方法见[部署](docs/deploy.md#校验发布物)。
+每个版本在 [Releases](https://github.com/openlinkos/registry-mirrors-relay/releases) 提供 linux/amd64、arm64、arm/v7 的二进制和 SBOM，镜像是 `ghcr.io/openlinkos/registry-mirrors-relay`，Helm chart 是 `oci://ghcr.io/openlinkos/charts/registry-mirrors-relay`。`SHA256SUMS`、镜像和 chart 都用 Sigstore 的 cosign 无密钥签名，并带 GitHub 的构建来源证明，校验方法见[部署](docs/deploy.md#校验发布物)。
 
 ## 路线
 
@@ -87,7 +87,7 @@ Docker Compose（CDN 之后、直接用 ACME、Caddy 在前三种）、Kubernete
 - [x] M3 访问控制与运营数据：账号、IP 和镜像规则、限流、指标、热重载、管理 API
 - [x] M4 管理后台
 - [x] M5 部署与发布：HTTPS（证书文件、ACME）、镜像、Compose、Kubernetes、systemd、签名的 v0.1.0
-- [ ] M6 Helm chart
+- [x] M6 Helm chart：两种模式（多副本只读、单副本可写），随 v0.1.1 发布到 OCI 仓库并签名
 
 ## 开发
 
@@ -97,7 +97,8 @@ Docker Compose（CDN 之后、直接用 ACME、Caddy 在前三种）、Kubernete
 go test -race ./...
 golangci-lint run ./...
 scripts/build-image.sh registry-mirrors-relay:dev   # 构建镜像
-scripts/kind-e2e.sh                                 # 在 kind 里端到端测试（需要 docker、kind、kubectl）
+scripts/kind-e2e.sh                                 # 在 kind 里端到端测试（需要 docker、kind、kubectl；INSTALL=helm 时用 chart 装）
+scripts/chart-check.sh                              # chart 的检查（需要 helm、kubeconform、yq、helm-docs）
 ```
 
 `scripts/isolated-test.sh` 在不能上外网的 Docker 网络里用各种客户端测试拉取，`scripts/smoke.sh` 对照上游检查 digest。

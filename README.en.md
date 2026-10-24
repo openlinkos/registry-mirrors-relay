@@ -29,14 +29,14 @@ docker run -d --name registry-mirrors-relay --restart unless-stopped \
   -v relay-data:/var/lib/registry-mirrors-relay \
   -v "$PWD/admin-password:/run/secrets/admin_password:ro" \
   -e RELAY_ADMIN_PASSWORD_FILE=/run/secrets/admin_password \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.1.0
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.1.1
 ```
 
 - Pull: `docker pull server:8080/library/alpine` (over plain HTTP, add `server:8080` to Docker's `insecure-registries`; for real use put it behind HTTPS, see [Deployment](docs/deploy.en.md)).
 - Admin console: `http://127.0.0.1:9090/admin/`, user `admin`, password from `admin-password`. From elsewhere use `ssh -L 9090:127.0.0.1:9090 server`.
 - The Entrances and usage page generates Docker, containerd, k3s and Podman configuration for your host name.
 
-Docker Compose (behind a CDN, direct with ACME, or behind Caddy), Kubernetes (kustomize, with several replicas, a writable single replica, Gateway API, monitoring and network policy) and systemd are covered in **[docs/deploy.en.md](docs/deploy.en.md)**.
+Docker Compose (behind a CDN, direct with ACME, or behind Caddy), Kubernetes (kustomize or the Helm chart, with several replicas, a writable single replica, Gateway API, monitoring and network policy) and systemd are covered in **[docs/deploy.en.md](docs/deploy.en.md)**.
 
 ## Supported setups
 
@@ -77,7 +77,7 @@ Docker Hub, gcr.io, ghcr.io, registry.k8s.io and quay.io are built in; more upst
 
 ## Releases and verification
 
-Each release on the [Releases](https://github.com/openlinkos/registry-mirrors-relay/releases) page has binaries for linux/amd64, arm64 and arm/v7 with SBOMs; the image is `ghcr.io/openlinkos/registry-mirrors-relay`. `SHA256SUMS` and the image are signed keylessly with Sigstore cosign and carry GitHub build provenance attestations; see [Deployment](docs/deploy.en.md#verifying-releases) for how to verify them.
+Each release on the [Releases](https://github.com/openlinkos/registry-mirrors-relay/releases) page has binaries for linux/amd64, arm64 and arm/v7 with SBOMs; the image is `ghcr.io/openlinkos/registry-mirrors-relay` and the Helm chart `oci://ghcr.io/openlinkos/charts/registry-mirrors-relay`. `SHA256SUMS`, the image and the chart are signed keylessly with Sigstore cosign and carry GitHub build provenance attestations; see [Deployment](docs/deploy.en.md#verifying-releases) for how to verify them.
 
 ## Roadmap
 
@@ -87,7 +87,7 @@ Each release on the [Releases](https://github.com/openlinkos/registry-mirrors-re
 - [x] M3 Access control and operational data: accounts, IP and image rules, rate limits, metrics, hot reload, admin API
 - [x] M4 Admin console
 - [x] M5 Packaging and release: HTTPS (certificate files, ACME), image, Compose, Kubernetes, systemd, signed v0.1.0
-- [ ] M6 Helm chart
+- [x] M6 Helm chart: two modes (read-only replicas, a writable single replica), published to an OCI registry and signed from v0.1.1
 
 ## Development
 
@@ -97,7 +97,8 @@ You need Go (see `go.mod` for the version).
 go test -race ./...
 golangci-lint run ./...
 scripts/build-image.sh registry-mirrors-relay:dev   # build an image
-scripts/kind-e2e.sh                                 # end-to-end test in kind (needs docker, kind, kubectl)
+scripts/kind-e2e.sh                                 # end-to-end test in kind (needs docker, kind, kubectl; INSTALL=helm installs the chart)
+scripts/chart-check.sh                              # chart checks (needs helm, kubeconform, yq, helm-docs)
 ```
 
 `scripts/isolated-test.sh` tests pulls with many clients on a Docker network without internet access, and `scripts/smoke.sh` checks digests against the upstreams.

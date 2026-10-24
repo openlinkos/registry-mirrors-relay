@@ -6,7 +6,7 @@ name: registry-mirrors-relay
 
 services:
   relay:
-    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.1.0
+    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.1.1
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]

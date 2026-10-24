@@ -2,13 +2,14 @@
 
 [简体中文](deploy.md) | English
 
-registry-mirrors-relay is a statically linked Go program. It never writes image data to disk; its data directory holds only the operational database (accounts, rules, audit log, usually under 10 MiB) and ACME certificates. Four ways to run it:
+registry-mirrors-relay is a statically linked Go program. It never writes image data to disk; its data directory holds only the operational database (accounts, rules, audit log, usually under 10 MiB) and ACME certificates. Five ways to run it:
 
 | Way | Fits | Files |
 | --- | --- | --- |
 | `docker run` | A first try | The commands below |
 | Docker Compose | One machine, long term | [`deploy/compose/`](../deploy/compose/) |
 | Kubernetes (kustomize) | Clusters, several replicas | [`deploy/kubernetes/`](../deploy/kubernetes/) |
+| Kubernetes (Helm) | Clusters managed with Helm, Flux or Argo CD | [`charts/registry-mirrors-relay/`](../charts/registry-mirrors-relay/) |
 | systemd | No containers | [`deploy/systemd/`](../deploy/systemd/) |
 
 The image is `ghcr.io/openlinkos/registry-mirrors-relay` for linux/amd64, arm64 and arm/v7, based on distroless and running as a non-root user (65532). Binaries are on the [Releases](https://github.com/openlinkos/registry-mirrors-relay/releases) page.
@@ -44,7 +45,7 @@ docker run -d --name registry-mirrors-relay --restart unless-stopped \
   -v relay-data:/var/lib/registry-mirrors-relay \
   -v "$PWD/admin-password:/run/secrets/admin_password:ro" \
   -e RELAY_ADMIN_PASSWORD_FILE=/run/secrets/admin_password \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.1.0
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.1.1
 ```
 
 - The image carries a configuration: pull entrance 8080, console 9090, metrics 9180, one single-domain entrance for any host name. To change it, mount your own at `/etc/registry-mirrors-relay/config.yaml` (see [`config.example.yaml`](../config.example.yaml)); inside a container, `listen.admin` and `listen.metrics` must be `:9090` and `:9180`.
@@ -102,9 +103,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: registry-mirror
 resources:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.1.0
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.1.1
 components:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.1.0
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.1.1
 ```
 
 ```bash
@@ -132,6 +133,53 @@ server = "https://registry-1.docker.io"
 
 Write one for each other upstream (`ghcr.io`, `registry.k8s.io`, `quay.io`, `gcr.io`) with the upstream's own address as `server` and the relay as `host`: containerd adds `?ns=<upstream>` to its requests and the relay picks the upstream from it. If the relay fails, containerd falls back to `server`. The console's Entrances and usage page generates all of this for your host name, including k3s `registries.yaml`.
 
+## Helm
+
+The chart lives in [`charts/registry-mirrors-relay/`](../charts/registry-mirrors-relay/) and, from v0.1.1 on, every release publishes it to `oci://ghcr.io/openlinkos/charts/registry-mirrors-relay`. The chart version is the application version without the `v`; unless you set `image.tag`, it pulls the image of the same release by digest. It needs Helm 3.8 or later (or Helm 4) and Kubernetes 1.30 or later.
+
+| `mode` | Workload | Operational data | kustomize equivalent |
+| --- | --- | --- | --- |
+| `readonly` (default) | Deployment, 2 replicas, with a PDB | Read-only; accounts and rules live in `config` | `base/` |
+| `writable` | StatefulSet, 1 replica, 1 GiB PVC | Writable | `overlays/single-writable/` |
+
+```yaml
+# values.yaml
+mode: writable
+admin:
+  existingSecret: registry-mirrors-relay-admin
+# Becomes the relay's config.yaml as is; see config.example.yaml
+config:
+  site:
+    name: Example Mirror
+  client_ip:
+    trusted_proxies: [private_ranges]
+ingress:
+  enabled: true
+  className: traefik
+  hosts:
+    - host: mirror.example.com
+  tls:
+    - secretName: mirror-example-com-tls
+      hosts: [mirror.example.com]
+```
+
+```bash
+kubectl create namespace registry-mirror
+openssl rand -base64 18 > admin-password
+kubectl -n registry-mirror create secret generic registry-mirrors-relay-admin --from-file=password=admin-password
+rm admin-password
+helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version 0.1.1 \
+  -n registry-mirror -f values.yaml
+helm test registry-mirrors-relay -n registry-mirror
+kubectl -n registry-mirror port-forward svc/registry-mirrors-relay-admin 9090   # then open http://127.0.0.1:9090/admin/
+```
+
+- **Settings the chart owns**: `data_dir`, `listen` and `admin.store` follow `mode`; setting them in `config` fails the render. `tls` and per-port entrances (`entrances[].listen`) aren't supported either; leave HTTPS to the Ingress or Gateway.
+- **Secrets**: no value takes a password. The administrator password comes only from `admin.existingSecret`. Write upstream tokens and the accounts file as `env:` or `file:` in `config` and bring them in from Secrets with `extraEnv` and `extraVolumes`; a `value:` fails the render.
+- **Configuration changes**: by default (`configRollout: always`) any change rolls the pods. With `restartOnly`, only changes that need a restart (`listen`, `data_dir`, `admin.store`, `log.access`, `limits.tracked_clients`) do; the relay hot-reloads the rest within a minute.
+- **Optional parts** (all off by default): `ingress`, `httpRoute` (Gateway API), `metrics.serviceMonitor`, `metrics.dashboard` (a Grafana dashboard) and `networkPolicy`. Metrics have their own ClusterIP Service, so making the pull Service a NodePort or LoadBalancer doesn't expose them.
+- Every value is listed in the chart's [README](../charts/registry-mirrors-relay/README.md). For pulling through the relay on nodes see the previous section; with `service.type: NodePort`, the `helm install` notes include a `hosts.toml` example.
+
 ## systemd
 
 ```bash
@@ -156,7 +204,7 @@ scripts/build-image.sh registry-mirrors-relay:dev          # an image from the s
 
 ## Verifying releases
 
-Each release's `SHA256SUMS` and image are signed keylessly with [Sigstore](https://www.sigstore.dev/) cosign by this repository's release workflow; there are also GitHub build provenance attestations and an SBOM per archive.
+Each release's `SHA256SUMS`, image and Helm chart are signed keylessly with [Sigstore](https://www.sigstore.dev/) cosign by this repository's release workflow; there are also GitHub build provenance attestations and an SBOM per archive.
 
 ```bash
 cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
@@ -164,10 +212,15 @@ cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 sha256sum --ignore-missing -c SHA256SUMS
 
-cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.1.0 \
+cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.1.1 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.1.0 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.1.1 -R openlinkos/registry-mirrors-relay
+
+cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.1.1 \
+  --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.1.1 -R openlinkos/registry-mirrors-relay
 ```
 
 ## Entrances that require sign-in and Docker's registry-mirrors
