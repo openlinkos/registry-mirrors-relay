@@ -2,7 +2,7 @@
 
 简体中文 | [English](admin.en.md)
 
-管理后台和[管理 API](api.md) 默认和拉取入口共用端口（8080），在 `/admin/`；写了 `listen.admin` 就挪到那个单独的端口。只接受本机、内网不经代理的直连，见下面的[远程访问](#远程访问)。页面全部在服务端渲染，不加载任何第三方资源，没有脚本也能用；样式来自 OpenLinkOS 的设计系统 [`@openlinkos/ui`](https://www.npmjs.com/package/@openlinkos/ui)，打包在程序里。支持中英文和深浅色。
+管理后台和[管理 API](api.md) 默认和拉取入口共用端口（8080），在 `/admin/`；写了 `listen.admin` 就挪到那个单独的端口。默认对所有地址开放，靠登录保护，见下面的[打开后台](#打开后台)。页面全部在服务端渲染，不加载任何第三方资源，没有脚本也能用；样式来自 OpenLinkOS 的设计系统 [`@openlinkos/ui`](https://www.npmjs.com/package/@openlinkos/ui)，打包在程序里。支持中英文和深浅色。
 
 ## 页面
 
@@ -52,17 +52,17 @@
 
 忘记口令时，其他管理员可以在「管理员与令牌」里重设；只有一个管理员时，停止服务后运行 `registry-mirrors-relay admin password -name admin`。`admin list` 列出所有管理员。
 
-## 远程访问
+## 打开后台
 
-后台只回应本机、内网不经代理的直连（`admin.allow`，默认 `loopback` 和 `private_ranges`）；经 CDN、反向代理来的请求一律 404，像这条路径不存在一样。规则和各种环境下是否可靠，见[部署](deploy.md#管理后台管理-api-和指标)。几种访问方式：
+后台默认对所有地址开放（`admin.public: true`），用拉取的域名或 IP 打开 `/admin/` 就行：
 
-- **Kubernetes**：`kubectl port-forward svc/registry-mirrors-relay 8080:80`，然后打开 `http://127.0.0.1:8080/admin/`。chart 拆了端口（`admin.separatePort`）时用 `svc/registry-mirrors-relay-admin 9090`。
-- **SSH 转发**：`ssh -L 8080:127.0.0.1:8080 服务器`，然后在本机打开 `http://127.0.0.1:8080/admin/`。
-- **Docker**：镜像自带的配置把后台放在单独的 9090，发布时只映射到本机：`-p 127.0.0.1:9090:9090`，打开 `http://127.0.0.1:9090/admin/`。
-- **局域网**：直接用 IP 打开，例如 `http://192.168.1.10:8080/admin/`。
-- **经 https 反向代理**：写 `admin.public_url`、`client_ip.trusted_proxies` 和 `admin.proxied_allow`（允许的客户端地址），见[部署](deploy.md#管理后台管理-api-和指标)。
+- **经 CDN、反向代理、Ingress**：`https://mirror.example.com/admin/`。浏览器那边是 https 时，会话 Cookie 带 `Secure`。
+- **直接访问**：`http://服务器:8080/admin/`；用 `tls.mode: acme` 时是 `https://<域名>/admin/`。
+- **Kubernetes**：也可以 `kubectl port-forward svc/registry-mirrors-relay 8080:80`，然后打开 `http://127.0.0.1:8080/admin/`；chart 拆了端口（`admin.separatePort`）时用 `svc/registry-mirrors-relay-admin 9090`。多副本时经 Ingress 打开要开会话保持，见[部署](deploy.md#kubernetes)。
 
-浏览器访问时的 Host 只能是 `public_url` 的域名、`localhost` 或 IP 地址，其他域名返回 421（防 DNS 重绑定）。
+保护靠登录（见下面的[安全](#安全)），所以对外请放在 HTTPS 之后：没有 HTTPS、也没写反向代理时，启动日志会提醒口令会明文传输。
+
+**只让本机和内网打开**：写 `admin.public: false`。这时后台只回应本机、内网不经代理的直连（`admin.allow`，默认 `loopback` 和 `private_ranges`），经 CDN、反向代理来的请求一律 404，像这条路径不存在一样；浏览器访问时的 Host 只能是 `public_url` 的域名、`localhost` 或 IP 地址，其他域名返回 421（防 DNS 重绑定）。远程用 `kubectl port-forward` 或 `ssh -L 8080:127.0.0.1:8080 服务器`；要经 https 反向代理放行固定的地址，写 `admin.public_url`、`client_ip.trusted_proxies` 和 `admin.proxied_allow`。规则和各种环境下是否可靠，见[部署](deploy.md#管理后台管理-api-和指标)。
 
 ## 在后台改配置
 
@@ -98,7 +98,7 @@
 
 - **内容安全策略**：`default-src 'none'; script-src 'self'; style-src 'self'; …; require-trusted-types-for 'script'; trusted-types 'none'`。页面没有内联脚本、内联样式和事件属性；唯一的脚本只写文本，不写标记。另有 `X-Frame-Options: DENY`、`nosniff`、`Referrer-Policy: same-origin`、`Cross-Origin-Opener-Policy` 等。
 - **会话**：32 字节随机 ID，进程里只存它的 SHA-256；30 分钟没有操作或登录满 12 小时后失效；重启后都要重新登录。`public_url` 是 https 时 Cookie 叫 `__Host-relay-admin`（Secure、HttpOnly、SameSite=Lax），否则叫 `relay-admin`（只在 `/admin` 下，HttpOnly、SameSite=Strict）。
-- **谁能连进来**：只有本机、内网不经代理的直连，见上面的[远程访问](#远程访问)；其他请求看到的是 404。
+- **谁能连进来**：默认所有地址都能打开登录页，靠下面这些措施保护；`admin.public: false` 时只有本机、内网不经代理的直连，其他请求看到的是 404，见上面的[打开后台](#打开后台)。指标和 pprof 没有登录，一直只给直连。
 - **跨站请求**：每个 POST 都要 `Origin` 和 `public_url` 或当前访问的 localhost、IP 地址一致，拒绝 `Sec-Fetch-Site: cross-site`，并且要带会话的 CSRF 令牌；成功后 303 跳转。
 - **登录限速**：口令一个一个地校验（bcrypt），每个客户端 10 分钟内最多失败 10 次，全局最多 100 次，超过后口令正确也拒绝（429），直到窗口过去。失败和封锁在每个窗口里只记一次审计。
 - **敏感操作**：管理员、API 令牌、登录会话和配置的修改，以及改自己的口令，要求 10 分钟内输入过口令，否则先确认身份。改了管理员的口令、角色或停用状态，那个管理员的会话全部结束。

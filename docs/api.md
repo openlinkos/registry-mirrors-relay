@@ -23,7 +23,7 @@ JSON API 在管理入口的 `/admin/api/v1/` 下：默认和拉取入口共用�
 
 `viewer` 只能读，写操作要 `admin`。所有写操作都记审计。认证失败按 IP 限次数（`limits.auth_failures_per_min`），超过返回 429。
 
-Host 只接受 `admin.public_url` 的主机、`localhost` 和 IP 地址，其他返回 421。远程管理请用 SSH 转发或 `kubectl port-forward`，或者按[部署](deploy.md#管理后台管理-api-和指标)写 `public_url` 和 `proxied_allow`，放在可信的反向代理之后。
+API 和后台一样，默认对所有地址开放（`admin.public: true`），靠令牌或会话保护；对外请放在 HTTPS 之后。`admin.public: false` 时只回应本机、内网不经代理的直连，Host 只接受 `admin.public_url` 的主机、`localhost` 和 IP 地址（其他返回 421），见[部署](deploy.md#管理后台管理-api-和指标)。
 
 运营数据的存储方式是 `none`（只读）时，写操作返回 409。
 
@@ -72,7 +72,7 @@ curl -X DELETE -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/admin/api
 
 ## 指标
 
-`metrics.enabled: true` 时，管理入口（默认是拉取端口，写了 `listen.admin` 就是那个端口）的 `/metrics` 是 Prometheus 文本格式，和后台一样只接受本机、内网不经代理的直连：
+`metrics.enabled: true` 时，管理入口（默认是拉取端口，写了 `listen.admin` 就是那个端口）的 `/metrics` 是 Prometheus 文本格式。指标没有登录，所以只接受本机、内网不经代理的直连（`admin.allow`）：
 
 - `relay_requests_total{upstream,kind,code,cache}`、`relay_response_bytes_total`、`relay_request_duration_seconds`；
 - `relay_manifest_cache_events_total{result}`、`relay_manifest_cache_bytes`；

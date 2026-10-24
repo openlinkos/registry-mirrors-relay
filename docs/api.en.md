@@ -23,7 +23,7 @@ The console session (cookie) works too: reads as they are, writes with `X-CSRF-T
 
 `viewer` can only read; writes need `admin`. Every write is audited. Failed authentication is limited per IP (`limits.auth_failures_per_min`), beyond which the API returns 429.
 
-The Host must be the host of `admin.public_url`, `localhost` or an IP address; anything else gets 421. Manage remotely through SSH forwarding or `kubectl port-forward`, or set `public_url` and `proxied_allow` behind a trusted reverse proxy as described in [Deployment](deploy.en.md#admin-console-admin-api-and-metrics).
+Like the console, the API is open to every address by default (`admin.public: true`), protected by tokens or sessions; put it behind HTTPS when it faces the internet. With `admin.public: false` it answers only direct connections from loopback and private addresses, and the Host must be the host of `admin.public_url`, `localhost` or an IP address (anything else gets 421), see [Deployment](deploy.en.md#admin-console-admin-api-and-metrics).
 
 With read-only operational data (`none`), writes return 409.
 
@@ -72,7 +72,7 @@ curl -X DELETE -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/admin/api
 
 ## Metrics
 
-With `metrics.enabled: true`, `/metrics` on the management entrance (the pull port by default, or `listen.admin`) uses the Prometheus text format; like the console, it answers only direct connections from loopback and private addresses:
+With `metrics.enabled: true`, `/metrics` on the management entrance (the pull port by default, or `listen.admin`) uses the Prometheus text format. Metrics have no sign-in, so they answer only direct connections from loopback and private addresses (`admin.allow`):
 
 - `relay_requests_total{upstream,kind,code,cache}`, `relay_response_bytes_total`, `relay_request_duration_seconds`;
 - `relay_manifest_cache_events_total{result}`, `relay_manifest_cache_bytes`;

@@ -104,11 +104,14 @@ admin:
   # initial_admin:
   #   username: admin
   #   password: {file: /run/secrets/relay_admin_password}   # 12 到 72 个字节，不要直接写在配置里
-  # 谁能打开管理后台、管理 API 和指标：只接受不经代理的直连，并且对端在这些地址里。
-  # 经 CDN、反向代理来的请求一律当作不存在（404）。远程用 SSH 隧道或 kubectl port-forward
+  # 管理后台和管理 API 默认对所有地址开放，经 CDN、反向代理用拉取的域名就能打开（/admin/），靠登录保护。
+  # 对外请放在 HTTPS 之后。写 false 时只回应下面 allow、proxied_allow 里的地址，经代理来的一律 404
+  # public: true
+  # 指标和 pprof（没有登录），以及 public: false 时的后台：只接受不经代理的直连，并且对端在这些地址里
   # allow: [loopback, private_ranges]
-  # 要经 https 反向代理访问后台时：写 public_url，代理写进 client_ip.trusted_proxies，再放行客户端地址
+  # 后台的正式地址（可选）：写了 https 的地址时，用它访问只认 __Host- 的会话 Cookie
   # public_url: https://admin.example.com
+  # public: false 时还要经 https 反向代理访问：代理写进 client_ip.trusted_proxies，再放行客户端地址
   # proxied_allow: [198.51.100.0/24]
   api_tokens:
     - {name: ops, role: admin, token: {env: RELAY_ADMIN_TOKEN}}   # 至少 32 个字符：openssl rand -hex 32
@@ -117,7 +120,7 @@ admin:
   # config_edit: true
   # store: {driver: none}   # k8s 多副本时：运营数据只读，全部来自配置文件
 
-# Prometheus 指标：和管理后台在同一个入口（同样只接受本机、内网直连），默认关
+# Prometheus 指标：和管理后台在同一个入口，只接受本机、内网的直连（admin.allow），默认关
 # metrics:
 #   enabled: true
 #   pprof: false   # 再开 /debug/pprof/

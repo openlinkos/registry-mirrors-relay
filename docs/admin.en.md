@@ -2,7 +2,7 @@
 
 [简体中文](admin.md) | English
 
-The admin console and the [admin API](api.en.md) share the pull port (8080) by default, under `/admin/`; with `listen.admin` they move to that separate port. They answer only direct connections from loopback and private addresses, see [Remote access](#remote-access). Every page is rendered on the server, nothing is loaded from third parties, and everything works without JavaScript. The styles come from the OpenLinkOS design system [`@openlinkos/ui`](https://www.npmjs.com/package/@openlinkos/ui), embedded in the binary. Chinese and English, light and dark.
+The admin console and the [admin API](api.en.md) share the pull port (8080) by default, under `/admin/`; with `listen.admin` they move to that separate port. They are open to every address by default and protected by sign-in, see [Opening the console](#opening-the-console). Every page is rendered on the server, nothing is loaded from third parties, and everything works without JavaScript. The styles come from the OpenLinkOS design system [`@openlinkos/ui`](https://www.npmjs.com/package/@openlinkos/ui), embedded in the binary. Chinese and English, light and dark.
 
 ## Pages
 
@@ -52,17 +52,17 @@ With read-only operational data (`admin.store.driver: none`, several Kubernetes 
 
 If you forget your password, another administrator can reset it under Admins and tokens. If you are the only one, stop the service and run `registry-mirrors-relay admin password -name admin`. `admin list` lists the administrators.
 
-## Remote access
+## Opening the console
 
-The console answers only direct connections from loopback and private addresses (`admin.allow`, `loopback` and `private_ranges` by default); requests through a CDN or reverse proxy get 404, as if the path didn't exist. The rule, and where it holds, are in [Deployment](deploy.en.md#admin-console-admin-api-and-metrics). Ways to reach it:
+The console is open to every address by default (`admin.public: true`); open `/admin/` on the pull host name or IP address:
 
-- **Kubernetes**: `kubectl port-forward svc/registry-mirrors-relay 8080:80`, then open `http://127.0.0.1:8080/admin/`. With the chart's `admin.separatePort`, use `svc/registry-mirrors-relay-admin 9090`.
-- **SSH forwarding**: `ssh -L 8080:127.0.0.1:8080 server`, then open `http://127.0.0.1:8080/admin/` locally.
-- **Docker**: the image's own configuration puts the console on a separate 9090; publish it locally only with `-p 127.0.0.1:9090:9090` and open `http://127.0.0.1:9090/admin/`.
-- **LAN**: open it by IP address, for example `http://192.168.1.10:8080/admin/`.
-- **Through an https reverse proxy**: set `admin.public_url`, `client_ip.trusted_proxies` and `admin.proxied_allow` (allowed client addresses), see [Deployment](deploy.en.md#admin-console-admin-api-and-metrics).
+- **Through a CDN, reverse proxy or Ingress**: `https://mirror.example.com/admin/`. When the browser side is https, the session cookie is `Secure`.
+- **Directly**: `http://server:8080/admin/`, or `https://<domain>/admin/` with `tls.mode: acme`.
+- **Kubernetes**: `kubectl port-forward svc/registry-mirrors-relay 8080:80` works too, then open `http://127.0.0.1:8080/admin/`; with the chart's `admin.separatePort`, use `svc/registry-mirrors-relay-admin 9090`. With several replicas behind an Ingress, turn on session affinity, see [Deployment](deploy.en.md#kubernetes).
 
-In the browser the Host must be `public_url`'s host, `localhost` or an IP address; other host names get 421 (against DNS rebinding).
+Sign-in protects it (see [Security](#security) below), so put it behind HTTPS when it faces the internet: without HTTPS or a configured reverse proxy, the startup log warns that passwords travel in clear text.
+
+**Keeping it to the local machine and the LAN**: set `admin.public: false`. The console then answers only direct connections from loopback and private addresses (`admin.allow`, `loopback` and `private_ranges` by default); requests through a CDN or reverse proxy get 404, as if the path didn't exist, and in the browser the Host must be `public_url`'s host, `localhost` or an IP address (others get 421, against DNS rebinding). Reach it with `kubectl port-forward` or `ssh -L 8080:127.0.0.1:8080 server`; to let fixed addresses in through an https reverse proxy, set `admin.public_url`, `client_ip.trusted_proxies` and `admin.proxied_allow`. The rule, and where it holds, are in [Deployment](deploy.en.md#admin-console-admin-api-and-metrics).
 
 ## Changing the configuration in the console
 
@@ -98,7 +98,7 @@ The console denies by default and checks at every layer:
 
 - **Content Security Policy**: `default-src 'none'; script-src 'self'; style-src 'self'; …; require-trusted-types-for 'script'; trusted-types 'none'`. Pages have no inline scripts, inline styles or event attributes; the one script writes text only, never markup. Also `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy: same-origin`, `Cross-Origin-Opener-Policy` and more.
 - **Sessions**: a 32-byte random ID, of which the process keeps only the SHA-256; sessions end after 30 minutes without activity or 12 hours after sign-in, and a restart signs everyone out. With an https `public_url` the cookie is `__Host-relay-admin` (Secure, HttpOnly, SameSite=Lax); otherwise `relay-admin` (under `/admin` only, HttpOnly, SameSite=Strict).
-- **Who can connect**: only direct connections from loopback and private addresses, see [Remote access](#remote-access); everyone else sees 404.
+- **Who can connect**: by default every address reaches the sign-in page, protected by the measures below; with `admin.public: false` only direct connections from loopback and private addresses do and everyone else sees 404, see [Opening the console](#opening-the-console). Metrics and pprof have no sign-in and always take direct connections only.
 - **Cross-site requests**: every POST needs an `Origin` equal to `public_url` or the localhost or IP address in use, `Sec-Fetch-Site: cross-site` is refused, and the session's CSRF token is required; success answers with a 303 redirect.
 - **Sign-in limits**: passwords are checked one at a time (bcrypt); at most 10 failures per client and 100 overall in 10 minutes, after which even the right password is refused (429) until the window passes. Failures and blocks are audited once per window.
 - **Sensitive actions**: changes to administrators, API tokens, sessions and the configuration, and changing your own password, need your password within the last 10 minutes; otherwise you confirm it first. Changing an administrator's password, role or status ends all their sessions.
