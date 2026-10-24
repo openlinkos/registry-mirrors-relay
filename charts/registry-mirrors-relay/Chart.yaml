@@ -1,0 +1,25 @@
+apiVersion: v2
+name: registry-mirrors-relay
+description: A container registry mirror that relays and never stores image data, with a built-in admin console.
+type: application
+# 发布时由 release.yml 改成标签的版本（chart 和应用同一个版本号）
+version: 0.1.1
+appVersion: "v0.1.1"
+# preStop 的 sleep 动作需要 1.30+
+kubeVersion: ">=1.30.0-0"
+home: https://github.com/openlinkos/registry-mirrors-relay
+sources:
+  - https://github.com/openlinkos/registry-mirrors-relay
+keywords:
+  - registry
+  - mirror
+  - docker
+  - containerd
+  - oci
+  - proxy
+maintainers:
+  - name: OpenLinkOS
+    url: https://github.com/openlinkos
+annotations:
+  # 发布时写入 appVersion 对应镜像的 digest；没有设置 image.tag、image.digest 时按它拉取
+  openlinkos.org/image-digest: ""

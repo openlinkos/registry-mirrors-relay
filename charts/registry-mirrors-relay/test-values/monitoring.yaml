@@ -1,0 +1,6 @@
+metrics:
+  serviceMonitor:
+    enabled: true
+    labels: {release: kube-prometheus-stack}
+  dashboard:
+    enabled: true

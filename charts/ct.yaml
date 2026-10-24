@@ -1,0 +1,7 @@
+# chart-testing（ct lint、ct install）的配置，CI 里用
+chart-dirs:
+  - charts
+target-branch: main
+validate-maintainers: false
+# chart 版本号就是应用版本号，随发布标签一起改
+check-version-increment: false

@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
-# Kubernetes 端到端测试：在 kind 里部署 deploy/kubernetes/base（两个副本、只读运营数据、管理员口令组件），
+# Kubernetes 端到端测试：在 kind 里部署 relay（两个副本、只读运营数据、管理员口令来自 Secret），
 # 把节点上 containerd 的 docker.io 和 ghcr.io 指向 relay，然后起两个 Pod 拉镜像。
+#   INSTALL=kustomize（默认）：deploy/test/kind 的 kustomize（base 加管理员口令组件）；
+#   INSTALL=helm：用 charts/registry-mirrors-relay 和 deploy/test/kind/values.yaml 安装，另外跑 helm test，
+#                 最后升级成 mode=writable，确认 StatefulSet 就绪、第一次登录要求改口令。
 #
+# relay 所在的命名空间强制 restricted Pod Security；拉镜像的测试 Pod 在单独的命名空间里。
 # hosts.toml 里的 server（直连上游的后备）故意写成解析不了的地址：relay 不工作时 Pod 就拉不到镜像，
 # 不会悄悄绕过 relay。最后检查 relay 的访问日志里有这些拉取，并且管理后台能用 Secret 里的口令登录。
 #
-# 需要 docker、kind、kubectl、go、openssl。会消耗运行机器出口 IP 的 Docker Hub 匿名额度（几次）。
-# 用法：scripts/kind-e2e.sh；KEEP=1 时测完保留集群。
+# 需要 docker、kind、kubectl、go、openssl（helm 模式还要 helm，可用 HELM 指定）。
+# 会消耗运行机器出口 IP 的 Docker Hub 匿名额度（几次）。KEEP=1 时测完保留集群。
 set -euo pipefail
 
 CLUSTER="${CLUSTER:-relay-e2e}"
+INSTALL="${INSTALL:-kustomize}"
+HELM="${HELM:-helm}"
 NS=relay
 IMAGE=registry-mirrors-relay:e2e
 fail=0
@@ -17,36 +23,58 @@ ok() { printf '  通过  %s\n' "$1"; }
 bad() { printf '  失败  %s\n' "$1"; fail=1; }
 
 work="$(mktemp -d)"
+pf=""
 cleanup() {
-  [ -n "${pf:-}" ] && kill "$pf" 2>/dev/null || true
+  [ -n "$pf" ] && kill "$pf" 2>/dev/null || true
   if [ "${KEEP:-}" != 1 ]; then kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true; fi
   rm -rf "$work"
 }
 trap cleanup EXIT
 
-echo "构建镜像，创建集群"
+# admin_login：经 port-forward 用 Secret 里的口令登录，输出登录后跳到的地址
+admin_login() {
+  kubectl -n "$NS" port-forward svc/registry-mirrors-relay-admin 19090:9090 >/dev/null 2>&1 &
+  pf=$!
+  for _ in $(seq 1 30); do curl -fs -o /dev/null http://127.0.0.1:19090/admin/login && break; sleep 1; done
+  curl -s -o /dev/null -w '%{redirect_url}' -H 'Origin: http://127.0.0.1:19090' \
+    --data-urlencode username=admin --data-urlencode "password=$(cat "$work/pw")" http://127.0.0.1:19090/admin/login
+  kill "$pf" 2>/dev/null || true
+  pf=""
+}
+
+echo "构建镜像，创建集群（安装方式：$INSTALL）"
 scripts/build-image.sh "$IMAGE" >/dev/null
 kind create cluster --name "$CLUSTER" --wait 120s >/dev/null
 kind load docker-image "$IMAGE" --name "$CLUSTER" >/dev/null
 
 echo "部署"
 kubectl create namespace "$NS" >/dev/null
+kubectl label namespace "$NS" pod-security.kubernetes.io/enforce=restricted >/dev/null
+kubectl create namespace pull >/dev/null
 openssl rand -base64 18 >"$work/pw"
 kubectl -n "$NS" create secret generic registry-mirrors-relay-admin --from-file=password="$work/pw" >/dev/null
-kubectl -n "$NS" apply -k deploy/test/kind >/dev/null
+case "$INSTALL" in
+  kustomize) kubectl -n "$NS" apply -k deploy/test/kind >/dev/null ;;
+  helm) "$HELM" install relay charts/registry-mirrors-relay -n "$NS" -f deploy/test/kind/values.yaml >/dev/null ;;
+  *) echo "INSTALL 只能是 kustomize 或 helm" >&2; exit 2 ;;
+esac
 if kubectl -n "$NS" rollout status deploy/registry-mirrors-relay --timeout=180s >/dev/null; then
-  ok "两个副本就绪"
+  ok "两个副本就绪（restricted Pod Security）"
 else
   bad "没有就绪"
   kubectl -n "$NS" describe pods
+  kubectl -n "$NS" get events
   exit 1
 fi
-
-echo "其他部署方式在 API Server 上校验（不需要额外 CRD 的）"
-kubectl create namespace dryrun >/dev/null
-for d in deploy/kubernetes/overlays/single-writable deploy/kubernetes/overlays/networkpolicy; do
-  if kubectl -n dryrun apply --dry-run=server -k "$d" >/dev/null; then ok "$d"; else bad "$d"; fi
-done
+if [ "$INSTALL" = helm ]; then
+  if "$HELM" test relay -n "$NS" >/dev/null; then ok "helm test"; else bad "helm test"; fi
+else
+  echo "其他部署方式在 API Server 上校验（不需要额外 CRD 的）"
+  kubectl create namespace dryrun >/dev/null
+  for d in deploy/kubernetes/overlays/single-writable deploy/kubernetes/overlays/networkpolicy; do
+    if kubectl -n dryrun apply --dry-run=server -k "$d" >/dev/null; then ok "$d"; else bad "$d"; fi
+  done
+fi
 
 echo "节点上的 containerd 指向 relay"
 for node in $(kind get nodes --name "$CLUSTER"); do
@@ -59,14 +87,14 @@ for node in $(kind get nodes --name "$CLUSTER"); do
 done
 
 echo "拉取"
-kubectl -n "$NS" run e2e-dockerhub --image=docker.io/library/busybox:1.37 --restart=Never --command -- sh -c 'echo ok' >/dev/null
-kubectl -n "$NS" run e2e-ghcr --image=ghcr.io/containerd/busybox:1.36 --restart=Never --command -- sh -c 'echo ok' >/dev/null
+kubectl -n pull run e2e-dockerhub --image=docker.io/library/busybox:1.37 --restart=Never --command -- sh -c 'echo ok' >/dev/null
+kubectl -n pull run e2e-ghcr --image=ghcr.io/containerd/busybox:1.36 --restart=Never --command -- sh -c 'echo ok' >/dev/null
 for pod in e2e-dockerhub e2e-ghcr; do
-  if kubectl -n "$NS" wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$pod" --timeout=240s >/dev/null; then
+  if kubectl -n pull wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$pod" --timeout=240s >/dev/null; then
     ok "$pod 拉到镜像并运行完成"
   else
     bad "$pod 没有运行完成"
-    kubectl -n "$NS" describe pod "$pod" | tail -20
+    kubectl -n pull describe pod "$pod" | tail -20
   fi
 done
 
@@ -78,12 +106,29 @@ done
 if grep -F 'ns=ghcr.io' "$work/logs" | grep -q '/blobs/'; then ok "镜像层经 relay 下载（带 ns=ghcr.io）"; else bad "没有经 relay 下载 ghcr.io 的镜像层"; fi
 
 echo "管理后台"
-kubectl -n "$NS" port-forward svc/registry-mirrors-relay-admin 19090:9090 >/dev/null 2>&1 &
-pf=$!
-for _ in $(seq 1 30); do curl -fs -o /dev/null http://127.0.0.1:19090/admin/login && break; sleep 1; done
-loc="$(curl -s -o /dev/null -w '%{redirect_url}' -H 'Origin: http://127.0.0.1:19090' \
-  --data-urlencode username=admin --data-urlencode "password=$(cat "$work/pw")" http://127.0.0.1:19090/admin/login)"
+loc="$(admin_login)"
 if [ "$loc" = "http://127.0.0.1:19090/admin/" ]; then ok "用 Secret 里的口令登录管理后台"; else bad "登录后跳到了 $loc"; fi
+
+if [ "$INSTALL" = helm ]; then
+  echo "升级成 mode=writable"
+  if "$HELM" upgrade relay charts/registry-mirrors-relay -n "$NS" -f deploy/test/kind/values.yaml --set mode=writable --wait --timeout 180s >/dev/null &&
+    kubectl -n "$NS" rollout status statefulset/registry-mirrors-relay --timeout=180s >/dev/null; then
+    ok "StatefulSet 就绪"
+  else
+    bad "升级失败"
+    kubectl -n "$NS" get all,pvc
+  fi
+  # 等 Deployment 的旧 Pod 退出，免得 port-forward 连到它们
+  for _ in $(seq 1 90); do [ -z "$(kubectl -n "$NS" get pods -l pod-template-hash -o name)" ] && break; sleep 1; done
+  if [ -z "$(kubectl -n "$NS" get deploy -o name)$(kubectl -n "$NS" get pods -l pod-template-hash -o name)" ] &&
+    [ "$(kubectl -n "$NS" get pvc -o jsonpath='{.items[*].status.phase}')" = Bound ]; then
+    ok "Deployment 已删除，PVC 已绑定"
+  else
+    bad "Deployment 还在或 PVC 没有绑定"
+  fi
+  loc="$(admin_login)"
+  if [ "$loc" = "http://127.0.0.1:19090/admin/account" ]; then ok "可写模式下第一次登录要求改口令"; else bad "登录后跳到了 $loc"; fi
+fi
 
 if [ "$fail" = 0 ]; then echo "全部通过"; else echo "有检查失败"; fi
 exit "$fail"

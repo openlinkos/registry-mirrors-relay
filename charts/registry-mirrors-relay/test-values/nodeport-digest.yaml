@@ -1,0 +1,6 @@
+image:
+  digest: sha256:3be52501d6fefbc94a9f90088907c4551cdf93c185e00c3a4c7ed5a88f06a0c7
+service:
+  type: NodePort
+  nodePort: 30080
+configRollout: restartOnly

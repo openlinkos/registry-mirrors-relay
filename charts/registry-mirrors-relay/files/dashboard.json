@@ -1,0 +1,84 @@
+{
+  "title": "registry-mirrors-relay",
+  "uid": "registry-mirrors-relay",
+  "tags": ["registry-mirrors-relay"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      { "name": "datasource", "label": "Prometheus", "type": "datasource", "query": "prometheus" }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1, "type": "timeseries", "title": "Requests per second by status",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [ { "refId": "A", "expr": "sum by (code) (rate(relay_requests_total[5m]))", "legendFormat": "{{code}}" } ]
+    },
+    {
+      "id": 2, "type": "timeseries", "title": "Traffic to clients by upstream",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "bps" }, "overrides": [] },
+      "targets": [ { "refId": "A", "expr": "sum by (upstream) (rate(relay_response_bytes_total[5m])) * 8", "legendFormat": "{{upstream}}" } ]
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "Concurrent layer downloads and requests in flight",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(relay_blob_streams)", "legendFormat": "layer downloads" },
+        { "refId": "B", "expr": "sum(relay_inflight_requests)", "legendFormat": "requests in flight" }
+      ]
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "Manifest latency p95 and manifest cache hit ratio",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": { "unit": "s" },
+        "overrides": [ { "matcher": { "id": "byName", "options": "cache hit ratio" }, "properties": [ { "id": "unit", "value": "percentunit" }, { "id": "custom.axisPlacement", "value": "right" } ] } ]
+      },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(relay_request_duration_seconds_bucket{kind=\"manifest\"}[5m])))", "legendFormat": "manifest p95" },
+        { "refId": "B", "expr": "sum(rate(relay_manifest_cache_events_total{result=\"hit\"}[5m])) / sum(rate(relay_manifest_cache_events_total{result=~\"hit|miss|revalidated\"}[5m]))", "legendFormat": "cache hit ratio" }
+      ]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Upstream probes (1 = up)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "min by (upstream) (relay_upstream_probe_up)", "legendFormat": "{{upstream}} up" },
+        { "refId": "B", "expr": "max by (upstream) (relay_upstream_breaker_open)", "legendFormat": "{{upstream}} breaker open" }
+      ]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Docker Hub pull quota left and rate-limited requests",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "min(relay_upstream_quota_remaining{upstream=\"docker.io\"})", "legendFormat": "Docker Hub quota left" },
+        { "refId": "B", "expr": "sum(rate(relay_rate_limited_total[5m])) * 60", "legendFormat": "rate limited per minute" }
+      ]
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Memory",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "process_resident_memory_bytes{job=~\".*registry-mirrors-relay.*\"}", "legendFormat": "{{pod}} RSS" },
+        { "refId": "B", "expr": "go_memstats_heap_inuse_bytes{job=~\".*registry-mirrors-relay.*\"}", "legendFormat": "{{pod}} heap" }
+      ]
+    }
+  ]
+}

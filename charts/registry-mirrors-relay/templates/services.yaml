@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "rmr.fullname" . }}
+  labels:
+    {{- include "rmr.labels" . | nindent 4 }}
+    app.kubernetes.io/component: relay
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  {{- if and .Values.service.externalTrafficPolicy (has .Values.service.type (list "NodePort" "LoadBalancer")) }}
+  externalTrafficPolicy: {{ .Values.service.externalTrafficPolicy }}
+  {{- end }}
+  {{- if eq .Values.service.type "LoadBalancer" }}
+  {{- with .Values.service.loadBalancerClass }}
+  loadBalancerClass: {{ . }}
+  {{- end }}
+  {{- with .Values.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  selector:
+    {{- include "rmr.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      {{- if and .Values.service.nodePort (has .Values.service.type (list "NodePort" "LoadBalancer")) }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}
+{{- if .Values.adminService.enabled }}
+---
+# 管理后台：只用于 kubectl port-forward，不要经 Ingress、LoadBalancer 暴露
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "rmr.fullname" . }}-admin
+  labels:
+    {{- include "rmr.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admin
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "rmr.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: admin
+      port: {{ .Values.adminService.port }}
+      targetPort: admin
+{{- end }}
+{{- if .Values.metrics.service.enabled }}
+---
+# 指标单独一个 ClusterIP Service：拉取入口用 NodePort 或 LoadBalancer 时不会顺带暴露指标
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "rmr.fullname" . }}-metrics
+  labels:
+    {{- include "rmr.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "rmr.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.service.port }}
+      targetPort: metrics
+{{- end }}

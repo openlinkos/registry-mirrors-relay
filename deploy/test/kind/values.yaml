@@ -1,0 +1,11 @@
+# kind 端到端测试用（scripts/kind-e2e.sh，INSTALL=helm）：和 kustomization.yaml 等价，名字、NodePort、Secret 都相同。
+fullnameOverride: registry-mirrors-relay
+image:
+  repository: registry-mirrors-relay
+  tag: e2e
+  pullPolicy: Never
+service:
+  type: NodePort
+  nodePort: 30080
+admin:
+  existingSecret: registry-mirrors-relay-admin

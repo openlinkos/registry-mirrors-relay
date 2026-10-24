@@ -1,0 +1,2 @@
+mode: writable
+replicaCount: 2

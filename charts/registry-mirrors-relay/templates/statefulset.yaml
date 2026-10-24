@@ -1,0 +1,36 @@
+{{- if eq .Values.mode "writable" }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "rmr.fullname" . }}
+  labels:
+    {{- include "rmr.labels" . | nindent 4 }}
+spec:
+  # 运营数据库（bbolt）同时只能被一个进程打开
+  replicas: 1
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  serviceName: {{ include "rmr.fullname" . }}
+  selector:
+    matchLabels:
+      {{- include "rmr.selectorLabels" . | nindent 6 }}
+  {{- with .Values.persistence.retentionPolicy }}
+  persistentVolumeClaimRetentionPolicy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  template:
+    {{- include "rmr.podTemplate" . | nindent 4 }}
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          {{- toYaml .Values.persistence.accessModes | nindent 10 }}
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+  {{- end }}
+{{- end }}

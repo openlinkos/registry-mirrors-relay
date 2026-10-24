@@ -1,0 +1,6 @@
+httpRoute:
+  enabled: true
+  parentRefs:
+    - name: public-gateway
+      namespace: gateway-system
+  hostnames: [mirror.example.com]

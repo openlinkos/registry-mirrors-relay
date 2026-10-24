@@ -1,0 +1,3 @@
+config:
+  entrances:
+    - {listen: ":5001", upstream: docker.io}

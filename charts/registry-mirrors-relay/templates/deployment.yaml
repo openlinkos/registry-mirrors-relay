@@ -1,0 +1,21 @@
+{{- if eq .Values.mode "readonly" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rmr.fullname" . }}
+  labels:
+    {{- include "rmr.labels" . | nindent 4 }}
+spec:
+  replicas: {{ include "rmr.replicas" . }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "rmr.selectorLabels" . | nindent 6 }}
+  template:
+    {{- include "rmr.podTemplate" . | nindent 4 }}
+{{- end }}

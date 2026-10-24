@@ -1,0 +1,13 @@
+{{- if and .Values.pdb.enabled (eq .Values.mode "readonly") (gt (int (include "rmr.replicas" .)) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "rmr.fullname" . }}
+  labels:
+    {{- include "rmr.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "rmr.selectorLabels" . | nindent 6 }}
+{{- end }}

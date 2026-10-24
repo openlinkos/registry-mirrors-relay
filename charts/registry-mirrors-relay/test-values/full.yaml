@@ -1,0 +1,70 @@
+# 尽量多的选项一起开：多个域名、每个域名一个上游、需要登录，HTTPS 交给 Ingress
+mode: writable
+admin:
+  existingSecret: relay-admin
+configRollout: restartOnly
+commonLabels: {team: infra}
+podAnnotations: {example.com/note: full}
+service:
+  type: LoadBalancer
+  loadBalancerSourceRanges: [203.0.113.0/24]
+  externalTrafficPolicy: Local
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+  hosts:
+    - host: docker.example.org
+    - host: ghcr.example.org
+  tls:
+    - hosts: [docker.example.org, ghcr.example.org]
+      secretName: example-org-tls
+networkPolicy:
+  enabled: true
+persistence:
+  size: 2Gi
+  storageClass: local-path
+  retentionPolicy: {whenDeleted: Retain, whenScaled: Retain}
+extraVolumes:
+  - name: users
+    secret:
+      secretName: relay-users
+extraVolumeMounts:
+  - name: users
+    mountPath: /run/secrets/relay-users
+    readOnly: true
+extraEnv:
+  - name: DOCKERHUB_TOKEN
+    valueFrom:
+      secretKeyRef: {name: relay-upstream, key: token}
+startupProbe:
+  httpGet: {path: /healthz, port: http}
+  failureThreshold: 30
+  periodSeconds: 2
+nodeSelector: {kubernetes.io/os: linux}
+tolerations:
+  - {key: dedicated, operator: Equal, value: mirror, effect: NoSchedule}
+priorityClassName: system-cluster-critical
+config:
+  client_ip:
+    trusted_proxies: [10.42.0.0/16, 192.0.2.0/24]
+  site:
+    name: Example Mirrors
+    operator: Example Org
+  entrances:
+    - {hosts: [docker.example.org], upstream: docker.io, auth: basic}
+    - {hosts: [ghcr.example.org], upstream: ghcr.io, auth: basic}
+  access:
+    users_file: /run/secrets/relay-users/htpasswd
+  upstreams:
+    docker.io:
+      credentials:
+        username: example-bot
+        password: {env: DOCKERHUB_TOKEN}
+        realm_host: auth.docker.io
+        public_only: true
+  limits:
+    manifest_rate: 5
+  log:
+    access: {output: stdout}

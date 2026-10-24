@@ -125,4 +125,11 @@ release:
       --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
     gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:{{ .Tag }} -R openlinkos/registry-mirrors-relay
+
+    # Helm chart (installs the image above by digest)
+    cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:{{ .Version }} \
+      --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
+    gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:{{ .Version }} -R openlinkos/registry-mirrors-relay
+    helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version {{ .Version }} -n registry-mirror --create-namespace
     ```

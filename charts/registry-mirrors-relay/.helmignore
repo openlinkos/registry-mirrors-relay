@@ -1,0 +1,7 @@
+# 打包 chart 时排除的文件
+.DS_Store
+*.tgz
+ci/
+test-values/
+README.md.gotmpl
+.helmignore

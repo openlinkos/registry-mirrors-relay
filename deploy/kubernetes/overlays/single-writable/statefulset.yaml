@@ -4,6 +4,7 @@ metadata:
   name: registry-mirrors-relay
 spec:
   replicas: 1
+  revisionHistoryLimit: 5
   serviceName: registry-mirrors-relay
   template:
     spec:
@@ -11,6 +12,13 @@ spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
       terminationGracePeriodSeconds: 60
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: registry-mirrors-relay
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532

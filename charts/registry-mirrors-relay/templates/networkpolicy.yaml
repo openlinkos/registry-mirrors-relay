@@ -1,0 +1,53 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "rmr.fullname" . }}
+  labels:
+    {{- include "rmr.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "rmr.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # 拉取入口：节点上的 containerd、集群里的 Pod、Ingress 或 Gateway 都会连
+    - ports:
+        - port: {{ .Values.containerPorts.http }}
+          protocol: TCP
+    {{- with .Values.networkPolicy.metricsFrom }}
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - port: {{ $.Values.containerPorts.metrics }}
+          protocol: TCP
+    {{- end }}
+    # 管理后台不放行：kubectl port-forward 不经过 NetworkPolicy
+    {{- with .Values.networkPolicy.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  egress:
+    - to:
+        {{- toYaml .Values.networkPolicy.dnsTo | nindent 8 }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # 上游 registry、令牌服务和对象存储：只用 HTTPS，只去公网（relay 自己也拒绝连接内网地址）
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              {{- toYaml .Values.networkPolicy.egressExceptIPv4 | nindent 14 }}
+        - ipBlock:
+            cidr: ::/0
+            except:
+              {{- toYaml .Values.networkPolicy.egressExceptIPv6 | nindent 14 }}
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- with .Values.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

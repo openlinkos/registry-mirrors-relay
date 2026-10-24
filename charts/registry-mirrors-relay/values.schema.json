@@ -1,0 +1,212 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "definitions": {
+    "stringMap": { "type": "object", "additionalProperties": { "type": "string" } },
+    "list": { "type": "array" },
+    "object": { "type": "object" },
+    "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+  },
+  "properties": {
+    "global": { "type": "object" },
+    "mode": { "type": "string", "enum": ["readonly", "writable"] },
+    "replicaCount": { "type": ["integer", "null"], "minimum": 1 },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "digest": { "type": "string", "pattern": "^(|sha256:[0-9a-f]{64})$" },
+        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "imagePullSecrets": { "$ref": "#/definitions/list" },
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "commonLabels": { "$ref": "#/definitions/stringMap" },
+    "config": {
+      "description": "The relay configuration. data_dir, listen and tls are set by the chart and rejected here.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "client_ip": { "type": "object" },
+        "site": { "type": "object" },
+        "entrances": { "type": "array", "items": { "type": "object" } },
+        "upstreams": { "type": "object" },
+        "access": { "type": "object" },
+        "limits": { "type": "object" },
+        "cache": { "type": "object" },
+        "timeouts": { "type": "object" },
+        "proxy": { "type": "object" },
+        "admin": { "type": "object" },
+        "log": { "type": "object" },
+        "metrics": { "type": "object" }
+      }
+    },
+    "configRollout": { "type": "string", "enum": ["always", "restartOnly"] },
+    "admin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "existingSecret": { "type": "string" },
+        "existingSecretKey": { "type": "string", "minLength": 1 },
+        "username": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" }
+      }
+    },
+    "containerPorts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "http": { "$ref": "#/definitions/port" },
+        "admin": { "$ref": "#/definitions/port" },
+        "metrics": { "$ref": "#/definitions/port" }
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+        "port": { "$ref": "#/definitions/port" },
+        "nodePort": { "type": ["integer", "null"], "minimum": 1, "maximum": 65535 },
+        "annotations": { "$ref": "#/definitions/stringMap" },
+        "externalTrafficPolicy": { "type": "string", "enum": ["", "Cluster", "Local"] },
+        "loadBalancerClass": { "type": "string" },
+        "loadBalancerSourceRanges": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "adminService": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "port": { "$ref": "#/definitions/port" }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "service": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "enabled": { "type": "boolean" }, "port": { "$ref": "#/definitions/port" } }
+        },
+        "serviceMonitor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "interval": { "type": "string" },
+            "labels": { "$ref": "#/definitions/stringMap" },
+            "relabelings": { "$ref": "#/definitions/list" }
+          }
+        },
+        "dashboard": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "enabled": { "type": "boolean" }, "labels": { "$ref": "#/definitions/stringMap" } }
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "className": { "type": "string" },
+        "annotations": { "$ref": "#/definitions/stringMap" },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["host"],
+            "properties": { "host": { "type": "string", "minLength": 1 } }
+          }
+        },
+        "tls": { "$ref": "#/definitions/list" }
+      }
+    },
+    "httpRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "parentRefs": { "$ref": "#/definitions/list" },
+        "hostnames": { "type": "array", "items": { "type": "string" } },
+        "timeouts": { "$ref": "#/definitions/object" }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "metricsFrom": { "$ref": "#/definitions/list" },
+        "dnsTo": { "$ref": "#/definitions/list" },
+        "egressExceptIPv4": { "type": "array", "items": { "type": "string" } },
+        "egressExceptIPv6": { "type": "array", "items": { "type": "string" } },
+        "extraIngress": { "$ref": "#/definitions/list" },
+        "extraEgress": { "$ref": "#/definitions/list" }
+      }
+    },
+    "pdb": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "enabled": { "type": "boolean" }, "minAvailable": { "type": ["integer", "string"] } }
+    },
+    "persistence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "size": { "type": "string" },
+        "storageClass": { "type": "string" },
+        "accessModes": { "type": "array", "items": { "type": "string" } },
+        "retentionPolicy": { "$ref": "#/definitions/object" }
+      }
+    },
+    "dataDir": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "sizeLimit": { "type": "string" } }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": { "type": "boolean" },
+        "name": { "type": "string" },
+        "annotations": { "$ref": "#/definitions/stringMap" }
+      }
+    },
+    "podSecurityContext": { "$ref": "#/definitions/object" },
+    "securityContext": { "$ref": "#/definitions/object" },
+    "resources": { "$ref": "#/definitions/object" },
+    "readinessProbe": { "$ref": "#/definitions/object" },
+    "livenessProbe": { "$ref": "#/definitions/object" },
+    "startupProbe": { "$ref": "#/definitions/object" },
+    "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
+    "preStopSleepSeconds": { "type": "integer", "minimum": 0 },
+    "revisionHistoryLimit": { "type": "integer", "minimum": 0 },
+    "topologySpreadConstraints": { "$ref": "#/definitions/list" },
+    "nodeSelector": { "$ref": "#/definitions/stringMap" },
+    "tolerations": { "$ref": "#/definitions/list" },
+    "affinity": { "$ref": "#/definitions/object" },
+    "priorityClassName": { "type": "string" },
+    "podAnnotations": { "$ref": "#/definitions/stringMap" },
+    "podLabels": { "$ref": "#/definitions/stringMap" },
+    "extraEnv": { "$ref": "#/definitions/list" },
+    "extraEnvFrom": { "$ref": "#/definitions/list" },
+    "extraVolumes": { "$ref": "#/definitions/list" },
+    "extraVolumeMounts": { "$ref": "#/definitions/list" },
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "enabled": { "type": "boolean" } }
+    }
+  }
+}

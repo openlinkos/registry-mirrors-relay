@@ -1,0 +1,5 @@
+admin:
+  existingSecret: a
+config:
+  admin:
+    initial_admin: {username: root, password: {file: /x}}

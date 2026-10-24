@@ -1,0 +1,251 @@
+# -- `readonly`: a Deployment with `replicaCount` replicas; operational data is read-only and comes from `config` only.
+# `writable`: a StatefulSet with one replica and a PersistentVolumeClaim; the admin console can create accounts, rules and bans.
+mode: readonly
+
+# -- Replicas in `readonly` mode; empty means 2. `writable` mode always runs one, and asking for more fails.
+replicaCount: null
+
+image:
+  # -- Image repository.
+  repository: ghcr.io/openlinkos/registry-mirrors-relay
+  # -- Image tag. Empty means the chart's appVersion, pinned to the digest recorded at release.
+  tag: ""
+  # -- Image digest (`sha256:...`). Takes precedence over `tag`.
+  digest: ""
+  # -- Image pull policy.
+  pullPolicy: IfNotPresent
+
+# -- Secrets for pulling the image.
+imagePullSecrets: []
+# -- Overrides the chart name in resource names.
+nameOverride: ""
+# -- Overrides the full resource name.
+fullnameOverride: ""
+# -- Labels added to every resource.
+commonLabels: {}
+
+# -- The relay configuration (see config.example.yaml in the repository), rendered into a ConfigMap.
+# The chart sets `data_dir`, `listen` and `admin.store` itself; `tls` and per-port entrances (`entrances[].listen`)
+# are not supported here. Secrets must come from `env` or `file`, never `value`.
+config: {}
+
+# -- `always`: any configuration change restarts the pods.
+# `restartOnly`: only changes that need a restart do; the rest are hot-reloaded (within about a minute).
+configRollout: always
+
+admin:
+  # -- Name of an existing Secret holding the first administrator's password. There is no default password.
+  # With `writable` the administrator must change it at the first sign-in, after which the Secret can be deleted.
+  # With `readonly` this is the only administrator and the password stays valid.
+  existingSecret: ""
+  # -- Key in that Secret.
+  existingSecretKey: password
+  # -- User name of the first administrator.
+  username: admin
+
+containerPorts:
+  # -- Pull entrance.
+  http: 8080
+  # -- Admin console and API.
+  admin: 9090
+  # -- Prometheus metrics.
+  metrics: 9180
+
+service:
+  # -- Service type for the pull entrance. Use NodePort or LoadBalancer when node containerd should pull through it.
+  type: ClusterIP
+  # -- Service port.
+  port: 80
+  # -- Node port when `type` is NodePort or LoadBalancer.
+  nodePort: null
+  # -- Service annotations.
+  annotations: {}
+  # -- externalTrafficPolicy for NodePort and LoadBalancer.
+  externalTrafficPolicy: ""
+  # -- loadBalancerClass for LoadBalancer.
+  loadBalancerClass: ""
+  # -- loadBalancerSourceRanges for LoadBalancer.
+  loadBalancerSourceRanges: []
+
+adminService:
+  # -- A ClusterIP Service for the admin console (`kubectl port-forward`). Never expose it publicly.
+  enabled: true
+  # -- Service port.
+  port: 9090
+
+metrics:
+  service:
+    # -- A ClusterIP Service for the metrics port.
+    enabled: true
+    # -- Service port.
+    port: 9180
+  serviceMonitor:
+    # -- Create a Prometheus Operator ServiceMonitor.
+    enabled: false
+    # -- Scrape interval.
+    interval: 30s
+    # -- Extra labels, e.g. for the Prometheus selector.
+    labels: {}
+    # -- Relabelings.
+    relabelings: []
+  dashboard:
+    # -- Create a ConfigMap with a Grafana dashboard.
+    enabled: false
+    # -- Labels for the Grafana sidecar.
+    labels:
+      grafana_dashboard: "1"
+
+ingress:
+  # -- Create an Ingress for the pull entrance.
+  enabled: false
+  # -- IngressClass name.
+  className: ""
+  # -- Ingress annotations. Disable request and response buffering and long timeouts in your controller.
+  annotations: {}
+  # -- Hosts; each `{host: mirror.example.com}` routes `/` to the relay.
+  hosts: []
+  # -- TLS settings.
+  tls: []
+
+httpRoute:
+  # -- Create a Gateway API HTTPRoute for the pull entrance.
+  enabled: false
+  # -- Gateways to attach to.
+  parentRefs: []
+  # -- Host names.
+  hostnames: []
+  # -- Timeouts; `0s` disables them, since layers can take a long time to download.
+  timeouts:
+    request: 0s
+    backendRequest: 0s
+
+networkPolicy:
+  # -- Create a NetworkPolicy: ingress to the pull entrance and metrics, egress to DNS and public HTTPS only.
+  enabled: false
+  # -- Peers allowed to scrape metrics.
+  metricsFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+  # -- Peers serving DNS.
+  dnsTo:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+  # -- IPv4 ranges excluded from HTTPS egress.
+  egressExceptIPv4: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 127.0.0.0/8]
+  # -- IPv6 ranges excluded from HTTPS egress.
+  egressExceptIPv6: ["fc00::/7", "fe80::/10", "::1/128"]
+  # -- Extra ingress rules.
+  extraIngress: []
+  # -- Extra egress rules.
+  extraEgress: []
+
+pdb:
+  # -- Create a PodDisruptionBudget in `readonly` mode with more than one replica.
+  enabled: true
+  # -- minAvailable.
+  minAvailable: 1
+
+persistence:
+  # -- Use a PersistentVolumeClaim in `writable` mode. Without it the operational data is lost when the pod restarts.
+  enabled: true
+  # -- Size of the operational database volume (usually under 10 MiB used).
+  size: 1Gi
+  # -- StorageClass; empty uses the cluster default.
+  storageClass: ""
+  # -- Access modes.
+  accessModes: [ReadWriteOnce]
+  # -- StatefulSet persistentVolumeClaimRetentionPolicy.
+  retentionPolicy: {}
+
+dataDir:
+  # -- sizeLimit of the emptyDir used for the data directory in `readonly` mode.
+  sizeLimit: 64Mi
+
+serviceAccount:
+  # -- Create a ServiceAccount (its token is never mounted).
+  create: true
+  # -- Name; empty uses the full name.
+  name: ""
+  # -- Annotations.
+  annotations: {}
+
+# -- Pod security context.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container security context.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# -- Resources. GOMEMLIMIT is set to 90% of the memory limit automatically.
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    memory: 512Mi
+
+# -- Readiness probe. `/readyz` turns 503 while shutting down; it never checks the upstreams.
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  periodSeconds: 5
+  failureThreshold: 2
+# -- Liveness probe.
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  periodSeconds: 10
+  failureThreshold: 6
+# -- Startup probe.
+startupProbe: {}
+
+# -- Grace period: running downloads get up to 30 seconds (`timeouts.shutdown_grace`).
+terminationGracePeriodSeconds: 60
+# -- Seconds to wait before shutting down so that Services drop the pod first.
+preStopSleepSeconds: 5
+# -- Revision history to keep.
+revisionHistoryLimit: 5
+
+# -- Topology spread constraints; `labelSelector` is filled in when omitted.
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+# -- Node selector.
+nodeSelector: {}
+# -- Tolerations.
+tolerations: []
+# -- Affinity.
+affinity: {}
+# -- Priority class.
+priorityClassName: ""
+# -- Pod annotations.
+podAnnotations: {}
+# -- Pod labels.
+podLabels: {}
+
+# -- Extra environment variables.
+extraEnv: []
+# -- Extra environment sources.
+extraEnvFrom: []
+# -- Extra volumes, e.g. a Secret with an htpasswd file for `config.access.users_file`.
+extraVolumes: []
+# -- Extra volume mounts. Mount Secrets under /run/secrets.
+extraVolumeMounts: []
+
+tests:
+  # -- Install the `helm test` pod.
+  enabled: true

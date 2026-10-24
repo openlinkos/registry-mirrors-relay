@@ -1,0 +1,32 @@
+registry-mirrors-relay {{ .Chart.AppVersion }} ({{ .Values.mode }} mode) is installed as {{ include "rmr.fullname" . }}.
+
+Pull entrance: Service {{ include "rmr.fullname" . }}, port {{ .Values.service.port }} ({{ .Values.service.type }}).
+{{- if .Values.ingress.enabled }}
+Ingress hosts: {{ range .Values.ingress.hosts }}{{ .host }} {{ end }}
+{{- end }}
+{{- if eq .Values.service.type "NodePort" }}
+
+To let containerd on the nodes pull through it, write for each upstream (docker.io shown):
+
+  # /etc/containerd/certs.d/docker.io/hosts.toml
+  server = "https://registry-1.docker.io"
+  [host."http://<node address>:<node port of {{ include "rmr.fullname" . }}>"]
+    capabilities = ["pull", "resolve"]
+{{- end }}
+
+Admin console (never expose it publicly):
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "rmr.fullname" . }}-admin {{ .Values.adminService.port }}
+  # then open http://127.0.0.1:{{ .Values.adminService.port }}/admin/
+{{- if .Values.admin.existingSecret }}
+
+The first administrator is "{{ .Values.admin.username }}" with the password from Secret {{ .Values.admin.existingSecret }}.
+{{- if eq .Values.mode "writable" }}
+They must change the password at the first sign-in; afterwards you can delete the Secret.
+{{- else }}
+In readonly mode this is the only administrator and its password stays valid: keep it long and random.
+{{- end }}
+{{- else }}
+
+No administrator is configured (admin.existingSecret is empty), so nobody can sign in to the console.
+{{- end }}

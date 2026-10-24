@@ -77,10 +77,10 @@ jobs:
           [ -n "$GOARM" ] && export GOARM="${GOARM#v}"
           go build -trimpath -o /dev/null ./cmd/registry-mirrors-relay
 
-  e2e:
-    name: kind e2e
+  chart:
+    name: helm chart
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -88,21 +88,55 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - name: install kind and kubectl
-        run: |
-          curl -fsSLo kind https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64
-          echo "aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  kind" | sha256sum -c -
-          curl -fsSLo kubectl https://dl.k8s.io/release/v1.37.0/bin/linux/amd64/kubectl
-          echo "6129359f4e1f3848a5572ccb0b26cf28b8ca08cef38c95a765b2f64a2c961a2f  kubectl" | sha256sum -c -
-          sudo install -m 0755 kind kubectl /usr/local/bin/
+      - name: install tools
+        run: scripts/ci-tools.sh kubectl helm chart
+      - uses: helm/chart-testing-action@720270857a28afd41e2426521a7801db09e9b510 # v2.9.0
+      - name: ct lint
+        run: ct lint --config charts/ct.yaml --charts charts/registry-mirrors-relay
+      - name: chart checks
+        env:
+          HELM: helm4
+          HELM3: helm
+        run: scripts/chart-check.sh
+
+  e2e:
+    name: kind e2e (${{ matrix.install }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        install: [kustomize, helm]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: install tools
+        run: scripts/ci-tools.sh kubectl kind helm
       - name: kustomize build every overlay
+        if: matrix.install == 'kustomize'
         run: |
           for d in deploy/kubernetes/base deploy/kubernetes/overlays/* deploy/test/kind; do
             echo "$d"
             kubectl kustomize "$d" >/dev/null
           done
       - name: kind e2e
+        env:
+          INSTALL: ${{ matrix.install }}
+          HELM: helm4
+          KEEP: "1"
         run: scripts/kind-e2e.sh
+      - uses: helm/chart-testing-action@720270857a28afd41e2426521a7801db09e9b510 # v2.9.0
+        if: matrix.install == 'helm'
+      - name: ct install
+        if: matrix.install == 'helm'
+        # 每组 ci/*-values.yaml 装进一个新的命名空间、跑 helm test 再删掉；用上一步载入 kind 的镜像
+        run: >-
+          ct install --config charts/ct.yaml --charts charts/registry-mirrors-relay
+          --helm-extra-set-args "--set=image.repository=registry-mirrors-relay --set=image.tag=e2e --set=image.pullPolicy=Never"
 
   release-snapshot:
     name: release (snapshot)

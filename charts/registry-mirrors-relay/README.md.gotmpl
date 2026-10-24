@@ -1,0 +1,63 @@
+# {{ template "chart.name" . }}
+
+{{ template "chart.description" . }} Pulls from Docker Hub, gcr.io, ghcr.io, registry.k8s.io, quay.io and any registry you add, through one host name or one per upstream, without writing image layers to disk.
+
+{{ template "chart.homepageLine" . }}
+
+## Install
+
+```bash
+kubectl create namespace registry-mirror
+# The first administrator: there is no default password
+openssl rand -base64 18 > admin-password
+kubectl -n registry-mirror create secret generic registry-mirrors-relay-admin --from-file=password=admin-password
+
+helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay \
+  --namespace registry-mirror --version {{ template "chart.version" . }} \
+  --set admin.existingSecret=registry-mirrors-relay-admin
+```
+
+Open the admin console with `kubectl -n registry-mirror port-forward svc/registry-mirrors-relay-admin 9090` and `http://127.0.0.1:9090/admin/`.
+
+## Modes
+
+- `mode: readonly` (default): a Deployment with two replicas and a PodDisruptionBudget. Operational data (accounts, IP and image rules, bans) comes only from `config`; the console shows it read-only. The first administrator from `admin.existingSecret` is the only one and its password stays valid, so keep it long and random.
+- `mode: writable`: a StatefulSet with one replica and a PersistentVolumeClaim for the operational database. The console can create accounts, rules and bans. The first administrator must change the password at the first sign-in; afterwards the Secret can be deleted.
+
+## Configuration
+
+`config` is the relay configuration (see [config.example.yaml](https://github.com/openlinkos/registry-mirrors-relay/blob/main/config.example.yaml)) and is rendered into a ConfigMap. The chart sets `data_dir`, `listen` and `admin.store` itself, and rejects `tls`, per-port entrances and secrets written as `value`: mount secrets and reference them with `env` or `file`.
+
+```yaml
+config:
+  client_ip:
+    trusted_proxies: [10.42.0.0/16]   # your ingress controller's pod network
+  entrances:
+    - name: mirror
+      hosts: [mirror.example.com]
+ingress:
+  enabled: true
+  className: traefik
+  hosts:
+    - host: mirror.example.com
+  tls:
+    - hosts: [mirror.example.com]
+      secretName: mirror-example-com-tls
+```
+
+To let containerd on the nodes pull through the relay, expose it on an address the nodes can reach (`service.type: NodePort` or `LoadBalancer`, or the Ingress host) and write `/etc/containerd/certs.d/<upstream>/hosts.toml`; see the [deployment guide](https://github.com/openlinkos/registry-mirrors-relay/blob/main/docs/deploy.en.md).
+
+## Verify
+
+The chart is signed keylessly by this repository's release workflow and has a build provenance attestation:
+
+```bash
+cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:{{ template "chart.version" . }} \
+  --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:{{ template "chart.version" . }} -R openlinkos/registry-mirrors-relay
+```
+
+{{ template "chart.requirementsSection" . }}
+
+{{ template "chart.valuesSection" . }}

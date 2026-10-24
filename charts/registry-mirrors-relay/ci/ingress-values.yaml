@@ -1,0 +1,10 @@
+replicaCount: 1
+ingress:
+  enabled: true
+  hosts:
+    - host: mirror.example.com
+config:
+  entrances:
+    - hosts: [mirror.example.com]
+  client_ip:
+    trusted_proxies: [private_ranges]
