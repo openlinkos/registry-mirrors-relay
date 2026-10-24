@@ -53,10 +53,22 @@ With read-only operational data (`none`), writes return 409.
 | `GET /admins`; `POST /admins` `{"name", "password", "role"}`; `PATCH /admins/{name}` `{"password", "role", "disabled"}`; `DELETE /admins/{name}` | Console administrators; at least one enabled admin role must remain, and you cannot disable or delete yourself; changes end that administrator's sessions. After you create an administrator or reset someone else's password, they must change it at the first sign-in (`must_change`) |
 | `GET /site`; `PUT /site` `{"name", "operator", "links"}`; `DELETE /site` | Site information on the usage page; once set it replaces `site` from the configuration, and deleting it switches back |
 | `GET /audit?limit=100` | Audit entries, newest first |
-| `GET /config` | The configuration in effect (YAML, secrets show only their source) |
+| `GET /config?view=effective\|file` | The configuration in effect (YAML, secrets show only their source); `view=file` is the configuration file alone, without the console's changes |
+| `GET /config/overrides` | Changes made to the configuration in the console: `key`, `value` (YAML), `state` (`active` in effect; `drift` in effect, but the file changed these fields since; `suspended` conflicts with the file and is not in effect; `ignored` not in effect because of `admin.config_edit: false`), `error`, who changed it and when; `editable` says whether changes can be made now |
+| `PUT /config/overrides/{key}` with the section as JSON | Change the configuration, in effect at once. `key` is `limits`, `cache`, `proxy`, `site`, `upstreams/<name>` (an object, field by field) or `entrances` (an array, replaced whole); the fields that can change are listed under [Admin console](admin.en.md#changing-the-configuration-in-the-console). Only fields that differ from the file are stored, and if none do the change is removed (`override` is null); `warnings` are new warnings caused by this change. Invalid input, or a result that fails validation with the file, returns 422 and changes nothing |
+| `DELETE /config/overrides/{key}` | Remove a change and go back to the file |
+| `GET /config/export?format=overrides\|merged` | Export the changes in effect in configuration file form (`yaml`): `overrides` (the default) has only the changes; `merged` merges them into the file, keeping comments and hiding secrets written inline |
 | `POST /reload` | Re-read the configuration file; SIGHUP does the same, and changes to the file are picked up within 10 seconds |
 
-Changes to rules and accounts take effect at once, without a reload. Rules and accounts from the configuration file are read-only in the API; change them in the file.
+Changes to rules, accounts and the configuration take effect at once, without a reload. Rules and accounts from the configuration file are read-only in the API; change them in the file.
+
+```bash
+# Allow 5 manifest requests per second per client and 2000 requests in flight overall
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"manifest_rate": 5, "max_inflight": 2000}' http://127.0.0.1:8080/admin/api/v1/config/overrides/limits
+# Go back to the configuration file
+curl -X DELETE -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/admin/api/v1/config/overrides/limits
+```
 
 ## Metrics
 
@@ -65,6 +77,7 @@ With `metrics.enabled: true`, `/metrics` on the management entrance (the pull po
 - `relay_requests_total{upstream,kind,code,cache}`, `relay_response_bytes_total`, `relay_request_duration_seconds`;
 - `relay_manifest_cache_events_total{result}`, `relay_manifest_cache_bytes`;
 - `relay_inflight_requests`, `relay_blob_streams`, `relay_rate_limited_total`, `relay_upstream_breaker_open{upstream}`, `relay_accesslog_dropped_total`;
+- `relay_config_overrides{key,state}`: each change made to the configuration in the console, with `state` as in `GET /config/overrides`;
 - `relay_upstream_probe_up{upstream}`, `relay_upstream_probe_seconds{upstream}` (a `/v2/` probe every minute; none when `proxy.health_interval` is 0), `relay_upstream_quota_remaining{upstream}`;
 - `go_goroutines`, `go_memstats_heap_inuse_bytes`, `process_resident_memory_bytes`, `relay_build_info`.
 

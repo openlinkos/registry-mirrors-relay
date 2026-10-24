@@ -29,7 +29,7 @@ docker run -d --name registry-mirrors-relay --restart unless-stopped \
   -v relay-data:/var/lib/registry-mirrors-relay \
   -v "$PWD/admin-password:/run/secrets/admin_password:ro" \
   -e RELAY_ADMIN_PASSWORD_FILE=/run/secrets/admin_password \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.2.0
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.3.0
 ```
 
 - Pull: `docker pull server:8080/library/alpine` (over plain HTTP, add `server:8080` to Docker's `insecure-registries`; for real use put it behind HTTPS, see [Deployment](docs/deploy.en.md)).
@@ -57,7 +57,7 @@ Docker Hub, gcr.io, ghcr.io, registry.k8s.io and quay.io are built in; more upst
 - **Saves quota and resources**: manifests are cached in memory with a cap, and pulls by tag are confirmed with a HEAD, which Docker Hub does not count; layers are streamed with one 16 KiB buffer per stream.
 - **Usage page and service status**: opening a host shows the mirror addresses, an address converter and configuration for each client, plus each upstream's reachability, its availability over the last 24 hours and this site's request success rate. On entrances that require sign-in only pulls need it by default; the page can also require sign-in or be turned off. See [Deployment](docs/deploy.en.md#usage-page-and-service-status).
 - **Access control**: entrances that require sign-in (bcrypt accounts), IP allow and deny lists, temporary bans, image allow and deny rules (403 or 451), rate limits per account or IP.
-- **Admin console and API**: overview, service status (each upstream's availability over 24 hours), Docker Hub quota left, client configuration, accounts, rules, rate limits, requests, abuse, audit log, admins and tokens; Chinese and English, light and dark. It shares one port with pulls by default and can move to a port of its own. See [docs/admin.en.md](docs/admin.en.md) and [docs/api.en.md](docs/api.en.md).
+- **Admin console and API**: overview, service status (each upstream's availability over 24 hours), Docker Hub quota left, client configuration, accounts, rules, rate limits, requests, abuse, audit log, admins and tokens; Chinese and English, light and dark. Entrances, upstreams, rate limits, the cache and more can be changed there too: on top of the configuration file, in effect at once, and exportable back to the file. It shares one port with pulls by default and can move to a port of its own. See [docs/admin.en.md](docs/admin.en.md) and [docs/api.en.md](docs/api.en.md).
 - **Operations**: Prometheus metrics (off by default), Caddy-format access logs, hot reload (SIGHUP, file changes, a button in the console), graceful shutdown, GOMEMLIMIT set from the container's memory limit.
 
 ## Design
@@ -90,7 +90,7 @@ Each release on the [Releases](https://github.com/openlinkos/registry-mirrors-re
 - [x] M5 Packaging and release: HTTPS (certificate files, ACME), image, Compose, Kubernetes, systemd, signed v0.1.0
 - [x] M6 Helm chart: two modes (read-only replicas, a writable single replica), published to an OCI registry and signed from v0.1.1
 - [x] v0.2.0: pulls, the admin console, the admin API and metrics on one port (or split), management for direct connections only; service status in the console
-- [ ] v0.3.0: edit entrances, upstreams, limits, cache and more from the console
+- [x] v0.3.0: edit entrances, upstreams, limits, cache and more from the console (on top of the configuration file, exportable)
 
 ## Development
 

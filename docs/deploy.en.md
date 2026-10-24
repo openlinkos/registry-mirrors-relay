@@ -44,7 +44,7 @@ docker run -d --name registry-mirrors-relay --restart unless-stopped \
   -v relay-data:/var/lib/registry-mirrors-relay \
   -v "$PWD/admin-password:/run/secrets/admin_password:ro" \
   -e RELAY_ADMIN_PASSWORD_FILE=/run/secrets/admin_password \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.2.0
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.3.0
 ```
 
 - The image carries a configuration: pull entrance 8080, management entrance 9090 (console, admin API, metrics), one single-domain entrance for any host name. To change it, mount your own at `/etc/registry-mirrors-relay/config.yaml` (see [`config.example.yaml`](../config.example.yaml)) and keep `listen.admin: ":9090"`: with Docker port publishing, IPv6 clients and rootless Docker arrive from the container gateway, so on a shared 8080 the relay could not tell local users from the internet.
@@ -102,9 +102,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: registry-mirror
 resources:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.2.0
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.3.0
 components:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.2.0
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.3.0
 ```
 
 ```bash
@@ -167,7 +167,7 @@ kubectl create namespace registry-mirror
 openssl rand -base64 18 > admin-password
 kubectl -n registry-mirror create secret generic registry-mirrors-relay-admin --from-file=password=admin-password
 rm admin-password
-helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version 0.2.0 \
+helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version 0.3.0 \
   -n registry-mirror -f values.yaml
 helm test registry-mirrors-relay -n registry-mirror
 kubectl -n registry-mirror port-forward svc/registry-mirrors-relay 8080:80   # then open http://127.0.0.1:8080/admin/
@@ -177,6 +177,7 @@ kubectl -n registry-mirror port-forward svc/registry-mirrors-relay 8080:80   # t
 - **Secrets**: no value takes a password. The administrator password comes only from `admin.existingSecret`. Write upstream tokens and the accounts file as `env:` or `file:` in `config` and bring them in from Secrets with `extraEnv` and `extraVolumes`; a `value:` fails the render.
 - **Configuration changes**: by default (`configRollout: always`) any change rolls the pods. With `restartOnly`, only changes that need a restart (`listen`, `data_dir`, `admin.store`, `log.access`, `log.level`, the `read_header`, `idle` and `shutdown_grace` timeouts, `proxy.buffer_size`, `limits.tracked_clients`) do; the relay hot-reloads the rest within a minute.
 - **Console and metrics**: they share 8080 by default, so `port-forward` to the main Service opens the console; `metrics.enabled` or `metrics.serviceMonitor.enabled` turns metrics on, and the ServiceMonitor scrapes 8080 too. `admin.separatePort: true` moves them to 9090 and a `<name>-admin` Service. With a NodePort or LoadBalancer pull Service, set `service.externalTrafficPolicy: Local` or split the port; the chart refuses to render otherwise.
+- **Changing the configuration in the console**: with `mode: writable`, entrances, upstreams, rate limits and more can be changed in the console (see [Admin console](admin.en.md#changing-the-configuration-in-the-console)). Those changes live on the PVC and are invisible to `helm upgrade`, Flux and Argo CD. To let values decide everything, write `admin: {config_edit: false}` under `config`, or alert on the metric `relay_config_overrides`. In `readonly` mode the configuration cannot be changed in the console.
 - **Optional parts** (all off by default): `ingress`, `httpRoute` (Gateway API), `metrics.serviceMonitor`, `metrics.dashboard` (a Grafana dashboard) and `networkPolicy`.
 - Every value is listed in the chart's [README](../charts/registry-mirrors-relay/README.md). For pulling through the relay on nodes see the previous section; with `service.type: NodePort`, the `helm install` notes include a `hosts.toml` example.
 
@@ -261,15 +262,15 @@ cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 sha256sum --ignore-missing -c SHA256SUMS
 
-cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.2.0 \
+cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.3.0 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.2.0 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.3.0 -R openlinkos/registry-mirrors-relay
 
-cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.2.0 \
+cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.3.0 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.2.0 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.3.0 -R openlinkos/registry-mirrors-relay
 ```
 
 ## Usage page and service status

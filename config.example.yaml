@@ -112,6 +112,9 @@ admin:
   # proxied_allow: [198.51.100.0/24]
   api_tokens:
     - {name: ops, role: admin, token: {env: RELAY_ADMIN_TOKEN}}   # 至少 32 个字符：openssl rand -hex 32
+  # 在后台改配置（入口、上游、限流、缓存等）：存在 state.db 里，叠加在这个文件之上，默认打开。
+  # 配置放在 Git 里、要完全以这个文件为准时写 false：后台的修改都不生效，只能重置。见 docs/admin.md
+  # config_edit: true
   # store: {driver: none}   # k8s 多副本时：运营数据只读，全部来自配置文件
 
 # Prometheus 指标：和管理后台在同一个入口（同样只接受本机、内网直连），默认关

@@ -44,7 +44,7 @@ docker run -d --name registry-mirrors-relay --restart unless-stopped \
   -v relay-data:/var/lib/registry-mirrors-relay \
   -v "$PWD/admin-password:/run/secrets/admin_password:ro" \
   -e RELAY_ADMIN_PASSWORD_FILE=/run/secrets/admin_password \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.2.0
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.3.0
 ```
 
 - 镜像自带一份配置：拉取入口 8080，管理入口 9090（后台、管理 API、指标），一个匹配任意域名的单域名入口。要改就把自己的配置挂到 `/etc/registry-mirrors-relay/config.yaml`（写法见 [`config.example.yaml`](../config.example.yaml)），并且保留 `listen.admin: ":9090"`：Docker 发布端口时，IPv6 客户端和 rootless Docker 的来源地址会变成容器网关，和拉取共用 8080 就分不出谁在本机。
@@ -102,9 +102,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: registry-mirror
 resources:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.2.0
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.3.0
 components:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.2.0
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.3.0
 ```
 
 ```bash
@@ -167,7 +167,7 @@ kubectl create namespace registry-mirror
 openssl rand -base64 18 > admin-password
 kubectl -n registry-mirror create secret generic registry-mirrors-relay-admin --from-file=password=admin-password
 rm admin-password
-helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version 0.2.0 \
+helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version 0.3.0 \
   -n registry-mirror -f values.yaml
 helm test registry-mirrors-relay -n registry-mirror
 kubectl -n registry-mirror port-forward svc/registry-mirrors-relay 8080:80   # 打开 http://127.0.0.1:8080/admin/
@@ -177,6 +177,7 @@ kubectl -n registry-mirror port-forward svc/registry-mirrors-relay 8080:80   # �
 - **密钥**：values 里没有填口令的地方。管理员口令只能来自 `admin.existingSecret`。上游令牌和账号文件在 `config` 里写成 `env:` 或 `file:`，再用 `extraEnv`、`extraVolumes` 从 Secret 引入；写成 `value:` 会渲染失败。
 - **配置变更**：默认（`configRollout: always`）配置一变就滚动重启。改成 `restartOnly` 后，只有要重启才能生效的改动（`listen`、`data_dir`、`admin.store`、`log.access`、`log.level`、`timeouts` 的 `read_header`/`idle`/`shutdown_grace`、`proxy.buffer_size`、`limits.tracked_clients`）才重启，其余的由 relay 自己在一分钟内热重载。
 - **管理后台和指标**：默认和拉取共用 8080，`port-forward` 到主 Service 就能打开后台；`metrics.enabled` 或 `metrics.serviceMonitor.enabled` 打开指标，ServiceMonitor 抓的也是 8080。`admin.separatePort: true` 把它们挪到单独的 9090 和 `<名字>-admin` Service。拉取入口的 Service 是 NodePort 或 LoadBalancer 时，要么写 `service.externalTrafficPolicy: Local`，要么拆端口，否则 chart 拒绝渲染。
+- **在后台改配置**：`mode: writable` 时可以在后台改入口、上游、限流等（见[管理后台](admin.md#在后台改配置)）。这些修改存在 PVC 里，`helm upgrade`、Flux、Argo CD 都看不到。要完全由 values 决定，在 `config` 里写 `admin: {config_edit: false}`；或者用指标 `relay_config_overrides` 报警。`readonly` 模式下后台不能改配置。
 - **可选组件**（默认都关）：`ingress`、`httpRoute`（Gateway API）、`metrics.serviceMonitor`、`metrics.dashboard`（Grafana 面板）、`networkPolicy`。
 - 全部参数见 chart 的 [README](../charts/registry-mirrors-relay/README.md)。节点怎样从 relay 拉镜像见上一节；`service.type: NodePort` 时，`helm install` 的提示里有 `hosts.toml` 的例子。
 
@@ -261,15 +262,15 @@ cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 sha256sum --ignore-missing -c SHA256SUMS
 
-cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.2.0 \
+cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.3.0 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.2.0 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.3.0 -R openlinkos/registry-mirrors-relay
 
-cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.2.0 \
+cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.3.0 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.2.0 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.3.0 -R openlinkos/registry-mirrors-relay
 ```
 
 ## 用法页和服务状态

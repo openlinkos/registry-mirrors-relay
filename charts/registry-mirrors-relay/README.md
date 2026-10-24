@@ -13,7 +13,7 @@ openssl rand -base64 18 > admin-password
 kubectl -n registry-mirror create secret generic registry-mirrors-relay-admin --from-file=password=admin-password
 
 helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay \
-  --namespace registry-mirror --version 0.2.0 \
+  --namespace registry-mirror --version 0.3.0 \
   --set admin.existingSecret=registry-mirrors-relay-admin
 ```
 
@@ -28,7 +28,7 @@ Set `admin.separatePort: true` to move all three to their own port and `<fullnam
 ## Modes
 
 - `mode: readonly` (default): a Deployment with two replicas and a PodDisruptionBudget. Operational data (accounts, IP and image rules, bans) comes only from `config`; the console shows it read-only. The first administrator from `admin.existingSecret` is the only one and its password stays valid, so keep it long and random.
-- `mode: writable`: a StatefulSet with one replica and a PersistentVolumeClaim for the operational database. The console can create accounts, rules and bans. The first administrator must change the password at the first sign-in; afterwards the Secret can be deleted.
+- `mode: writable`: a StatefulSet with one replica and a PersistentVolumeClaim for the operational database. The console can create accounts, rules and bans, and change entrances, upstreams, rate limits and the cache on top of `config`; those changes live on the PVC and are invisible to `helm upgrade` and GitOps tools, so set `config.admin.config_edit: false` if values must decide everything. The first administrator must change the password at the first sign-in; afterwards the Secret can be deleted.
 
 ## Configuration
 
@@ -58,10 +58,10 @@ To let containerd on the nodes pull through the relay, expose it on an address t
 The chart is signed keylessly by this repository's release workflow and has a build provenance attestation:
 
 ```bash
-cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.2.0 \
+cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.3.0 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.2.0 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.3.0 -R openlinkos/registry-mirrors-relay
 ```
 
 ## Requirements

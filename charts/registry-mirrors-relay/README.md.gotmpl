@@ -28,7 +28,7 @@ Set `admin.separatePort: true` to move all three to their own port and `<fullnam
 ## Modes
 
 - `mode: readonly` (default): a Deployment with two replicas and a PodDisruptionBudget. Operational data (accounts, IP and image rules, bans) comes only from `config`; the console shows it read-only. The first administrator from `admin.existingSecret` is the only one and its password stays valid, so keep it long and random.
-- `mode: writable`: a StatefulSet with one replica and a PersistentVolumeClaim for the operational database. The console can create accounts, rules and bans. The first administrator must change the password at the first sign-in; afterwards the Secret can be deleted.
+- `mode: writable`: a StatefulSet with one replica and a PersistentVolumeClaim for the operational database. The console can create accounts, rules and bans, and change entrances, upstreams, rate limits and the cache on top of `config`; those changes live on the PVC and are invisible to `helm upgrade` and GitOps tools, so set `config.admin.config_edit: false` if values must decide everything. The first administrator must change the password at the first sign-in; afterwards the Secret can be deleted.
 
 ## Configuration
 

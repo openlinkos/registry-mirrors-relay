@@ -53,10 +53,22 @@ Host 只接受 `admin.public_url` 的主机、`localhost` 和 IP 地址，其他
 | `GET /admins`；`POST /admins` `{"name", "password", "role"}`；`PATCH /admins/{name}` `{"password", "role", "disabled"}`；`DELETE /admins/{name}` | 后台管理员；至少要留一个能用的 admin 角色，不能停用或删除自己；改动会结束那个管理员的会话。新建或重设别人的口令后，对方第一次登录必须先改口令（`must_change`） |
 | `GET /site`；`PUT /site` `{"name", "operator", "links"}`；`DELETE /site` | 用法页的站点信息；设置后整体覆盖配置文件的 `site`，删除后改回配置文件的 |
 | `GET /audit?limit=100` | 审计记录，最新的在前 |
-| `GET /config` | 生效的配置（YAML，密钥只显示来源） |
+| `GET /config?view=effective\|file` | 生效的配置（YAML，密钥只显示来源）；`view=file` 是只按配置文件的，不含后台的修改 |
+| `GET /config/overrides` | 后台对配置的修改：`key`、`value`（YAML）、`state`（`active` 生效；`drift` 生效，但配置文件之后改过这些字段；`suspended` 和配置文件冲突，没有生效；`ignored` 因为 `admin.config_edit: false` 没有生效）、`error`、修改人和时间；`editable` 表示现在能不能改 |
+| `PUT /config/overrides/{key}`，请求体是这一段的 JSON | 改配置，立即生效。`key` 是 `limits`、`cache`、`proxy`、`site`、`upstreams/<名字>`（对象，逐字段覆盖）或 `entrances`（数组，整个替换），能改的字段见[管理后台](admin.md#在后台改配置)。只存和配置文件不同的字段，全都一样时去掉这一处（返回的 `override` 为 null）；`warnings` 是这次修改带来的新提醒。写错了，或者和配置文件合起来通不过校验，返回 422，什么都不改 |
+| `DELETE /config/overrides/{key}` | 去掉一处修改，改回配置文件的值 |
+| `GET /config/export?format=overrides\|merged` | 把生效中的修改导出成配置文件的写法（`yaml`）：`overrides`（默认）只有改过的部分；`merged` 合进配置文件、保留注释，直接写在配置里的密钥隐去 |
 | `POST /reload` | 重新读取配置文件；也可以发 SIGHUP，或者等文件变化后自动重载（每 10 秒检查一次） |
 
-规则和账号的修改立即生效，不用重载。配置文件里的规则和账号在 API 里只读，要改请改配置文件。
+规则、账号和配置的修改立即生效，不用重载。配置文件里的规则和账号在 API 里只读，要改请改配置文件。
+
+```bash
+# 把每个客户端每秒的 manifest 请求改成 5，全局处理中的请求改成 2000
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"manifest_rate": 5, "max_inflight": 2000}' http://127.0.0.1:8080/admin/api/v1/config/overrides/limits
+# 改回配置文件的值
+curl -X DELETE -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/admin/api/v1/config/overrides/limits
+```
 
 ## 指标
 
@@ -65,6 +77,7 @@ Host 只接受 `admin.public_url` 的主机、`localhost` 和 IP 地址，其他
 - `relay_requests_total{upstream,kind,code,cache}`、`relay_response_bytes_total`、`relay_request_duration_seconds`；
 - `relay_manifest_cache_events_total{result}`、`relay_manifest_cache_bytes`；
 - `relay_inflight_requests`、`relay_blob_streams`、`relay_rate_limited_total`、`relay_upstream_breaker_open{upstream}`、`relay_accesslog_dropped_total`；
+- `relay_config_overrides{key,state}`：后台对配置的每一处修改，`state` 同 `GET /config/overrides`；
 - `relay_upstream_probe_up{upstream}`、`relay_upstream_probe_seconds{upstream}`（每分钟探测一次 `/v2/`，`proxy.health_interval` 为 0 时不探测）、`relay_upstream_quota_remaining{upstream}`；
 - `go_goroutines`、`go_memstats_heap_inuse_bytes`、`process_resident_memory_bytes`、`relay_build_info`。
 
