@@ -1,4 +1,5 @@
-// Package lru 是一个带上限的 LRU 缓存，可以按条数和权重（例如字节数）同时限制。并发安全。
+// Package lru is a bounded LRU cache that can be limited by both entry count and weight (for example
+// bytes). It is safe for concurrent use.
 package lru
 
 import (
@@ -12,18 +13,18 @@ type entry[K comparable, V any] struct {
 	weight int64
 }
 
-// Cache 的 Add、Get 都是 O(1)。
+// Cache has O(1) Add and Get.
 type Cache[K comparable, V any] struct {
 	mu        sync.Mutex
 	ll        *list.List
 	items     map[K]*list.Element
 	maxItems  int
-	maxWeight int64 // 0 表示不按权重限制
+	maxWeight int64 // 0 means no weight limit
 	weight    int64
 	onEvict   func(K, V)
 }
 
-// New 创建缓存。maxItems 至少为 1；maxWeight 为 0 时只按条数限制。
+// New creates a cache. maxItems is at least 1; when maxWeight is 0 only the entry count is limited.
 func New[K comparable, V any](maxItems int, maxWeight int64) *Cache[K, V] {
 	if maxItems < 1 {
 		maxItems = 1
@@ -31,10 +32,11 @@ func New[K comparable, V any](maxItems int, maxWeight int64) *Cache[K, V] {
 	return &Cache[K, V]{ll: list.New(), items: map[K]*list.Element{}, maxItems: maxItems, maxWeight: maxWeight}
 }
 
-// OnEvict 设置淘汰时的回调（在持锁时调用，回调里不要再操作这个缓存）。
+// OnEvict sets the callback for evictions (it is called with the lock held, so the callback must not
+// use this cache again).
 func (c *Cache[K, V]) OnEvict(f func(K, V)) { c.onEvict = f }
 
-// Get 取值并把它移到最近使用。
+// Get returns the value and marks it as most recently used.
 func (c *Cache[K, V]) Get(k K) (V, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -46,7 +48,7 @@ func (c *Cache[K, V]) Get(k K) (V, bool) {
 	return zero, false
 }
 
-// Peek 取值，不改变顺序。
+// Peek returns the value without changing the order.
 func (c *Cache[K, V]) Peek(k K) (V, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -57,7 +59,8 @@ func (c *Cache[K, V]) Peek(k K) (V, bool) {
 	return zero, false
 }
 
-// Add 放入或替换。权重超过上限的单个条目不放入，返回 false。
+// Add inserts or replaces an entry. A single entry whose weight exceeds the limit is not added and Add
+// returns false.
 func (c *Cache[K, V]) Add(k K, v V, weight int64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -79,7 +82,7 @@ func (c *Cache[K, V]) Add(k K, v V, weight int64) bool {
 	return true
 }
 
-// Remove 删除一项。
+// Remove deletes an entry.
 func (c *Cache[K, V]) Remove(k K) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -98,14 +101,14 @@ func (c *Cache[K, V]) removeElement(el *list.Element) {
 	}
 }
 
-// Len 是条数。
+// Len is the number of entries.
 func (c *Cache[K, V]) Len() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.ll.Len()
 }
 
-// Weight 是当前的总权重。
+// Weight is the current total weight.
 func (c *Cache[K, V]) Weight() int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()

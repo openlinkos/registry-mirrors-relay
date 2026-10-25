@@ -13,13 +13,13 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/stats"
 )
 
-// ---- 客户端账号
+// ---- Client accounts
 
 func (h *Handler) usersPage(c *ctx) error {
 	return h.render(c, "users", &view{Title: tr(c.lang, "nav.users"), Nav: "users", Data: h.ops.Users()})
 }
 
-// limitsFrom 读表单里的单独限流：留空或 0 表示用默认值。
+// limitsFrom reads the per-account limits from the form: empty or 0 means the default.
 func limitsFrom(c *ctx) (rate *float64, streams *int, err error) {
 	r, s := 0.0, 0
 	if v := strings.TrimSpace(c.form.Get("manifest_rate")); v != "" {
@@ -40,7 +40,7 @@ type secretData struct {
 	Name   string
 	Secret string
 	Back   string
-	Base   string // 当前访问后台的地址，如 http://127.0.0.1:8080，用在 API 的示例里
+	Base   string // the console's current address, e.g. http://127.0.0.1:8080, for the API examples
 }
 
 func (h *Handler) userCreate(c *ctx) error {
@@ -117,13 +117,13 @@ func (h *Handler) userDelete(c *ctx) error {
 	return c.done("/admin/users", "user.deleted", name)
 }
 
-// ---- 规则
+// ---- Rules
 
 type rulesData struct {
 	ops.Rules
 	Test      *ops.ImageDecision
 	TestImage string
-	BanCIDR   string // 从别的页面点"封禁"过来时预先填好
+	BanCIDR   string // filled in beforehand when arriving from another page via "Ban"
 	Upstreams []string
 }
 
@@ -187,7 +187,7 @@ func (h *Handler) imageRuleDelete(c *ctx) error {
 	return c.done("/admin/rules", "rule.deleted", p)
 }
 
-// ---- 限流
+// ---- Rate limits
 
 type limitedClient struct {
 	Client, User string
@@ -209,7 +209,7 @@ func (h *Handler) limitsPage(c *ctx) error {
 			d.Overrides = append(d.Overrides, u)
 		}
 	}
-	// 最近被限流的客户端：从最近的请求里找 429，按客户端合并
+	// Recently rate-limited clients: find the 429s among recent requests and group them by client
 	by := map[string]*limitedClient{}
 	for _, r := range h.app.Stats.Recent(stats.Filter{Status: http.StatusTooManyRequests}, 5000) {
 		k := r.ClientIP + " " + r.User

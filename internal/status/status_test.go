@@ -13,26 +13,27 @@ func TestHistory(t *testing.T) {
 	h.Record("docker.io", true, 100*time.Millisecond, now)
 	h.Record("docker.io", false, 0, now.Add(-time.Minute))
 	h.Record("docker.io", true, 50*time.Millisecond, now.Add(-3*time.Hour))
-	h.Record("docker.io", true, 50*time.Millisecond, now.Add(-25*time.Hour)) // 超出 24 小时，被同一格的新数据挤掉或不显示
+	// Over 24 hours old: pushed out by newer data in the same slot, or not shown
+	h.Record("docker.io", true, 50*time.Millisecond, now.Add(-25*time.Hour))
 	hs := h.Hours("docker.io", now)
 	if len(hs) != Hours || hs[Hours-1].Start != now.Truncate(time.Hour).Unix() || hs[0].Start != now.Truncate(time.Hour).Add(-23*time.Hour).Unix() {
-		t.Fatalf("应返回 24 个整点，最后一个是当前小时：%+v", hs[Hours-1])
+		t.Fatalf("want 24 whole hours, the last being the current hour: %+v", hs[Hours-1])
 	}
 	if c := hs[Hours-1]; c.OK != 1 || c.Total != 2 {
-		t.Fatalf("当前小时应是 1/2：%+v", c)
+		t.Fatalf("current hour should be 1/2: %+v", c)
 	}
 	if c := hs[Hours-4]; c.OK != 1 || c.Total != 1 {
-		t.Fatalf("三小时前应是 1/1：%+v", c)
+		t.Fatalf("three hours ago should be 1/1: %+v", c)
 	}
 	var total int
 	for _, x := range hs {
 		total += x.Total
 	}
 	if total != 3 {
-		t.Fatalf("24 小时以前的数据不应出现：共 %d 次", total)
+		t.Fatalf("data older than 24 hours should not appear: %d probes in total", total)
 	}
 	if hs := h.Hours("ghcr.io", now); len(hs) != Hours || hs[0].Total != 0 {
-		t.Fatal("没有记录的上游应返回 24 个空格")
+		t.Fatal("an upstream with no records should return 24 empty slots")
 	}
 }
 
@@ -44,7 +45,7 @@ func TestBuild(t *testing.T) {
 		Probes: map[string]Probe{
 			"docker.io": {OK: true, Status: 401, Latency: 123 * time.Millisecond, Checked: now},
 			"ghcr.io":   {OK: false, Error: `Get "https://ghcr.io/v2/": dial tcp 140.82.112.33:443: i/o timeout`, Checked: now},
-			"quay.io":   {OK: false, Status: 503, Error: "上游返回 503 Service Unavailable", Checked: now},
+			"quay.io":   {OK: false, Status: 503, Error: "upstream returned 503 Service Unavailable", Checked: now},
 		},
 		Open: map[string]bool{"quay.io": true},
 		Requests: []RequestsHour{
@@ -55,52 +56,52 @@ func TestBuild(t *testing.T) {
 	}
 	r := Build(in)
 	if r.Status != "degraded" || r.Version != "0.1.3" || r.Interval != 60 {
-		t.Fatalf("部分上游异常应是 degraded：%+v", r)
+		t.Fatalf("some upstreams failing should be degraded: %+v", r)
 	}
 	got := map[string]Upstream{}
 	for _, u := range r.Upstreams {
 		got[u.Name] = u
 	}
 	if r.Upstreams[0].Name != "docker.io" || len(r.Upstreams) != 4 {
-		t.Fatal("上游按名字排序")
+		t.Fatal("upstreams should be sorted by name")
 	}
 	if u := got["docker.io"]; u.Status != "ok" || u.LatencyMS != 123 || u.Checked == nil {
-		t.Fatalf("docker.io：%+v", u)
+		t.Fatalf("docker.io: %+v", u)
 	}
 	if u := got["ghcr.io"]; u.Status != "down" || u.Reason != "timeout" {
-		t.Fatalf("ghcr.io 应是 down/timeout：%+v", u)
+		t.Fatalf("ghcr.io should be down/timeout: %+v", u)
 	}
 	if u := got["quay.io"]; u.Status != "open" || u.Reason != "http_503" {
-		t.Fatalf("熔断中的上游应是 open：%+v", u)
+		t.Fatalf("an upstream with an open circuit breaker should be open: %+v", u)
 	}
 	if u := got["gcr.io"]; u.Status != "unknown" || u.Checked != nil {
-		t.Fatalf("还没探测过的上游应是 unknown：%+v", u)
+		t.Fatalf("an upstream not yet probed should be unknown: %+v", u)
 	}
 	if v := r.Service.Hours[0].Value; v == nil || *v != 0.998 {
-		t.Fatalf("成功率应是 0.998：%v", v)
+		t.Fatalf("success rate should be 0.998: %v", v)
 	}
 	if r.Service.Hours[1].Value != nil {
-		t.Fatal("请求太少的小时不算成功率")
+		t.Fatal("hours with too few requests should have no success rate")
 	}
 	b, _ := json.Marshal(r)
 	for _, leak := range []string{"140.82", "dial tcp", "Service Unavailable", "requests", "1000"} {
 		if strings.Contains(string(b), leak) {
-			t.Fatalf("status.json 不应包含 %q：%s", leak, b)
+			t.Fatalf("status.json should not contain %q: %s", leak, b)
 		}
 	}
 
 	in.Probes = map[string]Probe{"docker.io": {OK: false, Error: "x"}}
 	in.Open, in.Names = nil, []string{"docker.io"}
 	if r := Build(in); r.Status != "down" {
-		t.Fatalf("全部上游异常应是 down：%s", r.Status)
+		t.Fatalf("all upstreams failing should be down: %s", r.Status)
 	}
 	in.Probes = nil
 	if r := Build(in); r.Status != "unknown" {
-		t.Fatalf("没有探测结果应是 unknown：%s", r.Status)
+		t.Fatalf("no probe results should be unknown: %s", r.Status)
 	}
 	in.Probes = map[string]Probe{"docker.io": {OK: true}}
 	if r := Build(in); r.Status != "ok" {
-		t.Fatalf("全部正常应是 ok：%s", r.Status)
+		t.Fatalf("all healthy should be ok: %s", r.Status)
 	}
 }
 
@@ -115,10 +116,10 @@ func TestReason(t *testing.T) {
 	}
 	for msg, want := range cases {
 		if got := Reason(0, msg); got != want {
-			t.Errorf("%q：%s，应为 %s", msg, got, want)
+			t.Errorf("%q: got %s, want %s", msg, got, want)
 		}
 	}
-	if got := Reason(502, "上游返回 502"); got != "http_502" {
-		t.Errorf("有状态码时应是 http_<状态码>：%s", got)
+	if got := Reason(502, "upstream returned 502"); got != "http_502" {
+		t.Errorf("with a status code the reason should be http_<status code>: %s", got)
 	}
 }

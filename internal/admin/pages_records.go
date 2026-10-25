@@ -13,11 +13,11 @@ import (
 const perPage = 100
 
 type pagerView struct {
-	Page       int // 从 1 开始
+	Page       int // starts at 1
 	Prev, Next string
 }
 
-// pager 生成上一页、下一页的链接，保留当前的查询参数。
+// pager builds the previous-page and next-page links, keeping the current query parameters.
 func pager(c *ctx, page int, more bool) pagerView {
 	link := func(p int) string {
 		q := c.r.URL.Query()

@@ -16,23 +16,23 @@ func TestBreaker(t *testing.T) {
 		b.Done(true)
 	}
 	if ok, _ := b.Allow(); !ok {
-		t.Fatal("未达阈值前应放行")
+		t.Fatal("requests should pass before the threshold is reached")
 	}
-	b.Done(true) // 第三次失败，打开
+	b.Done(true) // third failure: open
 	if ok, wait := b.Allow(); ok || wait != 10*time.Second {
-		t.Fatalf("打开后应拒绝并给出等待时间：%v %v", ok, wait)
+		t.Fatalf("an open breaker should refuse and give a wait time: %v %v", ok, wait)
 	}
 
 	now = now.Add(10 * time.Second)
 	if ok, _ := b.Allow(); !ok {
-		t.Fatal("冷却后应放一个试探请求")
+		t.Fatal("after the cooldown one probe request should pass")
 	}
 	if ok, _ := b.Allow(); ok {
-		t.Fatal("试探进行中，其他请求应被拒绝")
+		t.Fatal("other requests should be refused while the probe is in progress")
 	}
-	b.Done(true) // 试探失败，冷却加倍
+	b.Done(true) // probe failed: cooldown doubles
 	if ok, wait := b.Allow(); ok || wait != 20*time.Second {
-		t.Fatalf("试探失败后冷却应加倍：%v %v", ok, wait)
+		t.Fatalf("cooldown should double after a failed probe: %v %v", ok, wait)
 	}
 	now = now.Add(20 * time.Second)
 	b.Allow()
@@ -41,19 +41,19 @@ func TestBreaker(t *testing.T) {
 	b.Allow()
 	b.Done(true)
 	if _, wait := b.Allow(); wait != 40*time.Second {
-		t.Fatalf("冷却不应超过上限：%v", wait)
+		t.Fatalf("cooldown should not exceed the limit: %v", wait)
 	}
 
 	now = now.Add(40 * time.Second)
 	b.Allow()
-	b.Done(false) // 试探成功，关闭
+	b.Done(false) // probe succeeded: close
 	if ok, _ := b.Allow(); !ok || b.Open() {
-		t.Fatal("试探成功后应关闭")
+		t.Fatal("breaker should close after a successful probe")
 	}
 	b.Done(true)
 	b.Done(true)
 	if b.Open() {
-		t.Fatal("关闭后失败计数应从 0 重新开始")
+		t.Fatal("failure count should restart from 0 after closing")
 	}
 }
 
@@ -63,17 +63,17 @@ func TestSuccessResetsCount(t *testing.T) {
 	b.Done(false)
 	b.Done(true)
 	if b.Open() {
-		t.Fatal("成功应清零连续失败计数")
+		t.Fatal("a success should reset the consecutive failure count")
 	}
 }
 
 func TestNil(t *testing.T) {
 	b := New(0, time.Second, time.Second)
 	if b != nil {
-		t.Fatal("阈值为 0 应返回 nil")
+		t.Fatal("threshold 0 should return nil")
 	}
 	if ok, _ := b.Allow(); !ok || b.Open() {
-		t.Fatal("nil 应始终放行")
+		t.Fatal("nil should always allow")
 	}
 	b.Done(true)
 }

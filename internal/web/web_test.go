@@ -39,19 +39,19 @@ func TestPage(t *testing.T) {
 	h := handler(t, "")
 	rec, ok := get(h, http.MethodGet, "/")
 	if !ok || rec.Code != 200 || !strings.Contains(rec.Body.String(), "data-variant=\"direct\"") {
-		t.Fatalf("/ 应返回用法页：%v %d", ok, rec.Code)
+		t.Fatalf("/ should return the usage page: %v %d", ok, rec.Code)
 	}
 	csp := rec.Header().Get("Content-Security-Policy")
 	script := between(rec.Body.Bytes(), "<script>", "</script>")
 	sum := sha256.Sum256(script)
 	if len(script) < 100 || !strings.Contains(csp, "'sha256-"+base64.StdEncoding.EncodeToString(sum[:])+"'") || strings.Contains(csp, "script-src 'unsafe-inline'") {
-		t.Fatalf("CSP 应按哈希放行内联脚本：%s", csp)
+		t.Fatalf("CSP should allow the inline script by its hash: %s", csp)
 	}
 	if rec, _ := get(h, http.MethodHead, "/robots.txt"); rec.Body.Len() != 0 || rec.Header().Get("Content-Length") == "0" {
-		t.Fatal("HEAD 不返回正文，但要有长度")
+		t.Fatal("HEAD should return no body but a length")
 	}
 	if _, ok := get(h, http.MethodGet, "/etc/passwd"); ok {
-		t.Fatal("其他路径不应处理")
+		t.Fatal("other paths should not be handled")
 	}
 }
 
@@ -88,13 +88,13 @@ access:
 	}
 	s := read(false)
 	if s.Operator != "OpenLinkOS" || s.Domains["ghcr"] != "ghcr.example.com" || s.Domains["docker"] != "docker.example.com" || len(s.Domains) != 2 || s.Links["home"] != "https://linkos.org" {
-		t.Fatalf("site.json 不对：%+v", s)
+		t.Fatalf("wrong site.json: %+v", s)
 	}
 	if s.Login || len(s.LoginKeys) != 1 || s.LoginKeys[0] != "docker" || !s.Status {
-		t.Fatalf("site.json 的登录和状态标记不对：%+v", s)
+		t.Fatalf("wrong login and status flags in site.json: %+v", s)
 	}
 	if !read(true).Login {
-		t.Fatal("要登录的入口看到的 site.json 应带 login: true")
+		t.Fatal("site.json seen by an entrance that requires signing in should have login: true")
 	}
 }
 
@@ -102,14 +102,14 @@ func TestStatusJSON(t *testing.T) {
 	h := handler(t, "")
 	rec, ok := get(h, http.MethodGet, "/status.json")
 	if !ok || rec.Code != 200 || rec.Header().Get("Cache-Control") != "no-store" || !strings.Contains(rec.Body.String(), `"status":"ok"`) {
-		t.Fatalf("/status.json：%v %d %q", ok, rec.Code, rec.Body.String())
+		t.Fatalf("/status.json: %v %d %q", ok, rec.Code, rec.Body.String())
 	}
 	off := handler(t, "site: {show_status: false}")
 	if _, ok := get(off, http.MethodGet, "/status.json"); ok {
-		t.Fatal("show_status: false 时不应提供 status.json")
+		t.Fatal("status.json should not be served with show_status: false")
 	}
 	rec, _ = get(off, http.MethodGet, "/site.json")
 	if !strings.Contains(rec.Body.String(), `"status": false`) {
-		t.Fatalf("show_status: false 时 site.json 应带 status: false：%s", rec.Body.String())
+		t.Fatalf("with show_status: false, site.json should have status: false: %s", rec.Body.String())
 	}
 }

@@ -1,10 +1,14 @@
-// Package route 把请求映射到入口和上游：按监听地址和 Host 找入口，再按入口类型解析路径。
+// Package route maps requests to entrances and upstreams: it finds the entrance by listen address and Host,
+// then parses the path according to the entrance type.
 //
-// 入口有两种：
-//   - 固定上游的入口（每个上游一个子域名或一个端口）：路径里的仓库名原样交给这个上游，
-//     不会把第一段当成 registry；containerd 的 ns 参数和这个上游不一致时返回 404。
-//   - 单域名入口：路径第一段是配置里的上游名或别名时按前缀选上游（/v2/ghcr.io/owner/image/...）；
-//     否则按 ns 参数选；都没有时用默认上游（Docker 的 registry-mirrors 发来的就是这种请求）。
+// There are two kinds of entrance:
+//   - Fixed-upstream entrances (one subdomain or one port per upstream): the repository name in the path is
+//     passed to that upstream as is, and the first segment is never taken as a registry; when containerd's
+//     ns parameter does not match this upstream, the result is 404.
+//   - Single-domain entrances: when the first path segment is an upstream name or alias from the
+//     configuration, the upstream is chosen by that prefix (/v2/ghcr.io/owner/image/...); otherwise by the ns
+//     parameter; when neither is present, the default upstream is used (this is the kind of request Docker's
+//     registry-mirrors sends).
 package route
 
 import (
@@ -19,7 +23,7 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/ref"
 )
 
-// Kind 是请求的类型。
+// Kind is the type of request.
 type Kind int
 
 const (
@@ -34,26 +38,26 @@ func (k Kind) String() string {
 	return [...]string{"ping", "manifest", "blob", "tags", "referrers"}[k]
 }
 
-// Entrance 是一个入口。
+// Entrance is an entrance.
 type Entrance struct {
 	Name            string
-	Upstream        string // 固定上游；为空表示单域名入口
+	Upstream        string // fixed upstream; empty means a single-domain entrance
 	DefaultUpstream string
 	Auth            string
-	Page            string // 用法页：public | login | off
+	Page            string // usage page: public | login | off
 }
 
-// Target 是解析后的请求。
+// Target is a parsed request.
 type Target struct {
 	Kind     Kind
-	Upstream string     // 上游名，如 docker.io
-	Repo     string     // 上游那边的仓库名，已补 library/
-	Ref      string     // tag 或 digest
-	Client   string     // 客户端请求里的名字（含前缀、未补 library/），改写分页链接时用
-	Query    url.Values // 允许转发给上游的查询参数
+	Upstream string     // upstream name, such as docker.io
+	Repo     string     // repository name on the upstream side, with library/ already added
+	Ref      string     // tag or digest
+	Client   string     // name in the client's request (with prefix, without added library/), used to rewrite pagination links
+	Query    url.Values // query parameters allowed to be forwarded to the upstream
 }
 
-// Error 是解析失败的原因，对应 OCI 的错误码。
+// Error is the reason parsing failed, mapped to an OCI error code.
 type Error struct {
 	Status  int
 	Code    string
@@ -70,15 +74,15 @@ func invalid(msg string) *Error {
 	return &Error{Status: http.StatusBadRequest, Code: "NAME_INVALID", Message: msg}
 }
 
-// Router 是不可变的，配置重载时整体替换。
+// Router is immutable and replaced as a whole when the configuration is reloaded.
 type Router struct {
-	exact   map[string]*Entrance // Host → 入口
-	any     *Entrance            // hosts 里写了 "*" 的入口
-	names   map[string]string    // 上游名和别名 → 上游名（只含启用的上游）
+	exact   map[string]*Entrance // Host → entrance
+	any     *Entrance            // the entrance whose hosts include "*"
+	names   map[string]string    // upstream names and aliases → upstream name (enabled upstreams only)
 	library map[string]bool
 }
 
-// New 由配置构建 Router。配置应已通过校验。
+// New builds a Router from the configuration. The configuration must already be validated.
 func New(cfg *config.Config) *Router {
 	r := &Router{exact: map[string]*Entrance{}, names: map[string]string{}, library: map[string]bool{}}
 	for name, u := range cfg.Upstreams {
@@ -104,7 +108,7 @@ func New(cfg *config.Config) *Router {
 	return r
 }
 
-// NormalizeHost 去掉端口、方括号和末尾的点，转成小写。
+// NormalizeHost strips the port, square brackets and trailing dot, and converts to lower case.
 func NormalizeHost(host string) string {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
@@ -113,7 +117,7 @@ func NormalizeHost(host string) string {
 	return strings.TrimSuffix(strings.ToLower(host), ".")
 }
 
-// Entrance 按 Host 找入口，找不到返回 nil。
+// Entrance finds the entrance for a Host, or returns nil if there is none.
 func (r *Router) Entrance(host string) *Entrance {
 	if e := r.exact[NormalizeHost(host)]; e != nil {
 		return e
@@ -121,7 +125,7 @@ func (r *Router) Entrance(host string) *Entrance {
 	return r.any
 }
 
-// Upstream 把名字或别名解析成上游名。
+// Upstream resolves a name or alias to an upstream name.
 func (r *Router) Upstream(name string) (string, bool) {
 	n, ok := r.names[strings.ToLower(name)]
 	return n, ok
@@ -132,15 +136,16 @@ var (
 	tagsRe = regexp.MustCompile(`^/v2/(.+)/tags/list$`)
 )
 
-// Parse 解析 /v2 下的请求。u 是请求的 URL（r.URL）。
+// Parse parses a request under /v2. u is the request URL (r.URL).
 func (r *Router) Parse(e *Entrance, u *url.URL) (Target, *Error) {
 	path := u.Path
 	if path == "/v2" || path == "/v2/" {
 		return Target{Kind: KindPing}, nil
 	}
-	// 编码过的路径（%2F 之类）、空段、. 和 ..、非 ASCII 字符一律拒绝，避免两边对路径的理解不一致
+	// Encoded paths (%2F and the like), empty segments, . and .., and non-ASCII characters are all rejected, so
+	// that both sides cannot interpret the path differently
 	if u.RawPath != "" || strings.Contains(path, "//") || hasDotSegment(path) || !isASCII(path) {
-		return Target{}, invalid("路径不合法")
+		return Target{}, invalid("invalid path")
 	}
 	var t Target
 	var name string
@@ -150,33 +155,33 @@ func (r *Router) Parse(e *Entrance, u *url.URL) (Target, *Error) {
 		case "manifests":
 			t.Kind = KindManifest
 			if !ref.ValidTag(t.Ref) && !ref.ValidDigest(t.Ref) {
-				return Target{}, &Error{Status: http.StatusBadRequest, Code: "MANIFEST_INVALID", Message: "tag 或 digest 不合法"}
+				return Target{}, &Error{Status: http.StatusBadRequest, Code: "MANIFEST_INVALID", Message: "invalid tag or digest"}
 			}
 		case "blobs":
 			t.Kind = KindBlob
 			if !ref.ValidDigest(t.Ref) {
-				return Target{}, &Error{Status: http.StatusBadRequest, Code: "DIGEST_INVALID", Message: "digest 不合法"}
+				return Target{}, &Error{Status: http.StatusBadRequest, Code: "DIGEST_INVALID", Message: "invalid digest"}
 			}
 		case "referrers":
 			t.Kind = KindReferrers
 			if !ref.ValidDigest(t.Ref) {
-				return Target{}, &Error{Status: http.StatusBadRequest, Code: "DIGEST_INVALID", Message: "digest 不合法"}
+				return Target{}, &Error{Status: http.StatusBadRequest, Code: "DIGEST_INVALID", Message: "invalid digest"}
 			}
 		}
 	} else if m := tagsRe.FindStringSubmatch(path); m != nil {
 		name, t.Kind = m[1], KindTags
 	} else {
-		return Target{}, notFound("不支持的接口")
+		return Target{}, notFound("unsupported endpoint")
 	}
 	t.Client = name
 
 	q := u.Query()
 	ns := strings.ToLower(q.Get("ns"))
 	if e.Upstream != "" {
-		// 固定上游的入口：名字原样用，不看第一段
+		// Fixed-upstream entrance: use the name as is, ignore the first segment
 		if ns != "" {
 			if up, ok := r.Upstream(ns); !ok || up != e.Upstream {
-				return Target{}, notFound("这个入口只代理 " + e.Upstream)
+				return Target{}, notFound("this entrance only proxies " + e.Upstream)
 			}
 		}
 		t.Upstream, t.Repo = e.Upstream, name
@@ -185,11 +190,11 @@ func (r *Router) Parse(e *Entrance, u *url.URL) (Target, *Error) {
 		if hasSlash && looksLikeRegistry(first) {
 			up, ok := r.Upstream(first)
 			if !ok {
-				return Target{}, notFound("没有配置上游 " + first)
+				return Target{}, notFound("upstream not configured: " + first)
 			}
 			if ns != "" {
 				if nup, ok := r.Upstream(ns); !ok || nup != up {
-					return Target{}, notFound("路径前缀和 ns 指向不同的上游")
+					return Target{}, notFound("path prefix and ns point to different upstreams")
 				}
 			}
 			t.Upstream, t.Repo = up, rest
@@ -198,7 +203,7 @@ func (r *Router) Parse(e *Entrance, u *url.URL) (Target, *Error) {
 			if ns != "" {
 				var ok bool
 				if up, ok = r.Upstream(ns); !ok {
-					return Target{}, notFound("没有配置上游 " + ns)
+					return Target{}, notFound("upstream not configured: " + ns)
 				}
 			}
 			t.Upstream, t.Repo = up, name
@@ -208,14 +213,14 @@ func (r *Router) Parse(e *Entrance, u *url.URL) (Target, *Error) {
 		t.Repo = "library/" + t.Repo
 	}
 	if !ref.ValidName(t.Repo) {
-		return Target{}, invalid("仓库名不合法")
+		return Target{}, invalid("invalid repository name")
 	}
 	t.Query = forwardQuery(t.Kind, q)
 	return t, nil
 }
 
-// looksLikeRegistry 沿用 Docker 的规则：第一段含 . 或 :，或者是 localhost，才是 registry。
-// Docker Hub 的命名空间不能含点，所以不会混淆。
+// looksLikeRegistry follows Docker's rule: the first segment is a registry only if it contains . or :, or is
+// localhost. Docker Hub namespaces cannot contain dots, so there is no ambiguity.
 func looksLikeRegistry(s string) bool {
 	return strings.ContainsAny(s, ".:") || s == "localhost"
 }
@@ -238,7 +243,8 @@ func isASCII(s string) bool {
 	return true
 }
 
-// forwardQuery 只保留上游需要的参数：tags/list 的 n、last，referrers 的 artifactType。ns 等不转发。
+// forwardQuery keeps only the parameters the upstream needs: n and last for tags/list, artifactType for
+// referrers. ns and the like are not forwarded.
 func forwardQuery(k Kind, q url.Values) url.Values {
 	out := url.Values{}
 	switch k {
@@ -259,7 +265,7 @@ func forwardQuery(k Kind, q url.Values) url.Values {
 	return out
 }
 
-// UpstreamPath 是发给上游的路径（不含查询参数）。
+// UpstreamPath is the path sent to the upstream (without query parameters).
 func (t Target) UpstreamPath() string {
 	switch t.Kind {
 	case KindManifest:
@@ -274,8 +280,8 @@ func (t Target) UpstreamPath() string {
 	return "/v2/"
 }
 
-// RewriteLink 把上游 tags/list 分页的 Link 头改成客户端用的路径。
-// 只接受指向同一仓库 tags/list 的链接，其余丢弃（返回空串）。
+// RewriteLink rewrites the Link header of upstream tags/list pagination to the path the client uses.
+// Only links to tags/list of the same repository are accepted; others are dropped (an empty string is returned).
 func (t Target) RewriteLink(link string) string {
 	start, end := strings.Index(link, "<"), strings.Index(link, ">")
 	if start != 0 || end < 0 {

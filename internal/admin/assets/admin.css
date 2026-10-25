@@ -1,9 +1,12 @@
 /*
- * 管理后台对 OpenLinkOS 设计系统（@openlinkos/ui，先于本文件以 ui.css 加载）的少量补充。
- * 其余全部用设计系统自己的类。只用设计系统的变量，不写死颜色。规则不在任何层里，所以优先于设计系统。
+ * The admin console's few additions to the OpenLinkOS design system (@openlinkos/ui, loaded as ui.css
+ * before this file). Everything else uses the design system's own classes. Only design system variables
+ * are used; no colours are hard-coded. The rules are not in any layer, so they take precedence over the
+ * design system.
  */
 
-/* 概览页的曲线：服务端画好的 SVG，颜色在这里给，页面里没有内联样式。 */
+/* Overview charts: SVG drawn on the server; the colours are given here, with no inline styles in the
+   page. */
 .admin-chart {
   display: block;
   inline-size: 100%;
@@ -57,13 +60,13 @@
   background: var(--ol-color-danger-solid);
 }
 
-/* 表格行里的小表单（删除、加入白名单）：和按钮一样只占自己的宽度。 */
+/* Small forms in table rows (delete, add to allowlist): like buttons, they take only their own width. */
 .admin-inline {
   display: inline-flex;
   margin: 0;
 }
 
-/* 表格里较长的值（URI、正则）：换行，不撑宽表格。 */
+/* Longer values in tables (URIs, regular expressions): wrap rather than widen the table. */
 .admin-wrap {
   overflow-wrap: anywhere;
   max-inline-size: 36rem;
@@ -73,12 +76,13 @@
   max-inline-size: 9rem;
 }
 
-/* 表单底下的说明、表格后面的文字。 */
+/* Notes below forms and text after tables. */
 .admin-after {
   margin-block-start: var(--ol-space-3);
 }
 
-/* 近 24 小时的条：每小时一格，颜色按可用率分档；没有数据的格子是边框色。 */
+/* Strips for the last 24 hours: one cell per hour, coloured by availability band; cells without data
+   use the border colour. */
 .admin-hours-cell {
   display: inline-flex;
   align-items: center;
@@ -117,7 +121,8 @@
   white-space: nowrap;
 }
 
-/* 入口编辑表：表格里的输入框不随列收窄，放不下时整张表横向滚动 */
+/* Entrance edit table: inputs in the table do not shrink with their columns; when they do not fit, the
+   whole table scrolls horizontally */
 .admin-edit-table .ol-input,
 .admin-edit-table .ol-select {
   inline-size: 100%;

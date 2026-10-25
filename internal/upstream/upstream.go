@@ -1,4 +1,5 @@
-// Package upstream 负责和上游 registry 打交道：共用的连接池、拨号拦截、服务端取令牌、跟随重定向。
+// Package upstream deals with upstream registries: shared connection pools, dial guarding, server-side token
+// fetching and redirect following.
 package upstream
 
 import (
@@ -27,7 +28,7 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/version"
 )
 
-// Options 主要给测试用：替换拨号、信任测试 CA、放行本地地址。
+// Options are mainly for tests: replace dialling, trust a test CA, allow local addresses.
 type Options struct {
 	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
 	RootCAs     *x509.CertPool
@@ -35,21 +36,23 @@ type Options struct {
 	Log         *slog.Logger
 }
 
-// Pool 是所有上游。一般的上游共用一个连接池和令牌缓存；配了私有 CA 或允许内网的上游单独一套。
+// Pool holds all upstreams. Ordinary upstreams share one connection pool and token cache; upstreams with a
+// private CA or allowed to reach private networks get their own.
 type Pool struct {
 	ups        map[string]*Upstream
 	transports []*http.Transport
 	log        *slog.Logger
 }
 
-// client 是一套连接池加令牌缓存。http 走 HTTP/2，给 manifest、令牌这类小请求；blob 给镜像层，默认只用 HTTP/1.1。
+// client is a connection pool plus token cache. http uses HTTP/2, for small requests such as manifests and
+// tokens; blob is for layers and uses only HTTP/1.1 by default.
 type client struct {
 	http   *http.Client
 	blob   *http.Client
 	tokens *token.Cache
 }
 
-// Upstream 是一个上游。
+// Upstream is an upstream.
 type Upstream struct {
 	Name     string
 	Registry string
@@ -66,11 +69,11 @@ type Upstream struct {
 	log          *slog.Logger
 
 	mu         sync.Mutex
-	challenges map[string]token.Challenge // 主机 → 它的 Bearer 质询（只用 realm、service）
+	challenges map[string]token.Challenge // host → its Bearer challenge (only realm and service are used)
 	quota      atomic.Pointer[Quota]
 }
 
-// NewPool 由配置创建所有启用的上游。
+// NewPool creates all enabled upstreams from the configuration.
 func NewPool(cfg *config.Config, opt Options) (*Pool, error) {
 	log := opt.Log
 	if log == nil {
@@ -95,17 +98,17 @@ func NewPool(cfg *config.Config, opt Options) (*Pool, error) {
 		}
 		redirectRe, err := config.CompileHostPatterns(append(append([]string{}, c.RedirectHosts...), c.ExtraRedirectHosts...))
 		if err != nil {
-			return nil, fmt.Errorf("上游 %s：%w", name, err)
+			return nil, fmt.Errorf("upstream %s: %w", name, err)
 		}
 		realmRe, err := config.CompileHostPatterns(c.TokenRealmHosts)
 		if err != nil {
-			return nil, fmt.Errorf("上游 %s：%w", name, err)
+			return nil, fmt.Errorf("upstream %s: %w", name, err)
 		}
 		cl := shared
 		if c.AllowPrivateNetwork || c.TLSCAFile != "" {
 			roots, err := rootsWith(opt.RootCAs, c.TLSCAFile)
 			if err != nil {
-				return nil, fmt.Errorf("上游 %s：%w", name, err)
+				return nil, fmt.Errorf("upstream %s: %w", name, err)
 			}
 			allow := opt.AllowAddr
 			if c.AllowPrivateNetwork {
@@ -133,7 +136,7 @@ func NewPool(cfg *config.Config, opt Options) (*Pool, error) {
 	return p, nil
 }
 
-// rootsWith 返回系统 CA（测试时是 base）再加上 caFile 里的证书。
+// rootsWith returns the system CAs (base in tests) plus the certificates in caFile.
 func rootsWith(base *x509.CertPool, caFile string) (*x509.CertPool, error) {
 	if caFile == "" {
 		return base, nil
@@ -147,12 +150,12 @@ func rootsWith(base *x509.CertPool, caFile string) (*x509.CertPool, error) {
 			roots = x509.NewCertPool()
 		}
 	}
-	pem, err := os.ReadFile(caFile) //nolint:gosec // 路径由运维在配置里指定
+	pem, err := os.ReadFile(caFile) //nolint:gosec // the path is set by the operator in the configuration
 	if err != nil {
 		return nil, err
 	}
 	if !roots.AppendCertsFromPEM(pem) {
-		return nil, fmt.Errorf("%s 里没有可用的 PEM 证书", caFile)
+		return nil, fmt.Errorf("no usable PEM certificates in %s", caFile)
 	}
 	return roots, nil
 }
@@ -165,7 +168,7 @@ func (p *Pool) newClient(cfg *config.Config, opt Options, ua string, allow func(
 		dial = opt.DialContext
 	}
 	tr := &http.Transport{
-		Proxy:                 nil, // 不读 HTTP_PROXY：代理会绕过拨号拦截
+		Proxy:                 nil, // do not read HTTP_PROXY: a proxy would bypass the dial guard
 		DialContext:           dial,
 		ForceAttemptHTTP2:     true,
 		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots, NextProtos: []string{"h2", "http/1.1"}},
@@ -175,40 +178,40 @@ func (p *Pool) newClient(cfg *config.Config, opt Options, ua string, allow func(
 		IdleConnTimeout:       90 * time.Second,
 		MaxIdleConns:          1024,
 		MaxIdleConnsPerHost:   cfg.Proxy.MaxIdleConnsPerHost,
-		DisableCompression:    true, // 字节原样透传，长度和 digest 不变
+		DisableCompression:    true, // pass bytes through unchanged so length and digest stay the same
 		ReadBufferSize:        64 << 10,
 		WriteBufferSize:       16 << 10,
 		HTTP2: &http.HTTP2Config{
-			SendPingTimeout: 30 * time.Second, // 连接空闲 30 秒发一次 ping，及时发现断掉的 HTTP/2 连接
+			SendPingTimeout: 30 * time.Second, // ping after 30 seconds idle to detect broken HTTP/2 connections early
 			PingTimeout:     15 * time.Second,
 		},
 	}
 	p.transports = append(p.transports, tr)
-	// 重定向自己处理：要检查目标、去掉 Authorization、记录每一跳
+	// Handle redirects ourselves: check the target, drop Authorization, record every hop
 	noRedirect := func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	hc := &http.Client{Transport: tr, CheckRedirect: noRedirect}
 	bc := hc
 	if !cfg.Proxy.BlobHTTP2 {
 		bt := tr.Clone()
 		bt.ForceAttemptHTTP2 = false
-		bt.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{} // 非 nil 的空表：不用 HTTP/2
+		bt.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{} // non-nil empty map: no HTTP/2
 		bt.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots, NextProtos: []string{"http/1.1"}}
 		bt.HTTP2 = nil
-		bt.ReadBufferSize, bt.WriteBufferSize = 0, 0 // 用默认的 4 KiB；大块读取会绕过它直接读连接
+		bt.ReadBufferSize, bt.WriteBufferSize = 0, 0 // use the default 4 KiB; large reads bypass it and read the connection directly
 		p.transports = append(p.transports, bt)
 		bc = &http.Client{Transport: bt, CheckRedirect: noRedirect}
 	}
 	tc := token.NewCache(hc, t.Token.D(), ua, 4096)
 	tc.OnCredentialRejected = func(realm, user string) {
-		p.log.Warn("上游账号被令牌服务拒绝，改用匿名", "realm", realm, "username", user)
+		p.log.Warn("upstream credentials rejected by token service, falling back to anonymous", "realm", realm, "username", user)
 	}
 	return &client{http: hc, blob: bc, tokens: tc}
 }
 
-// Get 返回上游，没有时返回 nil。
+// Get returns the upstream, or nil if there is none.
 func (p *Pool) Get(name string) *Upstream { return p.ups[name] }
 
-// Names 返回所有上游的名字，按字母排序。
+// Names returns the names of all upstreams in alphabetical order.
 func (p *Pool) Names() []string {
 	out := make([]string, 0, len(p.ups))
 	for n := range p.ups {
@@ -218,54 +221,58 @@ func (p *Pool) Names() []string {
 	return out
 }
 
-// Close 关闭空闲连接。
+// Close closes idle connections.
 func (p *Pool) Close() {
 	for _, tr := range p.transports {
 		tr.CloseIdleConnections()
 	}
 }
 
-// BreakerOpen 表示这个上游的熔断器是否打开。
+// BreakerOpen reports whether this upstream's circuit breaker is open.
 func (u *Upstream) BreakerOpen() bool { return u.breaker.Open() }
 
-// Request 是发给上游的一个请求。
+// Request is a request sent to the upstream.
 type Request struct {
-	Method string // GET 或 HEAD
+	Method string // GET or HEAD
 	Path   string // /v2/...
 	Query  url.Values
-	Header http.Header // 已按白名单过滤：Accept、Range、If-Range
-	Repo   string      // 上游的仓库名，用来生成令牌的 scope
-	Blob   bool        // 镜像层：用 blob 连接池
+	Header http.Header // already filtered by allowlist: Accept, Range, If-Range
+	Repo   string      // repository name on the upstream, used to build the token scope
+	Blob   bool        // layer: use the blob connection pool
 }
 
-// Response 是上游的最终响应。Body 由调用方关闭。
+// Response is the upstream's final response. The caller closes Body.
 type Response struct {
 	*http.Response
-	Hops []string // 服务端跟随过的每一跳的主机
-	// PassLocation 不为空时，表示遇到了白名单外（或超过跳数）的重定向，应原样交给客户端
+	Hops []string // host of every hop followed on the server side
+	// When PassLocation is not empty, a redirect outside the allowlist (or beyond the hop limit) was met and
+	// should be passed to the client as is
 	PassLocation string
-	// Probed 表示 HEAD 跟随重定向时改成了 GET Range: bytes=0-0（对象存储的签名绑定了方法，直接 HEAD 会 403），
-	// 调用方应按 Content-Range 里的总长度回答 HEAD，并丢弃正文。
+	// Probed means a HEAD following a redirect was turned into GET Range: bytes=0-0 (object storage signatures
+	// are bound to the method, so a plain HEAD gets 403); the caller should answer the HEAD with the total
+	// length in Content-Range and discard the body.
 	Probed bool
 }
 
-// RedirectError 表示白名单外的重定向，且上游配置为 deny。
+// RedirectError means a redirect outside the allowlist, with the upstream configured to deny it.
 type RedirectError struct{ Host string }
 
-func (e *RedirectError) Error() string { return "上游重定向到白名单外的主机 " + e.Host }
+func (e *RedirectError) Error() string {
+	return "upstream redirected to host not in allowlist: " + e.Host
+}
 
-// CircuitOpenError 表示上游的熔断器打开着，请求没有发出去。
+// CircuitOpenError means the upstream's circuit breaker is open and the request was not sent.
 type CircuitOpenError struct {
 	Upstream   string
 	RetryAfter time.Duration
 }
 
 func (e *CircuitOpenError) Error() string {
-	return "上游 " + e.Upstream + " 连续失败，暂停请求"
+	return "upstream " + e.Upstream + " failed repeatedly, requests paused"
 }
 
-// ErrNoLocation 表示上游返回了重定向却没有 Location。
-var ErrNoLocation = errors.New("上游的重定向没有 Location")
+// ErrNoLocation means the upstream returned a redirect without a Location.
+var ErrNoLocation = errors.New("upstream redirect has no Location")
 
 func isRedirect(code int) bool {
 	switch code {
@@ -276,7 +283,7 @@ func isRedirect(code int) bool {
 	return false
 }
 
-// Fetch 发出请求，按需取令牌，并在服务端跟随白名单内的重定向。
+// Fetch sends the request, fetches tokens as needed and follows allowlisted redirects on the server side.
 func (u *Upstream) Fetch(ctx context.Context, r Request) (*Response, error) {
 	target := &url.URL{Scheme: "https", Host: u.Registry, Path: r.Path}
 	if len(r.Query) > 0 {
@@ -289,10 +296,10 @@ func (u *Upstream) Fetch(ctx context.Context, r Request) (*Response, error) {
 	if ok, wait := u.breaker.Allow(); !ok {
 		return nil, &CircuitOpenError{Upstream: u.Name, RetryAfter: wait}
 	}
-	resp, err := u.do(ctx, req, r.Repo, true, r.Blob) //nolint:bodyclose // 重定向时在循环里 discard，否则随 Response 交给调用方关闭
+	resp, err := u.do(ctx, req, r.Repo, true, r.Blob) //nolint:bodyclose // discarded in the loop on redirect, otherwise handed to the caller with Response to close
 	switch {
 	case err != nil && ctx.Err() != nil:
-		u.breaker.Cancel() // 客户端自己走了，说明不了上游的情况
+		u.breaker.Cancel() // the client left on its own; that says nothing about the upstream
 	case err != nil:
 		u.breaker.Done(true)
 	default:
@@ -314,9 +321,9 @@ func (u *Upstream) Fetch(ctx context.Context, r Request) (*Response, error) {
 		if loc == "" {
 			return nil, ErrNoLocation
 		}
-		next, err := prev.Parse(loc) // 相对地址按返回它的那一跳解析
+		next, err := prev.Parse(loc) // a relative address is resolved against the hop that returned it
 		if err != nil {
-			return nil, fmt.Errorf("上游的 Location 不合法：%w", err)
+			return nil, fmt.Errorf("invalid upstream Location: %w", err)
 		}
 		if len(hops) >= u.maxRedirects || !u.redirectAllowed(next) {
 			if u.unlistedDeny {
@@ -338,8 +345,9 @@ func (u *Upstream) Fetch(ctx context.Context, r Request) (*Response, error) {
 		if err != nil {
 			return nil, err
 		}
-		// 跟随重定向时不主动带令牌：CDN 和对象存储的地址自带签名。对方要求认证时再按它的质询取
-		resp, err = u.do(ctx, req, r.Repo, false, r.Blob) //nolint:bodyclose // 同上
+		// Do not attach a token when following a redirect: CDN and object storage URLs carry their own signature.
+		// If the other side asks for authentication, fetch one according to its challenge
+		resp, err = u.do(ctx, req, r.Repo, false, r.Blob) //nolint:bodyclose // as above
 		if err != nil {
 			return nil, err
 		}
@@ -359,8 +367,9 @@ func (u *Upstream) newRequest(ctx context.Context, method string, target *url.UR
 	return req, nil
 }
 
-// do 发一次请求；上游返回 Bearer 质询时取令牌再试一次。primary 表示这是发给 registry 本身的请求：
-// 只有它会主动带上已知的令牌，也只有它可能用上配置的账号。
+// do sends one request; when the upstream returns a Bearer challenge it fetches a token and tries once more.
+// primary means the request goes to the registry itself: only such requests attach a known token up front,
+// and only they may use the configured account.
 func (u *Upstream) do(ctx context.Context, req *http.Request, repo string, primary, blob bool) (*http.Response, error) {
 	hc := u.client.http
 	if blob {
@@ -396,7 +405,7 @@ func (u *Upstream) do(ctx context.Context, req *http.Request, repo string, prima
 		return resp, nil
 	}
 	if !u.realmAllowed(ch.Realm()) {
-		u.log.Warn("上游给出的令牌服务不在白名单内，不去取令牌", "upstream", u.Name, "realm", ch.Realm())
+		u.log.Warn("token service from upstream not in allowlist, not fetching a token", "upstream", u.Name, "realm", ch.Realm())
 		return resp, nil
 	}
 	discard(resp)
@@ -410,7 +419,7 @@ func (u *Upstream) do(ctx context.Context, req *http.Request, repo string, prima
 	}
 	tok, err := u.client.tokens.Get(ctx, u.tokenRequest(*ch, scope, primary))
 	if err != nil {
-		return nil, fmt.Errorf("取令牌：%w", err)
+		return nil, fmt.Errorf("fetch token: %w", err)
 	}
 	retry := req.Clone(ctx)
 	retry.Header.Set("Authorization", "Bearer "+tok)
@@ -438,13 +447,13 @@ func (u *Upstream) setChallenge(host string, ch token.Challenge) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if len(u.challenges) >= 64 {
-		clear(u.challenges) // 正常只有几台主机，超过说明上游在变，清空重来
+		clear(u.challenges) // normally there are only a few hosts; more means the upstream is changing, so start over
 	}
-	// 只记 realm 和 service：scope 是那一次请求的仓库，不能用到别的仓库上
+	// Record only realm and service: the scope is for that request's repository and must not be used for others
 	u.challenges[host] = token.Challenge{Scheme: ch.Scheme, Params: map[string]string{"realm": ch.Realm(), "service": ch.Service()}}
 }
 
-// redirectAllowed：https、443 端口、没有 userinfo、不是 IP 字面量，主机在白名单内。
+// redirectAllowed: https, port 443, no userinfo, not an IP literal, and the host is in the allowlist.
 func (u *Upstream) redirectAllowed(next *url.URL) bool {
 	return hostAllowed(next, u.redirectRe)
 }
@@ -468,7 +477,8 @@ func hostAllowed(t *url.URL, re *regexp.Regexp) bool {
 	return re.MatchString(h)
 }
 
-// discard 读掉并关闭不再需要的响应正文（最多 64 KiB），让连接可以复用。
+// discard reads and closes a response body that is no longer needed (up to 64 KiB) so the connection can be
+// reused.
 func discard(resp *http.Response) {
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 	_ = resp.Body.Close()

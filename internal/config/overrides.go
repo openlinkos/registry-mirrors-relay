@@ -17,23 +17,29 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// Override 是在后台对配置的一处修改。Key 指明改哪一段，Value 是这一段的 YAML（JSON 也是合法的 YAML）：
-//   - limits、cache、proxy、site：逐字段覆盖，没写的字段用配置文件的；
-//   - upstreams/<名字>：逐字段覆盖这个上游，没有这个上游时新建；
-//   - entrances：整个入口列表替换。
+// Override is one console override of the configuration. Key names the section it changes, Value is that
+// section's YAML (JSON is valid YAML too):
+//   - limits, cache, proxy, site: field by field; fields not given come from the configuration file;
+//   - upstreams/<name>: field by field for that upstream, which is created if it does not exist;
+//   - entrances: replaces the whole list of entrances.
 //
-// 后台的修改不写回配置文件，存在运营数据库里。解析时先合进配置文件的 YAML 节点树，再和配置文件一样严格解码、
-// 合并默认值、校验，所以默认值、校验和错误信息都和改配置文件一样，配置文件仍是基准。
+// Console overrides are not written back to the configuration file but stored in the operational database. When
+// parsing, they are first merged into the configuration file's YAML node tree, which is then strictly decoded,
+// merged with the defaults and validated just like the configuration file, so defaults, validation and error
+// messages are the same as when editing the configuration file, which remains the baseline.
 //
-// 只有 overrideFields 里列出的字段能改。监听、TLS、管理入口（admin.*）、日志、指标、超时和各种密钥只能改配置文件：
-// 后台不能改「谁能进后台」，也不能让本服务去连内网、换掉上游账号的去向。配了账号（credentials）的上游，
-// registry 和 token_realm_hosts 也只能在配置文件里改。
+// Only the fields listed in overrideFields can be changed. Listeners, TLS, the management entrance (admin.*),
+// logs, metrics, timeouts and all secrets can only be changed in the configuration file: the console cannot
+// change who may enter the console, make this service connect to private networks, or change where an upstream
+// account is sent. For an upstream with an account (credentials), registry and token_realm_hosts can also only be
+// changed in the configuration file.
 type Override struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
 }
 
-// overrideFields 是各段能在后台改的字段，entrances 是每个入口能写的字段。
+// overrideFields lists, per section, the fields that can be changed in the console; for entrances, the fields
+// each entrance may set.
 var overrideFields = map[string][]string{
 	"limits": {"manifest_rate", "manifest_burst", "head_weight", "blob_streams_per_client", "max_inflight",
 		"max_blob_streams", "max_manifest_buffers", "auth_failures_per_min", "exempt_cidrs"},
@@ -45,13 +51,15 @@ var overrideFields = map[string][]string{
 	"entrances": {"name", "hosts", "upstream", "default_upstream", "auth", "page"},
 }
 
-// credentialLocked 是配了账号的上游不能在后台改的字段：改了就可能把账号发到别的主机。
+// credentialLocked lists the fields of an upstream with an account that cannot be changed in the console:
+// changing them could send the account to another host.
 var credentialLocked = []string{"registry", "token_realm_hosts"}
 
-// OverrideSections 是能在后台改的段，按显示顺序。
+// OverrideSections are the sections that can be changed in the console, in display order.
 var OverrideSections = []string{"limits", "cache", "proxy", "site"}
 
-// OverrideFields 返回这一处修改能写的字段（entrances 是每个入口能写的字段）。key 不认识时返回 nil。
+// OverrideFields returns the fields an override with this key may set (for entrances, the fields each entrance
+// may set). It returns nil for an unknown key.
 func OverrideFields(key string) []string {
 	section, _, ok := splitKey(key)
 	if !ok {
@@ -60,13 +68,13 @@ func OverrideFields(key string) []string {
 	return overrideFields[section]
 }
 
-// CredentialLocked 表示配了账号的上游不能在后台改这个字段。
+// CredentialLocked reports whether the field cannot be changed in the console for an upstream with an account.
 func CredentialLocked(field string) bool { return slices.Contains(credentialLocked, field) }
 
-// UpstreamKey 是一个上游对应的 key。
+// UpstreamKey returns the key for an upstream.
 func UpstreamKey(name string) string { return "upstreams/" + name }
 
-// splitKey 把 key 拆成段和上游名字。
+// splitKey splits a key into the section and the upstream name.
 func splitKey(key string) (section, name string, ok bool) {
 	if n, found := strings.CutPrefix(key, "upstreams/"); found {
 		return "upstreams", n, upstreamNameRe.MatchString(n)
@@ -75,7 +83,8 @@ func splitKey(key string) (section, name string, ok bool) {
 	return key, "", ok && key != "upstreams"
 }
 
-// overrideNode 解析一处修改，检查 key 和字段，返回这一段的节点（键值对，entrances 是列表）。
+// overrideNode parses an override, checks the key and fields, and returns the section's node (a mapping; a
+// sequence for entrances).
 func overrideNode(o Override) (*yaml.Node, error) {
 	section, _, ok := splitKey(o.Key)
 	if !ok {
@@ -118,8 +127,9 @@ func overrideNode(o Override) (*yaml.Node, error) {
 	return n, nil
 }
 
-// CheckOverride 检查一处修改本身的写法：key 认识、只写了能改的字段、类型对。
-// 和配置文件合起来对不对（例如入口引用的上游存不存在）要整体解析才知道，见 ParseWithOverrides。
+// CheckOverride checks an override on its own: the key is known, only changeable fields are set, and the types
+// are right. Whether it is valid combined with the configuration file (for example, whether an upstream an
+// entrance refers to exists) is only known from a full parse, see ParseWithOverrides.
 func CheckOverride(o Override) error {
 	n, err := overrideNode(o)
 	if err != nil {
@@ -148,7 +158,7 @@ func CheckOverride(o Override) error {
 	return strictDecode(b, target)
 }
 
-// applyOverrides 把后台的修改合进配置文件的节点树（最外层的键值对）。
+// applyOverrides merges the console overrides into the configuration file's node tree (the top-level mapping).
 func applyOverrides(top *yaml.Node, ovs []Override) error {
 	for _, o := range ovs {
 		if err := applyOverride(top, o); err != nil {
@@ -190,7 +200,7 @@ func applyOverride(top *yaml.Node, o Override) error {
 	return nil
 }
 
-// mapGet 返回键值对 m 里 key 的值，没有时返回 nil。
+// mapGet returns the value of key in the mapping m, or nil if there is none.
 func mapGet(m *yaml.Node, key string) *yaml.Node {
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		if m.Content[i].Value == key {
@@ -200,7 +210,7 @@ func mapGet(m *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
-// mapSet 设置键值对 m 里 key 的值，没有就加在最后。
+// mapSet sets the value of key in the mapping m, appending it at the end if absent.
 func mapSet(m *yaml.Node, key string, v *yaml.Node) {
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		if m.Content[i].Value == key {
@@ -211,7 +221,8 @@ func mapSet(m *yaml.Node, key string, v *yaml.Node) {
 	m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, v)
 }
 
-// childMap 返回键值对 m 里 key 对应的键值对，没有或者是空值时新建一个。fold 时 key 不区分大小写（上游名）。
+// childMap returns the mapping under key in the mapping m, creating one when it is missing or null. With fold,
+// key is matched case-insensitively (upstream names).
 func childMap(m *yaml.Node, key string, fold bool) (*yaml.Node, error) {
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		k := m.Content[i].Value
@@ -233,7 +244,8 @@ func childMap(m *yaml.Node, key string, fold bool) (*yaml.Node, error) {
 	return v, nil
 }
 
-// section 返回 key 对应的那一段在 c 里的值（结构体）。upstreams/<名字> 在 c 里没有时 ok 为 false。
+// section returns the value (a struct) in c of the section for key. ok is false when upstreams/<name> is not
+// in c.
 func section(c *Config, key string) (v reflect.Value, ok bool) {
 	sec, name, _ := splitKey(key)
 	switch sec {
@@ -253,7 +265,7 @@ func section(c *Config, key string) (v reflect.Value, ok bool) {
 	return reflect.Value{}, false
 }
 
-// field 按 yaml 标签找结构体的字段。
+// field finds a struct field by its yaml tag.
 func field(v reflect.Value, tag string) reflect.Value {
 	t := v.Type()
 	for i := range t.NumField() {
@@ -271,8 +283,9 @@ func sameValue(a, b reflect.Value) bool {
 	return reflect.DeepEqual(a.Interface(), b.Interface())
 }
 
-// MinimizeOverride 去掉和 file（只按配置文件解析的配置）里一样的字段，返回剩下的；
-// 全都一样时 keep 为 false，这一处修改可以去掉。入口列表整体比较。
+// MinimizeOverride removes the fields that equal those in file (the configuration parsed from the configuration
+// file alone) and returns the rest; when all are equal, keep is false and the override can be removed. The list
+// of entrances is compared as a whole.
 func MinimizeOverride(file *Config, o Override) (out Override, keep bool, err error) {
 	if err := CheckOverride(o); err != nil {
 		return o, false, err
@@ -321,7 +334,7 @@ func MinimizeOverride(file *Config, o Override) (out Override, keep bool, err er
 	return Override{Key: o.Key, Value: string(b)}, true, nil
 }
 
-// plain 去掉注释和写法（JSON 的花括号、引号），存下来的统一是普通的 YAML。
+// plain strips comments and styles (JSON braces, quotes), so that what is stored is always plain YAML.
 func plain(n *yaml.Node) {
 	n.Style, n.HeadComment, n.LineComment, n.FootComment = 0, "", "", ""
 	for _, c := range n.Content {
@@ -329,8 +342,9 @@ func plain(n *yaml.Node) {
 	}
 }
 
-// OverrideBase 是 file 里这一处修改所改的字段当时的值的指纹。保存时记下，之后配置文件里这些字段变了，
-// 指纹就对不上：说明配置文件在后台修改之后又改过，后台的修改可能已经过时。
+// OverrideBase is a fingerprint of the current values in file of the fields the override changes. It is recorded
+// on save; if those fields later change in the configuration file, the fingerprint no longer matches: the
+// configuration file was changed after the console override, which may now be out of date.
 func OverrideBase(file *Config, o Override) string {
 	n, err := overrideNode(o)
 	if err != nil {
@@ -354,8 +368,8 @@ func OverrideBase(file *Config, o Override) string {
 	return hex.EncodeToString(s[:16])
 }
 
-// FieldText 是 c 里 key 这一段某个字段的值，写成后台表单里的样子：列表用逗号分隔，时长写成 30s、6h 这样。
-// upstreams/<名字> 在 c 里没有时返回空串。
+// FieldText returns the value of a field of the section for key in c, written as in the console form: lists
+// separated by commas, durations such as 30s or 6h. It returns an empty string when upstreams/<name> is not in c.
 func FieldText(c *Config, key, name string) string {
 	base, ok := section(c, key)
 	if !ok {
@@ -378,7 +392,7 @@ func FieldText(c *Config, key, name string) string {
 	return fmt.Sprint(f.Interface())
 }
 
-// shortDuration 去掉时长末尾多余的 0m0s：1h0m0s 写成 1h。
+// shortDuration strips a redundant trailing 0m0s from a duration: 1h0m0s becomes 1h.
 func shortDuration(d time.Duration) string {
 	if d == 0 {
 		return "0s"
@@ -396,7 +410,8 @@ func shortDuration(d time.Duration) string {
 	return s
 }
 
-// FieldKind 是字段的类型，后台据此选输入框：bool、int、float、duration、size、list、string。
+// FieldKind returns the type of a field, from which the console picks the input: bool, int, float, duration,
+// size, list, string.
 func FieldKind(key, name string) string {
 	sec, _, ok := splitKey(key)
 	if !ok {
@@ -440,7 +455,8 @@ func FieldKind(key, name string) string {
 	return "string"
 }
 
-// fieldsNode 把表单里的文字按字段类型写成 YAML 键值对。列表用逗号、空白或换行分隔。
+// fieldsNode turns the form text into a YAML mapping according to each field's type. Lists are separated by
+// commas, whitespace or newlines.
 func fieldsNode(key string, names []string, values map[string]string) (*yaml.Node, error) {
 	m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	for _, name := range names {
@@ -482,7 +498,8 @@ func fieldsNode(key string, names []string, values map[string]string) (*yaml.Nod
 	return m, nil
 }
 
-// splitList 按空白、换行和逗号分隔列表。花括号里的逗号不算（正则的 {1,3}）。
+// splitList splits a list at whitespace, newlines and commas. Commas inside braces do not count (as in the regex
+// quantifier {1,3}).
 func splitList(text string) []string {
 	var out []string
 	for _, tok := range strings.Fields(text) {
@@ -507,7 +524,8 @@ func splitList(text string) []string {
 	return out
 }
 
-// FormOverride 由后台表单生成一处修改：values 是字段名到填写的文字（列表用逗号分隔），没给的字段不改。
+// FormOverride builds an override from a console form: values maps field names to the text entered (lists
+// separated by commas); fields not given are left unchanged.
 func FormOverride(key string, values map[string]string) (Override, error) {
 	names := OverrideFields(key)
 	if names == nil || key == "entrances" {
@@ -524,7 +542,8 @@ func FormOverride(key string, values map[string]string) (Override, error) {
 	return Override{Key: key, Value: string(b)}, nil
 }
 
-// FormEntrances 由后台表单生成入口列表的修改。空的字段不写，用默认值。
+// FormEntrances builds the override of the entrance list from a console form. Empty fields are left out, so
+// the defaults apply.
 func FormEntrances(list []map[string]string) (Override, error) {
 	seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 	for _, values := range list {
@@ -547,7 +566,8 @@ func FormEntrances(list []map[string]string) (Override, error) {
 	return Override{Key: "entrances", Value: string(b)}, nil
 }
 
-// ExportOverrides 把后台的修改写成配置文件的样子（只有改过的部分），用于抄回配置文件。
+// ExportOverrides writes the console overrides in the form of a configuration file (only the changed parts), for
+// copying back into the configuration file.
 func ExportOverrides(ovs []Override) ([]byte, error) {
 	top := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	if err := applyOverrides(top, ovs); err != nil {
@@ -559,8 +579,10 @@ func ExportOverrides(ovs []Override) ([]byte, error) {
 	return marshal(top)
 }
 
-// ExportMerged 把后台的修改合进配置文件，保留注释，用于直接替换配置文件。直接写在配置里的密钥（value）隐去，
-// 换成空值和一行注释，替换前要填回去，否则 check 会报错。
+// ExportMerged merges the console overrides into the configuration file, keeping comments, for replacing the
+// configuration file directly. Secrets written inline in the configuration (value) are redacted and replaced by
+// an empty value and a comment; they must be filled back in before the file is replaced, or check reports an
+// error.
 func ExportMerged(file []byte, ovs []Override) ([]byte, error) {
 	var root yaml.Node
 	if len(bytes.TrimSpace(file)) > 0 {
@@ -589,7 +611,7 @@ func ExportMerged(file []byte, ovs []Override) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// redactSecrets 隐去 password、token 下直接写的 value。
+// redactSecrets redacts the inline value under password and token.
 func redactSecrets(n *yaml.Node) {
 	switch n.Kind {
 	case yaml.MappingNode:
@@ -612,7 +634,7 @@ func redactSecrets(n *yaml.Node) {
 	}
 }
 
-// marshal 写成两格缩进的 YAML，和配置文件的习惯一致。
+// marshal writes YAML with two-space indentation, matching the usual style of configuration files.
 func marshal(v any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)

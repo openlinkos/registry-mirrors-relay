@@ -49,18 +49,18 @@ func TestEntranceLookup(t *testing.T) {
 	} {
 		e := r.Entrance(host)
 		if e == nil || e.Name != want {
-			t.Errorf("%s：期望入口 %s，实际 %+v", host, want, e)
+			t.Errorf("%s: want entrance %s, got %+v", host, want, e)
 		}
 	}
 	if e := r.Entrance("quay.example.com"); e == nil || e.Upstream != "quay.io" {
-		t.Fatalf("固定上游的入口：%+v", e)
+		t.Fatalf("fixed-upstream entrance: %+v", e)
 	}
 	res, err := config.Parse([]byte("entrances: [{hosts: [only.example.com]}]"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if e := New(res.Config).Entrance("other.example.com"); e != nil {
-		t.Fatal("没有匹配的入口时应返回 nil")
+		t.Fatal("should return nil when no entrance matches")
 	}
 }
 
@@ -87,37 +87,38 @@ func TestParseAllInOne(t *testing.T) {
 	for _, c := range cases {
 		tg, err := parse(t, r, e, c.path)
 		if err != nil {
-			t.Errorf("%s：%v", c.path, err)
+			t.Errorf("%s: %v", c.path, err)
 			continue
 		}
 		if tg.Upstream != c.up || tg.Repo != c.repo || tg.Client != c.client || tg.Kind != c.kind {
-			t.Errorf("%s：得到 %+v", c.path, tg)
+			t.Errorf("%s: got %+v", c.path, tg)
 		}
 	}
 	tg, _ := parse(t, r, e, "/v2/x/referrers/"+digest+"?artifactType=application%2Fvnd.example&ns=docker.io&evil=1")
 	if tg.Query.Encode() != "artifactType=application%2Fvnd.example" {
-		t.Fatalf("只应转发 artifactType：%s", tg.Query.Encode())
+		t.Fatalf("only artifactType should be forwarded: %s", tg.Query.Encode())
 	}
 }
 
 func TestParseFixedEntrance(t *testing.T) {
 	r := testRouter(t)
 	e := r.Entrance("gcr.example.com")
-	// 固定上游的入口不把第一段当 registry：gcr.io 上的 google.com/... 是一个仓库
+	// A fixed-upstream entrance does not treat the first segment as a registry: google.com/... on gcr.io is a
+	// repository
 	tg, err := parse(t, r, e, "/v2/google.com/cloudsdktool/cloud-sdk/manifests/slim")
 	if err != nil || tg.Upstream != "gcr.io" || tg.Repo != "google.com/cloudsdktool/cloud-sdk" {
-		t.Fatalf("得到 %+v %v", tg, err)
+		t.Fatalf("got %+v %v", tg, err)
 	}
-	// gcr.io 没有 library 前缀
+	// gcr.io has no library prefix
 	if tg, _ := parse(t, r, e, "/v2/distroless/manifests/x"); tg.Repo != "distroless" {
-		t.Fatalf("gcr.io 不应补 library/：%+v", tg)
+		t.Fatalf("gcr.io should not get library/: %+v", tg)
 	}
-	// containerd 把这个入口配成了 Docker Hub 的镜像
+	// containerd has configured this entrance as a Docker Hub mirror
 	if _, err := parse(t, r, e, "/v2/library/nginx/manifests/latest?ns=docker.io"); err == nil || err.Status != 404 {
-		t.Fatalf("ns 不一致应返回 404：%v", err)
+		t.Fatalf("a mismatched ns should return 404: %v", err)
 	}
 	if _, err := parse(t, r, e, "/v2/distroless/static/manifests/x?ns=gcr.io"); err != nil {
-		t.Fatalf("ns 一致应放行：%v", err)
+		t.Fatalf("a matching ns should be allowed: %v", err)
 	}
 }
 
@@ -128,7 +129,7 @@ func TestParseRejects(t *testing.T) {
 		"/v2/_catalog":                                     404,
 		"/v2/x/blobs/uploads/":                             404,
 		"/v2/x/blobs/uploads/abc":                          404,
-		"/v2/example.org/x/manifests/latest":               404, // 没有配置的上游，不回落到 Docker Hub
+		"/v2/example.org/x/manifests/latest":               404, // upstream not configured, no fallback to Docker Hub
 		"/v2/x/manifests/latest?ns=example.org":            404,
 		"/v2/ghcr.io/x/manifests/v1?ns=quay.io":            404,
 		"/v2/x/blobs/latest":                               400,
@@ -143,11 +144,11 @@ func TestParseRejects(t *testing.T) {
 	} {
 		_, err := parse(t, r, e, path)
 		if err == nil || err.Status != status {
-			t.Errorf("%s：期望 %d，实际 %v", path, status, err)
+			t.Errorf("%s: want %d, got %v", path, status, err)
 		}
 	}
 	if tg, err := parse(t, r, e, "/v2/"); err != nil || tg.Kind != KindPing {
-		t.Fatalf("/v2/ 应是 ping：%+v %v", tg, err)
+		t.Fatalf("/v2/ should be a ping: %+v %v", tg, err)
 	}
 }
 
@@ -156,18 +157,18 @@ func TestLinkRewrite(t *testing.T) {
 	e := r.Entrance("mirror.example.com")
 	tg, _ := parse(t, r, e, "/v2/docker.io/nginx/tags/list?n=2")
 	if tg.Query.Get("n") != "2" {
-		t.Fatalf("n 应转发：%v", tg.Query)
+		t.Fatalf("n should be forwarded: %v", tg.Query)
 	}
 	got := tg.RewriteLink(`</v2/library/nginx/tags/list?last=1.27&n=2>; rel="next"`)
 	if got != `</v2/docker.io/nginx/tags/list?last=1.27&n=2>; rel="next"` {
-		t.Fatalf("Link 改写不对：%s", got)
+		t.Fatalf("wrong Link rewrite: %s", got)
 	}
 	if tg.RewriteLink(`<https://evil.example/v2/other/tags/list>; rel="next"`) != "" {
-		t.Fatal("指向别处的 Link 应丢弃")
+		t.Fatal("a Link pointing elsewhere should be dropped")
 	}
 	tg2, _ := parse(t, r, e, "/v2/x/tags/list?n=99999")
 	if tg2.Query.Get("n") != "1000" {
-		t.Fatalf("n 应限制在 1000：%v", tg2.Query)
+		t.Fatalf("n should be capped at 1000: %v", tg2.Query)
 	}
 }
 
@@ -192,15 +193,15 @@ func FuzzParse(f *testing.F) {
 		}
 		p := tg.UpstreamPath()
 		if !strings.HasPrefix(p, "/v2/") {
-			t.Fatalf("上游路径不在 /v2/ 下：%q → %q", raw, p)
+			t.Fatalf("upstream path is not under /v2/: %q → %q", raw, p)
 		}
 		for _, seg := range strings.Split(p[1:], "/") {
 			if seg == "" || seg == "." || seg == ".." {
-				t.Fatalf("上游路径有不安全的段：%q → %q", raw, p)
+				t.Fatalf("upstream path has an unsafe segment: %q → %q", raw, p)
 			}
 		}
 		if _, ok := r.Upstream(tg.Upstream); !ok {
-			t.Fatalf("上游不在配置里：%q → %q", raw, tg.Upstream)
+			t.Fatalf("upstream is not in the configuration: %q → %q", raw, tg.Upstream)
 		}
 	})
 }

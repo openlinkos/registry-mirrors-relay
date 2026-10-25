@@ -1,6 +1,8 @@
-// Package accesslog 写访问日志。字段名和 Caddy 的 JSON 访问日志一致，已有的统计脚本（如 abuse-report.py）不用改。
+// Package accesslog writes the access log. Field names match Caddy's JSON access log, so existing
+// analysis scripts (such as abuse-report.py) need no changes.
 //
-// 写日志不能拖慢拉取：日志先进一个有上限的队列，由单独的协程写出；队列满了就丢弃并计数。
+// Logging must not slow down pulls: entries go into a bounded queue and a separate goroutine writes
+// them out; when the queue is full, entries are dropped and counted.
 package accesslog
 
 import (
@@ -17,7 +19,7 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
 )
 
-// Entry 是一条访问记录。
+// Entry is one access record.
 type Entry struct {
 	Time       time.Time
 	RemoteIP   string
@@ -32,16 +34,17 @@ type Entry struct {
 	Duration   time.Duration
 	Size       int64
 	Status     int
-	// 响应头里记两项：Content-Length 用来区分完整下载和中途断开，Content-Type 方便排查
+	// Two response headers are recorded: Content-Length tells complete downloads from interrupted
+	// ones, and Content-Type helps with troubleshooting
 	RespContentLength string
 	RespContentType   string
 
 	Entrance string
 	Upstream string
-	Image    string   // 完整的镜像名，如 docker.io/library/nginx
-	Kind     string   // manifest、blob、tags、referrers、ping
-	Ref      string   // tag 或 digest
-	Hops     []string // 服务端跟随的每一跳，写成 redirect1..3
+	Image    string   // full image name, e.g. docker.io/library/nginx
+	Kind     string   // manifest, blob, tags, referrers, ping
+	Ref      string   // tag or digest
+	Hops     []string // each hop the server followed, written as redirect1..3
 	Cache    string
 	Limited  bool
 	Error    string
@@ -82,7 +85,7 @@ type lineJSON struct {
 	Error       string              `json:"error,omitempty"`
 }
 
-// Marshal 把一条记录编码成一行 JSON（不含换行）。
+// Marshal encodes a record as one line of JSON (without the newline).
 func Marshal(e *Entry) []byte {
 	l := lineJSON{
 		Level: "info", Logger: "http.log.access", Msg: "handled request",
@@ -118,7 +121,7 @@ func Marshal(e *Entry) []byte {
 	return b
 }
 
-// Logger 异步写日志。
+// Logger writes the log asynchronously.
 type Logger struct {
 	ch      chan []byte
 	out     io.WriteCloser
@@ -127,10 +130,11 @@ type Logger struct {
 	closed  atomic.Bool
 }
 
-// queueSize 是待写日志的上限（行数），大约几 MB。
+// queueSize is the limit on pending log entries (in lines), roughly a few MB.
 const queueSize = 8192
 
-// New 按配置创建 Logger。output 为 off 时返回 nil，调用方的 Log 也能安全地传 nil。
+// New creates a Logger from the configuration. When output is off it returns nil; callers can safely
+// call Log on a nil Logger.
 func New(cfg config.AccessLog) (*Logger, error) {
 	var out io.WriteCloser
 	switch cfg.Output {
@@ -182,7 +186,7 @@ func (l *Logger) loop() {
 	}
 }
 
-// Log 记一条。队列满了就丢弃，不阻塞请求。
+// Log records one entry. When the queue is full the entry is dropped rather than blocking the request.
 func (l *Logger) Log(e *Entry) {
 	if l == nil || l.closed.Load() {
 		return
@@ -194,7 +198,7 @@ func (l *Logger) Log(e *Entry) {
 	}
 }
 
-// Dropped 是因为队列满而丢弃的条数。
+// Dropped is the number of entries dropped because the queue was full.
 func (l *Logger) Dropped() uint64 {
 	if l == nil {
 		return 0
@@ -202,7 +206,7 @@ func (l *Logger) Dropped() uint64 {
 	return l.dropped.Load()
 }
 
-// Close 写完队列里剩下的日志并关闭输出。
+// Close writes out the entries left in the queue and closes the output.
 func (l *Logger) Close() error {
 	if l == nil || !l.closed.CompareAndSwap(false, true) {
 		return nil
@@ -214,12 +218,13 @@ func (l *Logger) Close() error {
 
 type noteKey struct{}
 
-// WithNote 给这个请求的访问记录附一句说明（写进 error 字段），例如管理入口为什么没有放行。
+// WithNote attaches a short note to this request's access record (written to the error field), for
+// example why the management entrance refused the request.
 func WithNote(ctx context.Context, note string) context.Context {
 	return context.WithValue(ctx, noteKey{}, note)
 }
 
-// NoteFrom 取出 WithNote 附的说明。
+// NoteFrom returns the note attached by WithNote.
 func NoteFrom(ctx context.Context) string {
 	s, _ := ctx.Value(noteKey{}).(string)
 	return s

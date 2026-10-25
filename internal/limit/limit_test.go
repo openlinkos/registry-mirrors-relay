@@ -11,15 +11,15 @@ var ip = netip.MustParseAddr("198.51.100.7")
 
 func TestKey(t *testing.T) {
 	if Key("alice", ip) != "user:alice" || Key("", ip) != "ip:198.51.100.7" {
-		t.Fatal("IPv4 和用户名的键不对")
+		t.Fatal("wrong keys for IPv4 and user name")
 	}
 	a := Key("", netip.MustParseAddr("2001:db8:1:2:aaaa::1"))
 	b := Key("", netip.MustParseAddr("2001:db8:1:2:bbbb::9"))
 	if a != b || a != "ip:2001:db8:1:2::/64" {
-		t.Fatalf("同一个 /64 应共用一个键：%s %s", a, b)
+		t.Fatalf("addresses in the same /64 should share one key: %s %s", a, b)
 	}
 	if Key("", netip.MustParseAddr("::ffff:198.51.100.7")) != "ip:198.51.100.7" {
-		t.Fatal("IPv4 映射地址应还原")
+		t.Fatal("IPv4-mapped address should be unmapped")
 	}
 }
 
@@ -29,39 +29,39 @@ func TestManifestBucket(t *testing.T) {
 	l.now = func() time.Time { return now }
 	for i := 0; i < 4; i++ {
 		if ok, _ := l.AllowManifest("k", ip, false, Override{}); !ok {
-			t.Fatalf("突发内第 %d 次应放行", i+1)
+			t.Fatalf("request %d within the burst should pass", i+1)
 		}
 	}
 	ok, wait := l.AllowManifest("k", ip, false, Override{})
 	if ok || wait < time.Second {
-		t.Fatalf("超过突发应拒绝并给出等待：%v %v", ok, wait)
+		t.Fatalf("exceeding the burst should be refused with a wait time: %v %v", ok, wait)
 	}
-	now = now.Add(500 * time.Millisecond) // 补回 1 个
+	now = now.Add(500 * time.Millisecond) // refills 1 token
 	if ok, _ := l.AllowManifest("k", ip, false, Override{}); !ok {
-		t.Fatal("补回令牌后应放行")
+		t.Fatal("request should pass after tokens are refilled")
 	}
-	now = now.Add(125 * time.Millisecond) // 补回 0.25 个：够一次 HEAD
+	now = now.Add(125 * time.Millisecond) // refills 0.25 tokens: enough for one HEAD
 	if ok, _ := l.AllowManifest("k", ip, true, Override{}); !ok {
-		t.Fatal("HEAD 只扣 0.25")
+		t.Fatal("HEAD should cost only 0.25")
 	}
 	if ok, _ := l.AllowManifest("other", ip, false, Override{}); !ok {
-		t.Fatal("不同客户端互不影响")
+		t.Fatal("different clients should not affect each other")
 	}
-	// 单独放宽的账号
+	// account with a raised limit
 	for i := 0; i < 50; i++ {
 		if ok, _ := l.AllowManifest("user:ci", ip, false, Override{ManifestRate: 10}); !ok {
-			t.Fatalf("放宽的账号第 %d 次应放行", i+1)
+			t.Fatalf("request %d from the account with a raised limit should pass", i+1)
 		}
 	}
-	// 豁免的地址
+	// exempt addresses
 	l.SetConfig(Config{ManifestRate: 2, ManifestBurst: 1, TrackedClients: 10, Exempt: []netip.Prefix{netip.MustParsePrefix("198.51.100.0/24")}})
 	for i := 0; i < 10; i++ {
 		if ok, _ := l.AllowManifest("k", ip, false, Override{}); !ok {
-			t.Fatal("豁免的地址不限流")
+			t.Fatal("exempt addresses should not be rate limited")
 		}
 	}
 	if l.Stats().Limited == 0 {
-		t.Fatal("应记下被限流的次数")
+		t.Fatal("the number of limited requests should be recorded")
 	}
 }
 
@@ -71,7 +71,7 @@ func TestTrackedClientsBounded(t *testing.T) {
 		l.AllowManifest(Key("", netip.AddrFrom4([4]byte{198, 51, byte(i >> 8), byte(i)})), ip, false, Override{})
 	}
 	if n := l.Stats().TrackedClients; n != 100 {
-		t.Fatalf("记住的客户端数应受上限约束：%d", n)
+		t.Fatalf("the number of remembered clients should be bounded: %d", n)
 	}
 }
 
@@ -81,28 +81,28 @@ func TestBlobStreams(t *testing.T) {
 	r2, ok2, _ := l.AcquireBlob("a", ip, Override{})
 	_, ok3, reason := l.AcquireBlob("a", ip, Override{})
 	if !ok1 || !ok2 || ok3 || reason != "client" {
-		t.Fatalf("每个客户端最多 2 个：%v %v %v %s", ok1, ok2, ok3, reason)
+		t.Fatalf("at most 2 per client: %v %v %v %s", ok1, ok2, ok3, reason)
 	}
 	r4, ok4, _ := l.AcquireBlob("b", ip, Override{})
 	_, ok5, reason := l.AcquireBlob("c", ip, Override{})
 	if !ok4 || ok5 || reason != "global" {
-		t.Fatalf("全局最多 3 个：%v %v %s", ok4, ok5, reason)
+		t.Fatalf("at most 3 globally: %v %v %s", ok4, ok5, reason)
 	}
 	r1()
-	r1() // 重复释放无害
+	r1() // releasing twice is harmless
 	if _, ok, _ := l.AcquireBlob("c", ip, Override{}); !ok {
-		t.Fatal("释放后应能再占")
+		t.Fatal("a slot should be available again after release")
 	}
 	r2()
 	r4()
 	if st := l.Stats(); st.BlobStreams != 1 {
-		t.Fatalf("流计数：%d", st.BlobStreams)
+		t.Fatalf("stream count: %d", st.BlobStreams)
 	}
 	l.mu.Lock()
 	n := len(l.streams)
 	l.mu.Unlock()
 	if n != 1 {
-		t.Fatalf("流都结束的客户端应从表里删掉：%d", n)
+		t.Fatalf("clients whose streams have all ended should be removed from the table: %d", n)
 	}
 }
 
@@ -144,18 +144,18 @@ func TestAuthFailures(t *testing.T) {
 	l.now = func() time.Time { return now }
 	for i := 0; i < 3; i++ {
 		if ok, _ := l.AuthAllowed(ip); !ok {
-			t.Fatalf("第 %d 次应允许尝试", i+1)
+			t.Fatalf("attempt %d should be allowed", i+1)
 		}
 		l.AuthFailed(ip)
 	}
 	if ok, wait := l.AuthAllowed(ip); ok || wait < time.Second {
-		t.Fatal("失败 3 次后应拒绝")
+		t.Fatal("should refuse after 3 failures")
 	}
-	now = now.Add(20 * time.Second) // 每分钟补回 3 次：20 秒补回 1 次
+	now = now.Add(20 * time.Second) // 3 refilled per minute: 1 every 20 seconds
 	if ok, _ := l.AuthAllowed(ip); !ok {
-		t.Fatal("补回后应允许")
+		t.Fatal("should allow after refill")
 	}
 	if ok, _ := l.AuthAllowed(netip.MustParseAddr("198.51.100.8")); !ok {
-		t.Fatal("别的 IP 不受影响")
+		t.Fatal("other IPs should not be affected")
 	}
 }

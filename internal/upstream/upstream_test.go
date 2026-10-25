@@ -26,7 +26,8 @@ type env struct {
 	up   *Upstream
 }
 
-// newEnv 建一个假上游 registry.test（令牌在 auth.test，blob 在 cdn.test）和指向它的 Pool。
+// newEnv builds a fake upstream registry.test (tokens on auth.test, blobs on cdn.test) and a Pool pointing
+// to it.
 func newEnv(t *testing.T, extra string) *env {
 	t.Helper()
 	n := testutil.NewNet(t)
@@ -59,7 +60,7 @@ func (e *env) fetch(t *testing.T, method, path string, h http.Header) (*Response
 	}
 	resp, err := e.up.Fetch(context.Background(), Request{Method: method, Path: path, Header: h, Repo: "team/app"})
 	if err != nil {
-		t.Fatalf("Fetch %s：%v", path, err)
+		t.Fatalf("Fetch %s: %v", path, err)
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
@@ -71,31 +72,31 @@ func TestTokenDanceAndReuse(t *testing.T) {
 	path := "/v2/team/app/manifests/v1"
 	resp, body := e.fetch(t, http.MethodGet, path, http.Header{"Accept": {testutil.MediaIndex}})
 	if resp.StatusCode != 200 || !bytes.Equal(body, e.img.Index) {
-		t.Fatalf("应拿到 index：%d", resp.StatusCode)
+		t.Fatalf("should get the index: %d", resp.StatusCode)
 	}
 	if got := e.reg.Count("GET registry.test manifest"); got != 2 {
-		t.Fatalf("第一次：401 之后取令牌重试，应请求 2 次，实际 %d", got)
+		t.Fatalf("first: after 401, fetch a token and retry, so 2 requests expected, got %d", got)
 	}
 	e.fetch(t, http.MethodGet, path, nil)
 	if got := e.reg.Count("GET registry.test manifest"); got != 3 {
-		t.Fatalf("第二次应直接带上缓存的令牌，只请求 1 次，实际累计 %d", got)
+		t.Fatalf("second: should attach the cached token directly with only 1 request, got %d in total", got)
 	}
 	if got := e.reg.Count("GET auth.test token"); got != 1 {
-		t.Fatalf("令牌应只取 1 次，实际 %d", got)
+		t.Fatalf("the token should be fetched only once, got %d", got)
 	}
-	// 换一个仓库：带上新仓库的 scope 取令牌，不复用上一个仓库的
+	// Another repository: fetch a token with the new repository's scope, not reusing the previous one's
 	other := testutil.NewImage(t, "team/other", "v2", 1024)
 	e.reg.Add(other)
 	resp, err := e.up.Fetch(context.Background(), Request{Method: http.MethodHead, Path: "/v2/team/other/manifests/v2", Header: http.Header{}, Repo: "team/other"})
 	if err != nil || resp.StatusCode != 200 {
-		t.Fatalf("另一个仓库：%v %v", resp, err)
+		t.Fatalf("other repository: %v %v", resp, err)
 	}
 	resp.Body.Close()
 	if resp.Header.Get("Docker-Content-Digest") != other.IndexDigest() {
-		t.Fatal("HEAD 应带 digest")
+		t.Fatal("HEAD should carry the digest")
 	}
 	if got := e.reg.Count("HEAD registry.test manifest"); got != 1 {
-		t.Fatalf("已知质询时应主动带上新仓库的令牌，HEAD 只发 1 次，实际 %d", got)
+		t.Fatalf("with a known challenge, the new repository's token should be attached up front with only 1 HEAD, got %d", got)
 	}
 }
 
@@ -110,24 +111,24 @@ func TestBlobRedirectFollowedWithoutAuthorization(t *testing.T) {
 	}
 	resp, body := e.fetch(t, http.MethodGet, "/v2/team/app/blobs/"+layer, nil)
 	if resp.StatusCode != 200 || testutil.Digest(body) != layer {
-		t.Fatalf("应经 CDN 拿到完整的层：%d", resp.StatusCode)
+		t.Fatalf("should get the complete layer via the CDN: %d", resp.StatusCode)
 	}
 	if len(resp.Hops) != 1 || resp.Hops[0] != "cdn.test" {
 		t.Fatalf("hops = %v", resp.Hops)
 	}
 	if e.reg.AuthCount("cdn.test") != 0 {
-		t.Fatal("跟随重定向时不能把令牌发给 CDN")
+		t.Fatal("tokens must not be sent to the CDN when following redirects")
 	}
-	// Range 透传
+	// Range passed through
 	resp, body = e.fetch(t, http.MethodGet, "/v2/team/app/blobs/"+layer, http.Header{"Range": {"bytes=10-19"}})
 	if resp.StatusCode != http.StatusPartialContent || len(body) != 10 || !bytes.Equal(body, e.img.Blobs[layer][10:20]) {
-		t.Fatalf("Range：%d %d", resp.StatusCode, len(body))
+		t.Fatalf("Range: %d %d", resp.StatusCode, len(body))
 	}
 }
 
 func TestUnlistedRedirect(t *testing.T) {
 	pass := newEnv(t, "    extra_redirect_hosts: []\n")
-	pass.up.redirectRe, _ = config.CompileHostPatterns([]string{`pkg\.test`}) // 去掉 cdn.test
+	pass.up.redirectRe, _ = config.CompileHostPatterns([]string{`pkg\.test`}) // remove cdn.test
 	var layer string
 	for d := range pass.img.Blobs {
 		layer = d
@@ -135,7 +136,7 @@ func TestUnlistedRedirect(t *testing.T) {
 	}
 	resp, _ := pass.fetch(t, http.MethodGet, "/v2/team/app/blobs/"+layer, nil)
 	if !strings.HasPrefix(resp.PassLocation, "https://cdn.test/blobs/") || resp.StatusCode != http.StatusTemporaryRedirect {
-		t.Fatalf("白名单外应原样交给客户端：%+v", resp)
+		t.Fatalf("outside the allowlist, it should be passed to the client as is: %+v", resp)
 	}
 
 	deny := newEnv(t, "    unlisted_redirect: deny\n")
@@ -144,7 +145,7 @@ func TestUnlistedRedirect(t *testing.T) {
 	_, err := deny.up.Fetch(context.Background(), Request{Method: http.MethodGet, Path: "/v2/team/app/blobs/" + layer, Header: http.Header{}, Repo: "team/app"})
 	var re *RedirectError
 	if !errors.As(err, &re) || re.Host != "cdn.test" {
-		t.Fatalf("deny 时应返回 RedirectError：%v", err)
+		t.Fatalf("deny should return a RedirectError: %v", err)
 	}
 
 	zero := newEnv(t, "")
@@ -152,12 +153,13 @@ func TestUnlistedRedirect(t *testing.T) {
 	zero.up.maxRedirects = 0
 	resp, _ = zero.fetch(t, http.MethodGet, "/v2/team/app/blobs/"+layer, nil)
 	if resp.PassLocation == "" {
-		t.Fatal("超过跳数应交给客户端")
+		t.Fatal("beyond the hop limit, it should be passed to the client")
 	}
 }
 
 func TestChallengeAfterRedirect(t *testing.T) {
-	// 模拟 registry.k8s.io：manifest 先 307 到 pkg.test，那边才要求令牌
+	// Simulates registry.k8s.io: the manifest first redirects with 307 to pkg.test, which is where a token is
+	// required
 	e := newEnv(t, `    credentials:
       username: bot
       password: {env: TEST_PW}
@@ -167,15 +169,15 @@ func TestChallengeAfterRedirect(t *testing.T) {
 	e.reg.ServeManifestHost(t, e.net, "pkg.test")
 	resp, body := e.fetch(t, http.MethodGet, "/v2/team/app/manifests/v1", nil)
 	if resp.StatusCode != 200 || !bytes.Equal(body, e.img.Index) {
-		t.Fatalf("应在跳转后按 pkg.test 的质询取令牌：%d %s", resp.StatusCode, body)
+		t.Fatalf("should fetch a token for pkg.test's challenge after the redirect: %d %s", resp.StatusCode, body)
 	}
 	if len(resp.Hops) != 1 || resp.Hops[0] != "pkg.test" {
 		t.Fatalf("hops = %v", resp.Hops)
 	}
 	if e.reg.AuthCount("auth.test") != 0 {
-		t.Fatal("跟随重定向时取令牌不能用配置的账号")
+		t.Fatal("fetching a token while following a redirect must not use the configured account")
 	}
-	// 发给 registry 本身的请求才用账号
+	// Only requests to the registry itself use the account
 	var layer string
 	for d := range e.img.Blobs {
 		layer = d
@@ -184,7 +186,7 @@ func TestChallengeAfterRedirect(t *testing.T) {
 	e.reg.CDNHost = ""
 	e.fetch(t, http.MethodGet, "/v2/team/app/blobs/"+layer, nil)
 	if e.reg.AuthCount("auth.test") != 1 {
-		t.Fatalf("向 registry 取令牌时应带上账号：%d", e.reg.AuthCount("auth.test"))
+		t.Fatalf("fetching a token for the registry should use the account: %d", e.reg.AuthCount("auth.test"))
 	}
 }
 
@@ -193,10 +195,10 @@ func TestRealmNotAllowed(t *testing.T) {
 	e.up.realmRe, _ = config.CompileHostPatterns([]string{`other\.test`})
 	resp, _ := e.fetch(t, http.MethodGet, "/v2/team/app/manifests/v1", nil)
 	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("令牌服务不在白名单时应返回上游的 401：%d", resp.StatusCode)
+		t.Fatalf("should return the upstream's 401 when the token service is not in the allowlist: %d", resp.StatusCode)
 	}
 	if e.reg.Count("GET auth.test token") != 0 {
-		t.Fatal("不应访问白名单外的令牌服务")
+		t.Fatal("should not contact a token service outside the allowlist")
 	}
 }
 
@@ -205,7 +207,7 @@ func TestNoLocation(t *testing.T) {
 	e.reg.Fail["registry.test /v2/team/app/manifests/x"] = testutil.FailWith{Status: 307}
 	_, err := e.up.Fetch(context.Background(), Request{Method: http.MethodGet, Path: "/v2/team/app/manifests/x", Header: http.Header{}, Repo: "team/app"})
 	if !errors.Is(err, ErrNoLocation) {
-		t.Fatalf("没有 Location 应报错：%v", err)
+		t.Fatalf("a missing Location should be an error: %v", err)
 	}
 }
 
@@ -228,7 +230,7 @@ func TestHostAllowed(t *testing.T) {
 			t.Fatal(err)
 		}
 		if got := hostAllowed(u, re); got != want {
-			t.Errorf("%s：期望 %v，实际 %v", raw, want, got)
+			t.Errorf("%s: want %v, got %v", raw, want, got)
 		}
 	}
 }
@@ -242,13 +244,13 @@ func TestBlocked(t *testing.T) {
 		"8.8.8.8": false, "104.16.0.1": false, "2606:4700::1": false, "::ffff:8.8.8.8": false,
 	} {
 		if got := Blocked(netip.MustParseAddr(s)); got != want {
-			t.Errorf("%s：期望 %v，实际 %v", s, want, got)
+			t.Errorf("%s: want %v, got %v", s, want, got)
 		}
 	}
 }
 
 func TestDialGuardBlocksLoopback(t *testing.T) {
-	// 不替换拨号：用真正的拨号器连本机，应被拦下
+	// No dial replacement: connecting to this machine with the real dialler should be blocked
 	n := testutil.NewNet(t)
 	srv := n.Serve(t, http.NotFoundHandler(), "localhost")
 	res, err := config.Parse(nil)
@@ -264,12 +266,12 @@ func TestDialGuardBlocksLoopback(t *testing.T) {
 	_, err = up.Fetch(context.Background(), Request{Method: http.MethodGet, Path: "/v2/", Header: http.Header{}})
 	var be *BlockedError
 	if !errors.As(err, &be) {
-		t.Fatalf("连本机应被拦下：%v", err)
+		t.Fatalf("connecting to this machine should be blocked: %v", err)
 	}
 }
 
 func TestBreakerOpensAndRelayFailsFast(t *testing.T) {
-	n := testutil.NewNet(t) // 网络里没有 down.test：每次拨号都失败
+	n := testutil.NewNet(t) // down.test is not in the network: every dial fails
 	res, err := config.Parse([]byte(`
 proxy:
   breaker_failures: 3
@@ -290,15 +292,15 @@ upstreams:
 	req := Request{Method: http.MethodGet, Path: "/v2/x/manifests/latest", Header: http.Header{}, Repo: "x"}
 	for i := 0; i < 3; i++ {
 		if _, err := up.Fetch(context.Background(), req); err == nil {
-			t.Fatal("连不上的上游应报错")
+			t.Fatal("an unreachable upstream should be an error")
 		}
 	}
 	_, err = up.Fetch(context.Background(), req)
 	var co *CircuitOpenError
 	if !errors.As(err, &co) || co.RetryAfter <= 0 || !up.BreakerOpen() {
-		t.Fatalf("连续失败 3 次后应熔断：%v", err)
+		t.Fatalf("the breaker should open after 3 consecutive failures: %v", err)
 	}
-	// 客户端自己取消的请求不计入失败
+	// Requests the client cancels itself do not count as failures
 	other := pool.Get("docker.io")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -306,7 +308,7 @@ upstreams:
 		_, _ = other.Fetch(ctx, req)
 	}
 	if other.BreakerOpen() {
-		t.Fatal("客户端取消的请求不应触发熔断")
+		t.Fatal("requests cancelled by the client should not open the breaker")
 	}
 }
 
@@ -321,7 +323,7 @@ func TestPrivateNetworkUpstreamWithCAFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	yaml := "upstreams:\n  lab.example:\n    registry: \"" + srv.Listener.Addr().String() + "\"\n    tls_ca_file: \"" + filepath.ToSlash(caFile) + "\"\n"
-	// 不允许内网：拨号被拦下
+	// Private networks not allowed: the dial is blocked
 	res, err := config.Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
@@ -330,9 +332,9 @@ func TestPrivateNetworkUpstreamWithCAFile(t *testing.T) {
 	_, err = pool.Get("lab.example").Fetch(context.Background(), Request{Method: http.MethodHead, Path: "/v2/team/app/manifests/v1", Header: http.Header{}, Repo: "team/app"})
 	var be *BlockedError
 	if !errors.As(err, &be) {
-		t.Fatalf("默认应拒绝连内网：%v", err)
+		t.Fatalf("connecting to a private network should be refused by default: %v", err)
 	}
-	// 允许内网，并信任 tls_ca_file 里的 CA
+	// Allow private networks and trust the CA in tls_ca_file
 	res, err = config.Parse([]byte(yaml + "    allow_private_network: true\n"))
 	if err != nil {
 		t.Fatal(err)
@@ -340,12 +342,12 @@ func TestPrivateNetworkUpstreamWithCAFile(t *testing.T) {
 	pool, _ = NewPool(res.Config, Options{Log: slog.New(slog.DiscardHandler)})
 	resp, err := pool.Get("lab.example").Fetch(context.Background(), Request{Method: http.MethodHead, Path: "/v2/team/app/manifests/v1", Header: http.Header{}, Repo: "team/app"})
 	if err != nil || resp.StatusCode != 200 {
-		t.Fatalf("allow_private_network 后应能拉：%v %v", resp, err)
+		t.Fatalf("should be able to pull with allow_private_network: %v %v", resp, err)
 	}
 	resp.Body.Close()
-	// 其他上游仍然拒绝内网
+	// Other upstreams still refuse private networks
 	if pool.Get("docker.io").client == pool.Get("lab.example").client {
-		t.Fatal("放开内网的上游应使用单独的连接池")
+		t.Fatal("an upstream allowed to reach private networks should use a separate connection pool")
 	}
 }
 
@@ -369,14 +371,14 @@ func TestBlobsUseHTTP1(t *testing.T) {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 		if got := e.reg.Proto("registry.test manifest"); got != "HTTP/2.0" {
-			t.Errorf("manifest 应走 HTTP/2：%s", got)
+			t.Errorf("manifests should use HTTP/2: %s", got)
 		}
 		want := "HTTP/1.1"
 		if h2 {
 			want = "HTTP/2.0"
 		}
 		if got := e.reg.Proto("cdn.test blob"); got != want {
-			t.Errorf("blob_http2=%v 时镜像层应走 %s：%s", h2, want, got)
+			t.Errorf("with blob_http2=%v layers should use %s: %s", h2, want, got)
 		}
 	}
 }

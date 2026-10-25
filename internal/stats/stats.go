@@ -1,9 +1,12 @@
-// Package stats 汇总访问统计，给管理后台和 API 用。全部在内存里、有上限：
-//   - 最近 24 小时每分钟一格的计数；
-//   - 当前小时的热门镜像、热门客户端，以及"同一客户端反复完整下载同一层"（space-saving 算法，只记前若干名）；
-//   - 最近 5000 条请求的摘要（环形缓冲）。
+// Package stats aggregates access statistics for the admin console and the API. Everything is kept in
+// memory, with limits:
+//   - per-minute counters for the last 24 hours;
+//   - the current hour's top images, top clients, and "the same client fully downloading the same
+//     layer again and again" (space-saving algorithm, only the top entries are kept);
+//   - summaries of the last 5000 requests (ring buffer).
 //
-// 每过一个小时，把这一小时的汇总写进运营数据库，后台可以看更长时间的历史。
+// At the end of each hour that hour's summary is written to the operational database, so the console
+// can show a longer history.
 package stats
 
 import (
@@ -25,9 +28,9 @@ const (
 	topSize    = 256
 )
 
-// Minute 是一分钟的计数。
+// Minute holds the counters for one minute.
 type Minute struct {
-	Start     int64  `json:"start"` // unix 秒，整分钟
+	Start     int64  `json:"start"` // unix seconds, on the minute
 	Requests  uint64 `json:"requests"`
 	Bytes     uint64 `json:"bytes"`
 	Status4xx uint64 `json:"status_4xx"`
@@ -45,7 +48,7 @@ func (m *Minute) add(o Minute) {
 	m.CacheHits += o.CacheHits
 }
 
-// Request 是一条请求的摘要。
+// Request is the summary of one request.
 type Request struct {
 	Time     time.Time `json:"time"`
 	ClientIP string    `json:"client_ip"`
@@ -63,7 +66,7 @@ type Request struct {
 	Error    string    `json:"error,omitempty"`
 }
 
-// Hour 是写进运营数据库的一小时汇总。
+// Hour is the one-hour summary written to the operational database.
 type Hour struct {
 	Start   int64  `json:"start"`
 	Totals  Minute `json:"totals"`
@@ -72,25 +75,25 @@ type Hour struct {
 	Repeats []Item `json:"repeats"`
 }
 
-// Collector 实现了 relay 的 AccessLogger。
+// Collector implements relay's AccessLogger.
 type Collector struct {
 	mu      sync.Mutex
 	ring    [minutes]Minute
-	hour    int64 // 当前小时（unix 秒）
+	hour    int64 // current hour (unix seconds)
 	hourTot Minute
 	images  *TopK
 	clients *TopK
 	repeats *TopK
 	recent  []Request
 	pos     int
-	unlist  map[string]int       // "上游 主机" → 白名单外的重定向次数
-	seen    map[string]time.Time // 客户端账号 → 最后一次请求的时间（自启动以来）
-	hits    map[string]uint64    // 镜像规则 → 拒绝的次数（自启动以来）
+	unlist  map[string]int       // "upstream host" → number of redirects outside the allowlist
+	seen    map[string]time.Time // client account → time of its last request (since start)
+	hits    map[string]uint64    // image rule → number of refusals (since start)
 	store   store.Store
 	now     func() time.Time
 }
 
-// New 创建 Collector。store 可以为 nil（不落盘）。
+// New creates a Collector. store may be nil (nothing is persisted).
 func New(s store.Store) *Collector {
 	c := &Collector{images: NewTopK(topSize), clients: NewTopK(topSize), repeats: NewTopK(topSize),
 		recent: make([]Request, 0, recentSize), unlist: map[string]int{}, seen: map[string]time.Time{}, hits: map[string]uint64{},
@@ -99,7 +102,7 @@ func New(s store.Store) *Collector {
 	return c
 }
 
-// Log 记一次请求。
+// Log records one request.
 func (c *Collector) Log(e *accesslog.Entry) {
 	t := e.Time
 	if t.IsZero() {
@@ -139,7 +142,7 @@ func (c *Collector) Log(e *accesslog.Entry) {
 			c.seen[e.UserID] = t
 		}
 	}
-	// 完整下载了一个层（实际字节数等于 Content-Length）
+	// A layer was fully downloaded (the actual byte count equals Content-Length)
 	if e.Kind == "blob" && e.Status == 200 && e.Size > 0 && e.RespContentLength == strconv.FormatInt(e.Size, 10) {
 		c.repeats.Add(e.ClientIP+" "+e.Image+"@"+e.Ref, 1, e.Size)
 	}
@@ -163,7 +166,8 @@ func truncate(s string, n int) string {
 	return s[:n]
 }
 
-// UnlistedRedirect 记一次白名单外、交给了客户端的重定向（后台据此建议补充白名单）。
+// UnlistedRedirect records a redirect outside the allowlist that was handed to the client (the console
+// uses this to suggest additions to the allowlist).
 func (c *Collector) UnlistedRedirect(upstream, host string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -173,10 +177,11 @@ func (c *Collector) UnlistedRedirect(upstream, host string) {
 	}
 }
 
-// maxTracked 是账号最后使用时间、规则命中次数各自最多记多少项。
+// maxTracked is the maximum number of entries kept for account last-used times and for rule hit
+// counts, each.
 const maxTracked = 10000
 
-// RuleHit 记一次镜像规则的拒绝。
+// RuleHit records one refusal by an image rule.
 func (c *Collector) RuleHit(rule string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -185,7 +190,7 @@ func (c *Collector) RuleHit(rule string) {
 	}
 }
 
-// RuleHits 返回各镜像规则拒绝的次数（自启动以来）。
+// RuleHits returns the number of refusals by each image rule (since start).
 func (c *Collector) RuleHits() map[string]uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -196,7 +201,7 @@ func (c *Collector) RuleHits() map[string]uint64 {
 	return out
 }
 
-// LastSeen 返回各客户端账号最后一次请求的时间（自启动以来）。
+// LastSeen returns the time of each client account's last request (since start).
 func (c *Collector) LastSeen() map[string]time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -207,7 +212,7 @@ func (c *Collector) LastSeen() map[string]time.Time {
 	return out
 }
 
-// Unlisted 返回白名单外的重定向主机：上游 → 主机 → 次数。
+// Unlisted returns the redirect hosts outside the allowlist: upstream → host → count.
 func (c *Collector) Unlisted() map[string]map[string]int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -222,7 +227,8 @@ func (c *Collector) Unlisted() map[string]map[string]int {
 	return out
 }
 
-// rotate 跨过整点时，把上一小时的汇总存起来，开始新的一小时。调用方持锁。
+// rotate, when the hour boundary is crossed, saves the previous hour's summary and starts a new hour.
+// The caller holds the lock.
 func (c *Collector) rotate(t time.Time) {
 	h := t.Truncate(time.Hour).Unix()
 	if h <= c.hour {
@@ -248,14 +254,15 @@ func (c *Collector) saveHourLocked() {
 	_ = c.store.SaveHour(time.Unix(c.hour, 0), b)
 }
 
-// Flush 把当前小时（未结束的）也存一次，退出时调用。
+// Flush also saves the current (unfinished) hour; it is called on exit.
 func (c *Collector) Flush() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.saveHourLocked()
 }
 
-// Run 每分钟检查一次是否跨过整点（没有请求时也能及时存档），直到 ctx 结束。
+// Run checks once a minute whether the hour boundary has been crossed (so the hour is saved promptly
+// even when there are no requests), until ctx is done.
 func (c *Collector) Run(ctx context.Context) {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
@@ -272,14 +279,15 @@ func (c *Collector) Run(ctx context.Context) {
 	}
 }
 
-// Series 返回从 since 起每分钟的计数（没有请求的分钟也给出，计数为 0）。
+// Series returns the per-minute counters from since onwards (minutes without requests are included,
+// with zero counts).
 func (c *Collector) Series(since time.Time) []Minute {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now().Unix() / 60 * 60
 	from := max(since.Unix()/60*60, now-(minutes-1)*60)
 	if from > now {
-		return nil // since 在将来（时钟回拨）
+		return nil // since is in the future (the clock went backwards)
 	}
 	out := make([]Minute, 0, (now-from)/60+1)
 	for s := from; s <= now; s += 60 {
@@ -292,7 +300,7 @@ func (c *Collector) Series(since time.Time) []Minute {
 	return out
 }
 
-// Summary 是一段时间的汇总和排行。
+// Summary holds the totals and rankings for a period.
 type Summary struct {
 	Totals  Minute `json:"totals"`
 	Images  []Item `json:"images"`
@@ -300,7 +308,8 @@ type Summary struct {
 	Repeats []Item `json:"repeats"`
 }
 
-// Summarize 汇总最近 d（按整小时，当前小时算进去），排行取前 n。
+// Summarize aggregates the last d (in whole hours, including the current hour) and keeps the top n of
+// each ranking.
 func (c *Collector) Summarize(d time.Duration, n int) Summary {
 	c.mu.Lock()
 	cur := c.snapshotLocked()
@@ -334,11 +343,11 @@ func (c *Collector) Summarize(d time.Duration, n int) Summary {
 	return s
 }
 
-// Filter 是查询最近请求的条件，空字段不过滤。
+// Filter holds the conditions for querying recent requests; empty fields do not filter.
 type Filter struct {
 	ClientIP, Upstream, Image string
-	Query                     string // 在 URI、User-Agent、客户端 IP、镜像里找，或等于账号名
-	Status                    int    // 0 表示不限；4 表示 4xx，5 表示 5xx
+	Query                     string // found in the URI, User-Agent, client IP or image, or equal to the account name
+	Status                    int    // 0 means any; 4 means 4xx, 5 means 5xx
 }
 
 func (f Filter) match(r *Request) bool {
@@ -360,7 +369,7 @@ func (f Filter) match(r *Request) bool {
 	return true
 }
 
-// Recent 返回最近的请求，最新的在前。
+// Recent returns the recent requests, newest first.
 func (c *Collector) Recent(f Filter, limit int) []Request {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -375,20 +384,22 @@ func (c *Collector) Recent(f Filter, limit int) []Request {
 	return out
 }
 
-// Item 是排行里的一项。Count 和 Bytes 是估计值：被挤出又重新进入时会带上被替换项的计数（space-saving 的上界）。
+// Item is one entry in a ranking. Count and Bytes are estimates: an entry that was pushed out and
+// comes back in inherits the counts of the entry it replaces (the space-saving upper bound).
 type Item struct {
 	Key   string `json:"key"`
 	Count uint64 `json:"count"`
 	Bytes int64  `json:"bytes"`
 }
 
-// TopK 只记前 k 名（按字节数，相同时按次数）。满了以后新出现的项替换最小的一项。
+// TopK keeps only the top k entries (by bytes, then by count on ties). Once it is full, a new entry
+// replaces the smallest one.
 type TopK struct {
 	k     int
 	items map[string]*Item
 }
 
-// NewTopK 创建排行。
+// NewTopK creates a ranking.
 func NewTopK(k int) *TopK { return &TopK{k: k, items: make(map[string]*Item, k)} }
 
 func less(a, b *Item) bool {
@@ -398,7 +409,7 @@ func less(a, b *Item) bool {
 	return a.Count < b.Count
 }
 
-// Add 计入一次。
+// Add counts one occurrence.
 func (t *TopK) Add(key string, count uint64, bytes int64) {
 	if it, ok := t.items[key]; ok {
 		it.Count += count
@@ -419,7 +430,7 @@ func (t *TopK) Add(key string, count uint64, bytes int64) {
 	t.items[key] = &Item{Key: key, Count: minIt.Count + count, Bytes: minIt.Bytes + bytes}
 }
 
-// Top 返回前 n 名。
+// Top returns the top n entries.
 func (t *TopK) Top(n int) []Item {
 	out := make([]Item, 0, len(t.items))
 	for _, it := range t.items {

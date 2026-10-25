@@ -7,12 +7,13 @@ import (
 	"net/http"
 )
 
-// Puller 是一个最小的拉取客户端：沿 index → manifest → config → 层一路拉下来，校验每个 digest。
+// Puller is a minimal pull client: it pulls index → manifest → config → layers in turn and verifies
+// every digest.
 type Puller struct {
-	Base   string // 如 http://127.0.0.1:12345
-	Host   string // 请求的 Host 头
+	Base   string // e.g. http://127.0.0.1:12345
+	Host   string // Host header of the requests
 	Client *http.Client
-	Header http.Header // 每个请求额外带的头
+	Header http.Header // extra headers sent with every request
 }
 
 func (p *Puller) get(path, accept string) (*http.Response, error) {
@@ -45,18 +46,18 @@ func (p *Puller) fetch(path, accept, want string) ([]byte, error) {
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s：状态 %d：%s", path, resp.StatusCode, b)
+		return nil, fmt.Errorf("%s: status %d: %s", path, resp.StatusCode, b)
 	}
 	if want != "" && Digest(b) != want {
-		return nil, fmt.Errorf("%s：digest %s，期望 %s", path, Digest(b), want)
+		return nil, fmt.Errorf("%s: digest %s, want %s", path, Digest(b), want)
 	}
 	if d := resp.Header.Get("Docker-Content-Digest"); d != "" && d != Digest(b) {
-		return nil, fmt.Errorf("%s：Docker-Content-Digest %s 和内容不符", path, d)
+		return nil, fmt.Errorf("%s: Docker-Content-Digest %s does not match the content", path, d)
 	}
 	return b, nil
 }
 
-// Pull 拉取 name:ref 的所有平台，返回 index 的 digest 和拉到的字节数。
+// Pull pulls every platform of name:ref and returns the index digest and the number of bytes pulled.
 func (p *Puller) Pull(name, ref string) (string, int64, error) {
 	idx, err := p.fetch("/v2/"+name+"/manifests/"+ref, MediaIndex+", "+MediaManifest, "")
 	if err != nil {

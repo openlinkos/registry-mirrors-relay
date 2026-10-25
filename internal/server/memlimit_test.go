@@ -30,7 +30,7 @@ func TestCgroupLimit(t *testing.T) {
 			return nil, errors.New("no such file")
 		}
 		if got, _ := cgroupLimit(); got != c.want {
-			t.Errorf("%v：期望 %d，实际 %d", c.files, c.want, got)
+			t.Errorf("%v: want %d, got %d", c.files, c.want, got)
 		}
 	}
 }
@@ -46,13 +46,13 @@ func TestSetMemoryLimit(t *testing.T) {
 	}
 	t.Setenv("GOMEMLIMIT", "")
 	if got := SetMemoryLimit(slog.New(slog.DiscardHandler)); got != 900000000 {
-		t.Fatalf("应设为上限的 90%%：%d", got)
+		t.Fatalf("should be set to 90%% of the limit: %d", got)
 	}
 	if cur := debug.SetMemoryLimit(-1); cur != 900000000 {
-		t.Fatalf("运行时的上限：%d", cur)
+		t.Fatalf("runtime limit: %d", cur)
 	}
 	t.Setenv("GOMEMLIMIT", "256MiB")
 	if got := SetMemoryLimit(slog.New(slog.DiscardHandler)); got != 0 {
-		t.Fatal("已设 GOMEMLIMIT 环境变量时不应覆盖")
+		t.Fatal("should not override an existing GOMEMLIMIT environment variable")
 	}
 }

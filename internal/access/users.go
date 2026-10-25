@@ -1,5 +1,6 @@
-// Package access 是访问控制：客户端账号（HTTP Basic）、IP 黑白名单和临时封禁、镜像黑白名单。
-// 规则来自配置文件和运营数据库，合并后整体替换；校验口令的缓存跨替换保留。
+// Package access is access control: client accounts (HTTP Basic), IP allow and deny lists with temporary
+// bans, and image allow and deny lists. Rules come from the configuration file and the operational database,
+// are merged and replaced as a whole; the password check cache survives replacement.
 package access
 
 import (
@@ -19,17 +20,17 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/lru"
 )
 
-// User 是一个客户端账号。
+// User is a client account.
 type User struct {
 	Name        string
 	Hash        []byte // bcrypt
 	Disabled    bool
-	Source      string  // config（来自 users_file）或 store（来自运营数据库）
-	ManifestRPS float64 // 单独的限流，0 表示用默认值
+	Source      string  // config (from users_file) or store (from the operational database)
+	ManifestRPS float64 // per-account rate limit, 0 means the default
 	BlobStreams int
 }
 
-// ValidHash 判断是不是 bcrypt 哈希。其他格式（MD5、SHA1、明文）一律不接受。
+// ValidHash reports whether h is a bcrypt hash. Other formats (MD5, SHA1, plain text) are never accepted.
 func ValidHash(h string) bool {
 	if !strings.HasPrefix(h, "$2a$") && !strings.HasPrefix(h, "$2b$") && !strings.HasPrefix(h, "$2y$") {
 		return false
@@ -38,7 +39,8 @@ func ValidHash(h string) bool {
 	return err == nil
 }
 
-// ParseHtpasswd 读取 htpasswd 文件：每行 用户名:bcrypt 哈希，# 开头的行和空行忽略。
+// ParseHtpasswd reads an htpasswd file: one username:bcrypt-hash per line; lines starting with # and empty
+// lines are ignored.
 func ParseHtpasswd(r io.Reader) ([]User, error) {
 	var out []User
 	seen := map[string]bool{}
@@ -52,13 +54,13 @@ func ParseHtpasswd(r io.Reader) ([]User, error) {
 		}
 		name, hash, ok := strings.Cut(t, ":")
 		if !ok || name == "" {
-			return nil, fmt.Errorf("第 %d 行：应写成 用户名:哈希", line)
+			return nil, fmt.Errorf("line %d: expected username:hash", line)
 		}
 		if !ValidHash(hash) {
-			return nil, fmt.Errorf("第 %d 行（%s）：只接受 bcrypt 哈希，可以用 registry-mirrors-relay hash-password 生成", line, name)
+			return nil, fmt.Errorf("line %d (%s): only bcrypt hashes are accepted; generate one with registry-mirrors-relay hash-password", line, name)
 		}
 		if seen[name] {
-			return nil, fmt.Errorf("第 %d 行：用户 %s 重复", line, name)
+			return nil, fmt.Errorf("line %d: duplicate user %s", line, name)
 		}
 		seen[name] = true
 		out = append(out, User{Name: name, Hash: []byte(hash), Source: "config"})
@@ -66,9 +68,11 @@ func ParseHtpasswd(r io.Reader) ([]User, error) {
 	return out, s.Err()
 }
 
-// Authenticator 校验口令。bcrypt 每次要几十毫秒，所以：
-//   - 校验成功的结果按 HMAC(进程密钥, 用户名、口令、哈希) 缓存 10 分钟，改了口令或哈希自然失效；
-//   - 同时在跑的 bcrypt 不超过 CPU 核数，排不上就直接拒绝（防止用登录请求把 CPU 吃满）。
+// Authenticator checks passwords. Each bcrypt check takes tens of milliseconds, so:
+//   - successful checks are cached for 10 minutes under HMAC(process key, username, password, hash), so a
+//     changed password or hash invalidates them naturally;
+//   - no more bcrypt checks run at once than there are CPU cores, and a check that cannot get a slot is
+//     rejected outright (so sign-in requests cannot saturate the CPU).
 type Authenticator struct {
 	key   []byte
 	cache *lru.Cache[[32]byte, time.Time]
@@ -77,7 +81,7 @@ type Authenticator struct {
 	now   func() time.Time
 }
 
-// NewAuthenticator 创建校验器。
+// NewAuthenticator creates an Authenticator.
 func NewAuthenticator() *Authenticator {
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
@@ -92,13 +96,14 @@ func NewAuthenticator() *Authenticator {
 	}
 }
 
-// ErrBusy 表示同时校验的口令太多。
-var ErrBusy = errors.New("同时校验的口令太多")
+// ErrBusy means too many passwords are being checked at once.
+var ErrBusy = errors.New("too many concurrent password checks")
 
-// Verify 校验 user 的口令。返回 ErrBusy 时调用方应返回 503（不算一次登录失败）。
+// Verify checks the user's password. When it returns ErrBusy, the caller should return 503 (this does not
+// count as a failed sign-in).
 func (a *Authenticator) Verify(u *User, password string) (bool, error) {
 	if u == nil || u.Disabled {
-		// 用户不存在也做一次等价的 bcrypt，避免按耗时区分用户是否存在
+		// Run an equivalent bcrypt even if the user does not exist, so timing does not reveal whether it exists
 		a.dummy(password)
 		return false, nil
 	}
@@ -126,7 +131,8 @@ func (a *Authenticator) Verify(u *User, password string) (bool, error) {
 	return true, nil
 }
 
-// dummyHash 是一个固定口令的 bcrypt 哈希（cost 12），只用来让"用户不存在"和"口令错误"耗时相近。
+// dummyHash is a bcrypt hash of a fixed password (cost 12), used only to make "user does not exist" and
+// "wrong password" take a similar time.
 var dummyHash = func() []byte {
 	h, _ := bcrypt.GenerateFromPassword([]byte("registry-mirrors-relay"), 12)
 	return h

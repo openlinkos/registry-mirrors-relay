@@ -8,26 +8,27 @@ import (
 	"time"
 )
 
-// Ban 是一次临时封禁。
+// Ban is a temporary ban.
 type Ban struct {
 	Prefix netip.Prefix
 	Until  time.Time
 	Reason string
 }
 
-// IPRules 决定一个客户端 IP 能不能访问。不可变。
+// IPRules decides whether a client IP may access the service. Immutable.
 type IPRules struct {
 	allow []netip.Prefix
 	deny  []netip.Prefix
 	bans  []Ban
 }
 
-// NewIPRules 创建规则。allow 为空表示不限制来源。
+// NewIPRules creates the rules. An empty allow means no restriction on source addresses.
 func NewIPRules(allow, deny []netip.Prefix, bans []Ban) *IPRules {
 	return &IPRules{allow: allow, deny: deny, bans: bans}
 }
 
-// Decide 返回是否允许，以及拒绝的原因（写进日志，不返回给客户端）。
+// Decide returns whether access is allowed, and the reason for a denial (written to the log, not returned to
+// the client).
 func (r *IPRules) Decide(ip netip.Addr, now time.Time) (bool, string) {
 	if r == nil {
 		return true, ""
@@ -54,20 +55,21 @@ func (r *IPRules) Decide(ip netip.Addr, now time.Time) (bool, string) {
 	return false, "ip_allow"
 }
 
-// ImageRule 是一条编译好的镜像规则。
+// ImageRule is a compiled image rule.
 type ImageRule struct {
 	Pattern string
-	Status  int // 禁止规则的状态码：403 或 451
+	Status  int // status code of a deny rule: 403 or 451
 	Message string
 	re      *regexp.Regexp
 }
 
-// CompileImagePattern 把带上游的通配写法编译成正则：* 匹配一段里的任意字符，** 匹配任意多段（含零段），
-// 第一段写 * 表示任意上游。例如 ghcr.io/evil/**、*/library/nginx、docker.io/bitnami/*。
+// CompileImagePattern compiles a wildcard pattern that starts with the upstream into a regular expression:
+// * matches any characters within one segment, ** matches any number of segments (including zero), and * as
+// the first segment means any upstream. For example ghcr.io/evil/**, */library/nginx, docker.io/bitnami/*.
 func CompileImagePattern(p string) (*regexp.Regexp, error) {
 	segs := strings.Split(p, "/")
 	if len(segs) < 2 {
-		return nil, fmt.Errorf("%q 要写全上游", p)
+		return nil, fmt.Errorf("%q must start with the upstream", p)
 	}
 	var b strings.Builder
 	b.WriteString("^")
@@ -75,12 +77,12 @@ func CompileImagePattern(p string) (*regexp.Regexp, error) {
 		switch s {
 		case "**":
 			if i == 0 {
-				return nil, fmt.Errorf("%q：上游那一段不能写 **", p)
+				return nil, fmt.Errorf("%q: the upstream segment cannot be **", p)
 			}
 			b.WriteString("(?:/.*)?")
 			continue
 		case "":
-			return nil, fmt.Errorf("%q 里有空的段", p)
+			return nil, fmt.Errorf("%q has an empty segment", p)
 		}
 		if i > 0 {
 			b.WriteString("/")
@@ -89,7 +91,7 @@ func CompileImagePattern(p string) (*regexp.Regexp, error) {
 			b.WriteString(regexp.QuoteMeta(strings.ToLower(part)))
 			b.WriteString("[^/]*")
 		}
-		// 去掉最后多加的 [^/]*
+		// Remove the extra trailing [^/]*
 		str := b.String()
 		b.Reset()
 		b.WriteString(strings.TrimSuffix(str, "[^/]*"))
@@ -98,13 +100,13 @@ func CompileImagePattern(p string) (*regexp.Regexp, error) {
 	return regexp.Compile(b.String())
 }
 
-// ImageRules 决定一个镜像能不能拉。不可变。
+// ImageRules decides whether an image may be pulled. Immutable.
 type ImageRules struct {
 	allow []*regexp.Regexp
 	deny  []ImageRule
 }
 
-// NewImageRules 编译规则。allow 为空表示不限制。
+// NewImageRules compiles the rules. An empty allow means no restriction.
 func NewImageRules(allow []string, deny []ImageRule) (*ImageRules, error) {
 	r := &ImageRules{}
 	for _, p := range allow {
@@ -128,7 +130,8 @@ func NewImageRules(allow []string, deny []ImageRule) (*ImageRules, error) {
 	return r, nil
 }
 
-// Decide 判断完整的镜像名（上游/仓库，如 docker.io/library/nginx）。不允许时返回状态码和给客户端看的说明。
+// Decide checks a full image name (upstream/repository, such as docker.io/library/nginx). When the image is
+// not allowed, it returns the status code and a message for the client.
 func (r *ImageRules) Decide(full string) (ok bool, status int, message string, rule string) {
 	if r == nil {
 		return true, 0, "", ""
@@ -138,7 +141,7 @@ func (r *ImageRules) Decide(full string) (ok bool, status int, message string, r
 		if d.re.MatchString(full) {
 			msg := d.Message
 			if msg == "" {
-				msg = "这个镜像不能通过本服务拉取"
+				msg = "this image cannot be pulled through this service"
 			}
 			return false, d.Status, msg, d.Pattern
 		}
@@ -151,5 +154,5 @@ func (r *ImageRules) Decide(full string) (ok bool, status int, message string, r
 			return true, 0, "", ""
 		}
 	}
-	return false, 403, "本服务只允许拉取指定的镜像", "allow"
+	return false, 403, "this service only allows pulling specified images", "allow"
 }

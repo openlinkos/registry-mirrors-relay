@@ -1,8 +1,13 @@
-// Package app 把配置和运营数据组装成一份不可变的 Runtime，并在配置文件或运营数据变化时整体替换（热重载）。
-// 后台对配置的修改存在运营数据库里，叠加在配置文件之上，见 overrides.go。
+// Package app assembles the configuration and the operational data into one immutable Runtime and
+// replaces it as a whole when the configuration file or the operational data changes (hot reload).
+// Console overrides are stored in the operational database and layered on top of the configuration
+// file; see overrides.go.
 //
-// 替换时尽量保留状态：上游和代理设置没变就沿用原来的连接池（令牌缓存随之保留），缓存设置没变就沿用 manifest 缓存；
-// 限流计数、口令校验缓存、统计一直保留。监听地址、TLS、运营数据的存储方式这类改动要重启才能生效，会在日志里提示。
+// Replacing keeps as much state as possible: when the upstream and proxy settings are unchanged the old
+// connection pool is reused (and with it the token cache), and when the cache settings are unchanged the
+// manifest cache is reused; rate limit counters, the password check cache and the statistics are always
+// kept. Changes such as the listen addresses, TLS or how the operational data is stored take effect only
+// after a restart, which is noted in the log.
 package app
 
 import (
@@ -41,14 +46,15 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/web"
 )
 
-// Token 是一个管理 API 令牌的身份。
+// Token is the identity of a management API token.
 type Token struct {
 	Name   string
 	Role   string // admin | viewer
 	Source string // config | store
 }
 
-// Runtime 是某一时刻生效的全部设置。不可变，请求开始时取一次，整个请求都用它。
+// Runtime is all the settings in effect at one moment. It is immutable: a request takes it once at the
+// start and uses it throughout.
 type Runtime struct {
 	Config    *config.Config
 	Router    *route.Router
@@ -59,38 +65,39 @@ type Runtime struct {
 	Images    *access.ImageRules
 	Pool      *upstream.Pool
 	Manifests *manifest.Cache
-	Tokens    map[[32]byte]Token // SHA-256(令牌) → 身份
-	Data      store.Data         // 运营数据的快照（API 列表用）
-	Site      config.Site        // 生效的站点信息：后台设置过就用它，否则用配置文件的
-	Mgmt      MgmtPolicy         // 管理入口（后台、API、指标）的访问范围
+	Tokens    map[[32]byte]Token // SHA-256(token) → identity
+	Data      store.Data         // a snapshot of the operational data (for the API listings)
+	Site      config.Site        // the effective site information: the console's if set, else the configuration file's
+	Mgmt      MgmtPolicy         // who may reach the management entrance (console, API, metrics)
 	Built     time.Time
 
-	// FileConfig 是只按配置文件解析的配置（不含后台的修改），Config 是叠加了后台修改的、生效的配置
+	// FileConfig is the configuration parsed from the configuration file alone (without console
+	// overrides); Config is the effective configuration with the console overrides layered on top
 	FileConfig *config.Config
-	Overrides  []OverrideState // 后台对配置的修改和它们的状态
+	Overrides  []OverrideState // the console overrides and their states
 
 	poolKey, cacheKey string
 }
 
-// MgmtPolicy 是管理入口的访问范围，由 mgmt 包使用。
+// MgmtPolicy sets who may reach the management entrance; the mgmt package uses it.
 type MgmtPolicy struct {
-	Public       bool           // 后台和 API 对所有地址开放（admin.public）
-	Allow        []netip.Prefix // 直连时允许的对端（admin.allow）
-	ProxiedAllow []netip.Prefix // 经代理时允许的客户端（admin.proxied_allow）
-	PublicHost   string         // admin.public_url 的 Host，经代理访问时只认它
+	Public       bool           // the console and API are open to every address (admin.public)
+	Allow        []netip.Prefix // peers allowed on a direct connection (admin.allow)
+	ProxiedAllow []netip.Prefix // clients allowed when proxied (admin.proxied_allow)
+	PublicHost   string         // the Host of admin.public_url, the only one accepted when proxied
 }
 
-// Options 主要给测试用。
+// Options is mainly for tests.
 type Options struct {
-	ConfigPath string // 为空表示只用默认值，不监视文件
+	ConfigPath string // empty means defaults only, with no file to watch
 	Upstream   upstream.Options
 	Log        *slog.Logger
-	Store      store.Store // 为 nil 时按配置打开
-	// Hook 在每条访问记录写出时调用（测试里用来检查记录的内容）
+	Store      store.Store // opened as configured when nil
+	// Hook is called as each access log entry is written (tests use it to check the entries)
 	Hook func(*accesslog.Entry)
 }
 
-// App 持有跨越重载的状态。
+// App holds the state that survives reloads.
 type App struct {
 	log       *slog.Logger
 	opt       Options
@@ -103,26 +110,28 @@ type App struct {
 	Started   time.Time
 
 	rt      atomic.Pointer[Runtime]
-	mu      sync.Mutex // 串行化重载和后台对配置的修改；下面三项也由它保护
+	mu      sync.Mutex // serialises reloads and console overrides; also guards the three fields below
 	cfgHash [32]byte
-	fileRaw []byte // 配置文件的内容，后台修改配置时叠加在它上面
-	// warnings 是生效的配置的提醒，后台保存修改时只报新增的
+	fileRaw []byte // the content of the configuration file, which console overrides are layered on
+	// warnings are the warnings for the effective configuration; saving an override in the console
+	// reports only the new ones
 	warnings []string
 	reload   atomic.Pointer[ReloadStatus]
 
 	healthMu sync.Mutex
 	health   map[string]upstream.Health
-	probes   *status.History // 每小时的探测结果，给用法页的服务状态
+	probes   *status.History // hourly probe results, for the service status on the usage page
 }
 
-// ReloadStatus 是最近一次重载的结果。
+// ReloadStatus is the result of the last reload.
 type ReloadStatus struct {
 	Time    time.Time
 	Err     string
-	Restart []string // 需要重启才能生效的改动
+	Restart []string // changes that take effect only after a restart
 }
 
-// New 组装 App。res 是配置文件 raw 已经通过校验的解析结果；运营数据库里后台对配置的修改在这里叠加上去。
+// New assembles the App. res is the validated parse result of the configuration file raw; the console
+// overrides from the operational database are layered on here.
 func New(res *config.Result, raw []byte, opt Options) (*App, error) {
 	if opt.Log == nil {
 		opt.Log = slog.Default()
@@ -148,7 +157,7 @@ func New(res *config.Result, raw []byte, opt Options) (*App, error) {
 	}
 	al, err := accesslog.New(cfg.Log.Access)
 	if err != nil {
-		return nil, fmt.Errorf("访问日志：%w", err)
+		return nil, fmt.Errorf("access log: %w", err)
 	}
 	a.accessLog = al
 	a.Stats = stats.New(a.Store)
@@ -173,23 +182,24 @@ func New(res *config.Result, raw []byte, opt Options) (*App, error) {
 	return a, nil
 }
 
-// Runtime 返回当前生效的设置。
+// Runtime returns the settings currently in effect.
 func (a *App) Runtime() *Runtime { return a.rt.Load() }
 
-// ConfigPath 是配置文件的路径，只用默认值时为空。
+// ConfigPath is the path of the configuration file; it is empty when only defaults are used.
 func (a *App) ConfigPath() string { return a.opt.ConfigPath }
 
-// ConfigFile 返回配置文件现在的内容（最近一次成功加载的），只用默认值时为空。
+// ConfigFile returns the current content of the configuration file (as last loaded successfully); it
+// is empty when only defaults are used.
 func (a *App) ConfigFile() []byte {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.fileRaw
 }
 
-// LastReload 返回最近一次重载的结果，没有重载过时为 nil。
+// LastReload returns the result of the last reload, or nil if there has been none.
 func (a *App) LastReload() *ReloadStatus { return a.reload.Load() }
 
-// Log 把一条访问记录同时交给访问日志、统计和指标。
+// Log hands an access log entry to the access log, the statistics and the metrics.
 func (a *App) Log(e *accesslog.Entry) {
 	a.accessLog.Log(e)
 	a.Stats.Log(e)
@@ -199,10 +209,11 @@ func (a *App) Log(e *accesslog.Entry) {
 	}
 }
 
-// AccessLogDropped 是访问日志因队列满而丢弃的条数。
+// AccessLogDropped is the number of access log entries dropped because the queue was full.
 func (a *App) AccessLogDropped() uint64 { return a.accessLog.Dropped() }
 
-// bootstrapAdmin：运营数据库里还没有管理员、配置里写了 initial_admin 时，创建第一个管理员。
+// bootstrapAdmin creates the first administrator when the operational database has no administrators
+// yet and the configuration sets initial_admin.
 func (a *App) bootstrapAdmin(cfg *config.Config) error {
 	ia := cfg.Admin.InitialAdmin
 	if ia.Username == "" || !a.Store.Writable() {
@@ -210,9 +221,9 @@ func (a *App) bootstrapAdmin(cfg *config.Config) error {
 	}
 	if len(a.Store.Data().Admins) > 0 {
 		if ia.FromEnv {
-			a.log.Warn("RELAY_ADMIN_PASSWORD_FILE 指向的口令文件还在，但运营数据库里已经有管理员，它不会再被使用；请删掉这个文件（k8s 里是对应的 Secret）")
+			a.log.Warn("the password file named by RELAY_ADMIN_PASSWORD_FILE is still present, but the operational database already has administrators, so it is no longer used; delete the file (in k8s, the matching Secret)")
 		} else {
-			a.log.Warn("配置里还有 admin.initial_admin，但运营数据库里已经有管理员，它不会再被使用；请把它和对应的口令文件或环境变量删掉")
+			a.log.Warn("the configuration still sets admin.initial_admin, but the operational database already has administrators, so it is no longer used; remove it and its password file or environment variable")
 		}
 		return nil
 	}
@@ -226,9 +237,9 @@ func (a *App) bootstrapAdmin(cfg *config.Config) error {
 	})
 	if err == nil {
 		if ia.FromEnv {
-			a.log.Info("已按 RELAY_ADMIN_PASSWORD_FILE 指向的口令文件创建第一个管理员；第一次登录后必须改口令，之后请删掉这个文件（k8s 里是对应的 Secret）", "username", ia.Username)
+			a.log.Info("created the first administrator from the password file named by RELAY_ADMIN_PASSWORD_FILE; the password must be changed at the first login, after which delete the file (in k8s, the matching Secret)", "username", ia.Username)
 		} else {
-			a.log.Info("已按 admin.initial_admin 创建第一个管理员；第一次登录后必须改口令，之后请把 initial_admin 从配置里删掉", "username", ia.Username)
+			a.log.Info("created the first administrator from admin.initial_admin; the password must be changed at the first login, after which remove initial_admin from the configuration", "username", ia.Username)
 		}
 		_ = a.Store.Audit(store.AuditEntry{Actor: "system", Action: "admin.bootstrap", Target: ia.Username})
 	}
@@ -255,8 +266,9 @@ func fingerprint(parts ...any) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// build 由配置和当前的运营数据生成 Runtime，还没有生效：生效用 commit，不用了用 discard。
-// prev 不为 nil 时尽量沿用其中的连接池和缓存。
+// build generates a Runtime from the configuration and the current operational data without putting it
+// into effect: use commit to apply it, or discard when it is not used. When prev is not nil, its
+// connection pool and caches are reused where possible.
 func (a *App) build(cfg *config.Config, prev *Runtime) (_ *Runtime, err error) {
 	data := a.Store.Data()
 	now := time.Now()
@@ -267,10 +279,10 @@ func (a *App) build(cfg *config.Config, prev *Runtime) (_ *Runtime, err error) {
 		}
 	}()
 
-	// 客户端账号：配置文件里的优先，运营数据库里同名的忽略
+	// Client accounts: those from the configuration file win; same-named ones in the operational database are ignored
 	rt.Users = map[string]*access.User{}
 	if cfg.Access.UsersFile != "" {
-		f, err := os.Open(cfg.Access.UsersFile) //nolint:gosec // 路径由运维在配置里指定
+		f, err := os.Open(cfg.Access.UsersFile) //nolint:gosec // the path is set by the operator in the configuration
 		if err != nil {
 			return nil, fmt.Errorf("access.users_file：%w", err)
 		}
@@ -285,14 +297,14 @@ func (a *App) build(cfg *config.Config, prev *Runtime) (_ *Runtime, err error) {
 	}
 	for _, su := range data.Users {
 		if _, dup := rt.Users[su.Name]; dup {
-			a.log.Warn("运营数据库里的账号和 users_file 重名，以配置文件为准", "user", su.Name)
+			a.log.Warn("client account in the operational database has the same name as one in users_file; using the configuration file", "user", su.Name)
 			continue
 		}
 		rt.Users[su.Name] = &access.User{Name: su.Name, Hash: []byte(su.Hash), Disabled: su.Disabled, Source: "store",
 			ManifestRPS: su.ManifestRate, BlobStreams: su.BlobStreams}
 	}
 
-	// IP 规则和临时封禁
+	// IP rules and temporary bans
 	allow, err := config.ParsePrefixes(cfg.Access.IPAllow)
 	if err != nil {
 		return nil, err
@@ -304,7 +316,7 @@ func (a *App) build(cfg *config.Config, prev *Runtime) (_ *Runtime, err error) {
 	for _, r := range data.IPRules {
 		p, err := config.ParsePrefixes([]string{r.CIDR})
 		if err != nil {
-			a.log.Warn("运营数据库里的 IP 规则写法不对，忽略", "cidr", r.CIDR)
+			a.log.Warn("ignoring malformed IP rule in the operational database", "cidr", r.CIDR)
 			continue
 		}
 		if r.Kind == "allow" {
@@ -326,7 +338,7 @@ func (a *App) build(cfg *config.Config, prev *Runtime) (_ *Runtime, err error) {
 	}
 	rt.IPRules = access.NewIPRules(allow, deny, bans)
 
-	// 镜像规则
+	// Image rules
 	imgAllow := append([]string(nil), cfg.Access.Images.Allow...)
 	var imgDeny []access.ImageRule
 	for _, d := range cfg.Access.Images.Deny {
@@ -343,7 +355,7 @@ func (a *App) build(cfg *config.Config, prev *Runtime) (_ *Runtime, err error) {
 		return nil, err
 	}
 
-	// 上游：运营数据库里加的重定向主机（精确主机名）追加到白名单
+	// Upstreams: redirect hosts added in the operational database (exact host names) are appended to the allowlist
 	ups := map[string]*config.Upstream{}
 	var credHash []string
 	for name, u := range cfg.Upstreams {
@@ -373,7 +385,7 @@ func (a *App) build(cfg *config.Config, prev *Runtime) (_ *Runtime, err error) {
 		rt.Manifests = manifest.New(cfg.Cache, cfg.Limits.MaxManifestBuffers, 2*cfg.Timeouts.ResponseHeader.D())
 	}
 
-	// 管理 API 令牌
+	// Management API tokens
 	rt.Tokens = map[[32]byte]Token{}
 	for _, t := range cfg.Admin.APITokens {
 		rt.Tokens[sha256.Sum256([]byte(t.Token.Reveal()))] = Token{Name: t.Name, Role: t.Role, Source: "config"}
@@ -419,7 +431,8 @@ func (a *App) build(cfg *config.Config, prev *Runtime) (_ *Runtime, err error) {
 	return rt, nil
 }
 
-// commit 让 build 生成的 rt 生效：换下来的连接池稍后关掉（进行中的请求继续用旧的），限流设置跟着换。
+// commit puts the rt generated by build into effect: the replaced connection pool is closed later
+// (requests in progress keep using the old one), and the rate limit settings are switched along with it.
 func (a *App) commit(rt, prev *Runtime) {
 	if prev != nil && prev.Pool != rt.Pool {
 		old := prev.Pool
@@ -429,7 +442,8 @@ func (a *App) commit(rt, prev *Runtime) {
 	a.rt.Store(rt)
 }
 
-// discard 丢掉 build 生成、但不再生效的 rt：它新建的连接池关掉。
+// discard drops an rt generated by build that will not be put into effect: any connection pool it
+// created is closed.
 func (a *App) discard(rt, prev *Runtime) {
 	if prev == nil || prev.Pool != rt.Pool {
 		rt.Pool.Close()
@@ -443,7 +457,8 @@ func (a *App) withLog(o upstream.Options) upstream.Options {
 	return o
 }
 
-// Rebuild 在运营数据变化后（API 修改了账号、规则等）重新生成 Runtime。
+// Rebuild regenerates the Runtime after the operational data changes (the API changed accounts, rules
+// and so on).
 func (a *App) Rebuild() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -456,11 +471,13 @@ func (a *App) Rebuild() error {
 	return nil
 }
 
-// ErrNoConfigFile 表示没有配置文件可以重载。
+// ErrNoConfigFile means there is no configuration file to reload.
 var ErrNoConfigFile = errors.New("没有配置文件，只在用默认值")
 
-// ReloadConfig 重新读取配置文件并替换 Runtime。配置有错时保留原来的设置并返回错误。
-// 后台对配置的修改重新叠加上去，和配置文件冲突的暂停（配置文件是基准，和重启时一样）。
+// ReloadConfig rereads the configuration file and replaces the Runtime. When the configuration has errors
+// it keeps the previous settings and returns the error. The console overrides are layered on again, and
+// those that conflict with the configuration file are suspended (the configuration file is the baseline,
+// as on restart).
 func (a *App) ReloadConfig() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -478,14 +495,14 @@ func (a *App) ReloadConfig() error {
 	res, err := config.Parse(raw)
 	if err != nil {
 		st.Err = err.Error()
-		a.log.Error("配置有误，保留原来的设置", "err", err)
+		a.log.Error("configuration is invalid; keeping the previous settings", "err", err)
 		return err
 	}
 	prev := a.rt.Load()
 	rt, eff, err := a.assemble(raw, res, prev)
 	if err != nil {
 		st.Err = err.Error()
-		a.log.Error("新配置无法生效，保留原来的设置", "err", err)
+		a.log.Error("new configuration cannot be applied; keeping the previous settings", "err", err)
 		return err
 	}
 	st.Restart = restartNeeded(prev.Config, eff.Config)
@@ -493,17 +510,17 @@ func (a *App) ReloadConfig() error {
 		a.log.Warn(w)
 	}
 	if len(st.Restart) > 0 {
-		a.log.Warn("这些改动要重启才能生效", "fields", strings.Join(st.Restart, ", "))
+		a.log.Warn("these changes take effect only after a restart", "fields", strings.Join(st.Restart, ", "))
 	}
 	a.noteOverrides(prev.Overrides, rt.Overrides)
 	a.commit(rt, prev)
 	a.cfgHash = sha256.Sum256(raw)
 	a.fileRaw, a.warnings = raw, eff.Warnings
-	a.log.Info("已重新加载配置", "path", a.opt.ConfigPath)
+	a.log.Info("configuration reloaded", "path", a.opt.ConfigPath)
 	return nil
 }
 
-// restartNeeded 列出热重载管不到的改动。
+// restartNeeded lists the changes that a hot reload cannot apply.
 func restartNeeded(old, cur *config.Config) []string {
 	var out []string
 	check := func(name string, x, y any) {
@@ -512,7 +529,8 @@ func restartNeeded(old, cur *config.Config) []string {
 		}
 	}
 	check("listen", old.Listen, cur.Listen)
-	// ACME 的域名随时按生效的配置放行（入口可以在后台改），不用重启
+	// ACME host names are always allowed by the effective configuration (entrances can be changed in
+	// the console), so no restart is needed
 	ot, ct := old.TLS, cur.TLS
 	ot.ACME.Hosts, ct.ACME.Hosts = nil, nil
 	check("tls", ot, ct)
@@ -528,7 +546,8 @@ func restartNeeded(old, cur *config.Config) []string {
 	return out
 }
 
-// Watch 每 10 秒检查一次配置文件，内容变了就重载（也适用于 k8s ConfigMap 的符号链接替换）。
+// Watch checks the configuration file every 10 seconds and reloads it when the content has changed (this
+// also works for the symlink swap of a k8s ConfigMap).
 func (a *App) Watch(ctx context.Context) {
 	if a.opt.ConfigPath == "" {
 		return
@@ -554,7 +573,7 @@ func (a *App) Watch(ctx context.Context) {
 	}
 }
 
-// Health 返回各上游最近一次探测的结果。
+// Health returns the result of the last probe of each upstream.
 func (a *App) Health() map[string]upstream.Health {
 	a.healthMu.Lock()
 	defer a.healthMu.Unlock()
@@ -565,7 +584,8 @@ func (a *App) Health() map[string]upstream.Health {
 	return out
 }
 
-// CheckUpstream 立即探测一个上游并记下结果。没有这个上游时 ok 为 false。
+// CheckUpstream probes an upstream immediately and records the result. ok is false when there is no such
+// upstream.
 func (a *App) CheckUpstream(ctx context.Context, name string) (h upstream.Health, ok bool) {
 	u := a.Runtime().Pool.Get(name)
 	if u == nil {
@@ -582,10 +602,11 @@ func (a *App) CheckUpstream(ctx context.Context, name string) (h upstream.Health
 	return h, true
 }
 
-// ProbeHours 是一个上游近 24 小时每小时的探测结果。
+// ProbeHours is the hourly probe results of an upstream for the last 24 hours.
 func (a *App) ProbeHours(name string) []status.Hour { return a.probes.Hours(name, time.Now()) }
 
-// StatusReport 是用法页 /status.json 的内容：各上游的连通性和近 24 小时的可用率，以及本服务的请求成功率。
+// StatusReport is the content of the usage page's /status.json: the reachability of each upstream and its
+// availability over the last 24 hours, plus the request success rate of this service.
 func (a *App) StatusReport() status.Report {
 	rt := a.Runtime()
 	now := time.Now()
@@ -606,7 +627,8 @@ func (a *App) StatusReport() status.Report {
 	return status.Build(in)
 }
 
-// requestHours 把每分钟的计数按小时汇总成 status.Hours 项，旧的在前，最后一项是当前小时。
+// requestHours sums the per-minute counts by hour into status.Hours entries, oldest first; the last entry
+// is the current hour.
 func requestHours(minutes []stats.Minute, now time.Time) []status.RequestsHour {
 	cur := now.Truncate(time.Hour).Unix()
 	out := make([]status.RequestsHour, status.Hours)
@@ -624,7 +646,7 @@ func requestHours(minutes []stats.Minute, now time.Time) []status.RequestsHour {
 	return out
 }
 
-// WatchUpstreams 按 proxy.health_interval 探测所有上游，启动时先探测一次。
+// WatchUpstreams probes all upstreams every proxy.health_interval, starting with one probe at start-up.
 func (a *App) WatchUpstreams(ctx context.Context) {
 	for {
 		iv := a.Runtime().Config.Proxy.HealthInterval.D()
@@ -635,7 +657,7 @@ func (a *App) WatchUpstreams(ctx context.Context) {
 			}
 			wg.Wait()
 		} else {
-			iv = time.Minute // 关着时也每分钟看一次设置有没有改
+			iv = time.Minute // when turned off, still check every minute whether the setting has changed
 		}
 		select {
 		case <-ctx.Done():
@@ -645,11 +667,12 @@ func (a *App) WatchUpstreams(ctx context.Context) {
 	}
 }
 
-// Close 存下统计、写完访问日志、关闭连接和运营数据库。
+// Close saves the statistics, finishes writing the access log, and closes the connections and the
+// operational database.
 func (a *App) Close() {
 	a.Stats.Flush()
 	if n := a.accessLog.Dropped(); n > 0 {
-		a.log.Warn("访问日志队列满时丢弃过记录", "count", n)
+		a.log.Warn("access log entries were dropped while the queue was full", "count", n)
 	}
 	_ = a.accessLog.Close()
 	if rt := a.rt.Load(); rt != nil {
@@ -660,7 +683,7 @@ func (a *App) Close() {
 
 func (a *App) registerMetrics() {
 	m := a.Metrics
-	m.Register("relay_manifest_cache_events_total", "manifest 缓存的结果", "counter", func() []metrics.Sample {
+	m.Register("relay_manifest_cache_events_total", "Manifest cache results", "counter", func() []metrics.Sample {
 		st := a.Runtime().Manifests.Stats()
 		return []metrics.Sample{
 			{Labels: metrics.Labels("result", "hit"), Value: float64(st.Hits)},
@@ -671,19 +694,19 @@ func (a *App) registerMetrics() {
 			{Labels: metrics.Labels("result", "bypass"), Value: float64(st.Bypass)},
 		}
 	})
-	m.Register("relay_manifest_cache_bytes", "manifest 缓存占用的字节数", "gauge", func() []metrics.Sample {
+	m.Register("relay_manifest_cache_bytes", "Bytes used by the manifest cache", "gauge", func() []metrics.Sample {
 		return []metrics.Sample{{Value: float64(a.Runtime().Manifests.Stats().Bytes)}}
 	})
-	m.Register("relay_inflight_requests", "正在处理的请求数", "gauge", func() []metrics.Sample {
+	m.Register("relay_inflight_requests", "Requests in progress", "gauge", func() []metrics.Sample {
 		return []metrics.Sample{{Value: float64(a.Limiter.Stats().Inflight)}}
 	})
-	m.Register("relay_blob_streams", "正在转发的镜像层数", "gauge", func() []metrics.Sample {
+	m.Register("relay_blob_streams", "Layers (blobs) being relayed", "gauge", func() []metrics.Sample {
 		return []metrics.Sample{{Value: float64(a.Limiter.Stats().BlobStreams)}}
 	})
-	m.Register("relay_rate_limited_total", "被限流或超过并发上限而拒绝的请求数", "counter", func() []metrics.Sample {
+	m.Register("relay_rate_limited_total", "Requests refused by rate limits or concurrency caps", "counter", func() []metrics.Sample {
 		return []metrics.Sample{{Value: float64(a.Limiter.Stats().Limited)}}
 	})
-	m.Register("relay_upstream_breaker_open", "上游熔断器是否打开", "gauge", func() []metrics.Sample {
+	m.Register("relay_upstream_breaker_open", "Whether the upstream circuit breaker is open", "gauge", func() []metrics.Sample {
 		var out []metrics.Sample
 		for _, name := range a.Runtime().Pool.Names() {
 			v := 0.0
@@ -694,7 +717,7 @@ func (a *App) registerMetrics() {
 		}
 		return out
 	})
-	m.Register("relay_upstream_probe_up", "上游最近一次探测是否正常（/v2/ 返回 200 或 401）", "gauge", func() []metrics.Sample {
+	m.Register("relay_upstream_probe_up", "Whether the last upstream probe succeeded (/v2/ returned 200 or 401)", "gauge", func() []metrics.Sample {
 		var out []metrics.Sample
 		health := a.Health()
 		for _, name := range a.Runtime().Pool.Names() {
@@ -710,7 +733,7 @@ func (a *App) registerMetrics() {
 		}
 		return out
 	})
-	m.Register("relay_upstream_probe_seconds", "上游最近一次探测的耗时", "gauge", func() []metrics.Sample {
+	m.Register("relay_upstream_probe_seconds", "Duration of the last upstream probe", "gauge", func() []metrics.Sample {
 		var out []metrics.Sample
 		health := a.Health()
 		for _, name := range a.Runtime().Pool.Names() {
@@ -720,7 +743,7 @@ func (a *App) registerMetrics() {
 		}
 		return out
 	})
-	m.Register("relay_upstream_quota_remaining", "上游在响应头里报告的剩余拉取额度（Docker Hub 的 Ratelimit-Remaining）", "gauge", func() []metrics.Sample {
+	m.Register("relay_upstream_quota_remaining", "Remaining pull quota reported by the upstream in response headers (Docker Hub's Ratelimit-Remaining)", "gauge", func() []metrics.Sample {
 		var out []metrics.Sample
 		for _, name := range a.Runtime().Pool.Names() {
 			if q := a.Runtime().Pool.Get(name).Quota(); q != nil {
@@ -729,7 +752,7 @@ func (a *App) registerMetrics() {
 		}
 		return out
 	})
-	m.Register("relay_accesslog_dropped_total", "访问日志因队列满而丢弃的条数", "counter", func() []metrics.Sample {
+	m.Register("relay_accesslog_dropped_total", "Access log entries dropped because the queue was full", "counter", func() []metrics.Sample {
 		return []metrics.Sample{{Value: float64(a.accessLog.Dropped())}}
 	})
 }

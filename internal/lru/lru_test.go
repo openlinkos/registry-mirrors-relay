@@ -9,13 +9,13 @@ func TestEvictByCount(t *testing.T) {
 	c := New[string, int](2, 0)
 	c.Add("a", 1, 0)
 	c.Add("b", 2, 0)
-	c.Get("a") // a 变成最近使用
+	c.Get("a") // a becomes most recently used
 	c.Add("c", 3, 0)
 	if _, ok := c.Peek("b"); ok {
-		t.Fatal("b 应被淘汰")
+		t.Fatal("b should have been evicted")
 	}
 	if _, ok := c.Peek("a"); !ok {
-		t.Fatal("a 刚用过，不应被淘汰")
+		t.Fatal("a was just used and should not have been evicted")
 	}
 	if c.Len() != 2 {
 		t.Fatalf("Len = %d", c.Len())
@@ -28,20 +28,20 @@ func TestEvictByWeight(t *testing.T) {
 	c.OnEvict(func(k, _ string) { evicted = append(evicted, k) })
 	c.Add("a", "", 4)
 	c.Add("b", "", 4)
-	c.Add("c", "", 4) // 超过 10，淘汰 a
+	c.Add("c", "", 4) // exceeds 10, evicts a
 	if c.Weight() != 8 || len(evicted) != 1 || evicted[0] != "a" {
 		t.Fatalf("weight=%d evicted=%v", c.Weight(), evicted)
 	}
 	if c.Add("huge", "", 11) {
-		t.Fatal("单个超过上限的条目不应放入")
+		t.Fatal("a single entry over the limit should not be added")
 	}
-	c.Add("b", "", 1) // 替换时重算权重
+	c.Add("b", "", 1) // replacing recalculates the weight
 	if c.Weight() != 5 {
-		t.Fatalf("替换后 weight=%d", c.Weight())
+		t.Fatalf("after replace weight=%d", c.Weight())
 	}
 	c.Remove("b")
 	if c.Weight() != 4 || c.Len() != 1 {
-		t.Fatalf("删除后 weight=%d len=%d", c.Weight(), c.Len())
+		t.Fatalf("after remove weight=%d len=%d", c.Weight(), c.Len())
 	}
 }
 
@@ -60,6 +60,6 @@ func TestConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 	if c.Len() > 64 {
-		t.Fatalf("超过上限：%d", c.Len())
+		t.Fatalf("over the limit: %d", c.Len())
 	}
 }

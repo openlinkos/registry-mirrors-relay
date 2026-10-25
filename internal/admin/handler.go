@@ -1,10 +1,13 @@
-// Package admin 是网页管理后台：
-//   - 全部页面在服务端用 html/template 渲染，没有脚本也能用；一个同源的小脚本只做本地时间、复制按钮、删除确认和概览刷新；
-//   - 样式、字体、图标来自设计系统 @openlinkos/ui，打包进程序，不从第三方加载任何东西；
-//   - 严格的 CSP（没有内联脚本和样式，Trusted Types 不允许任何策略）、会话、CSRF、来源检查、登录限速、
-//     敏感操作要求最近输入过口令、表单提交成功后 303 跳转（PRG）。
+// Package admin is the web admin console:
+//   - every page is rendered on the server with html/template and works without scripts; one small
+//     same-origin script only handles local times, copy buttons, delete confirmations and overview refresh;
+//   - styles, fonts and icons come from the design system @openlinkos/ui, are bundled into the program,
+//     and nothing is loaded from third parties;
+//   - a strict CSP (no inline scripts or styles, Trusted Types allows no policy), sessions, CSRF, origin
+//     checks, login rate limits, sensitive operations require a recently entered password, and a
+//     successful form submission ends in a 303 redirect (PRG).
 //
-// 校验和写入都在 internal/ops，和 JSON API 共用。
+// Validation and writes live in internal/ops and are shared with the JSON API.
 package admin
 
 import (
@@ -29,17 +32,19 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/version"
 )
 
-// CSP 是每个后台页面的内容安全策略（SVG 图片用下面更窄的那个）。
+// CSP is the content security policy of every console page (SVG images use the narrower one below).
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; " +
 	"connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; " +
 	"require-trusted-types-for 'script'; trusted-types 'none'"
 
-// SVGCSP：SVG 图片的颜色写在内嵌的 <style> 里，页面的策略会拦掉；它们单独用一个只允许内联样式的策略，
-// 并且放进沙箱，直接打开也执行不了任何东西。
+// SVGCSP: the colours of the SVG images are written in an embedded <style>, which the page policy would
+// block; they get a separate policy that allows only inline styles, and are sandboxed, so nothing can run
+// even when one is opened directly.
 const SVGCSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
 
-// Cookie 的名字。public_url 是 https 时会话 Cookie 用 __Host- 前缀（Secure、整个主机、SameSite=Lax）；
-// 其他情况（本机、SSH 转发）用普通名字，只在 /admin 下、SameSite=Strict。
+// Cookie names. When public_url is https the session cookie uses the __Host- prefix (Secure, the whole
+// host, SameSite=Lax); otherwise (local machine, SSH forwarding) it uses a plain name, only under /admin,
+// SameSite=Strict.
 const (
 	secureCookie = "__Host-relay-admin"
 	plainCookie  = "relay-admin"
@@ -49,19 +54,20 @@ const (
 	busyRetry    = 5 * time.Second
 )
 
-// Options 主要给测试用。
+// Options are mainly for tests.
 type Options struct {
 	Log         *slog.Logger
 	Now         func() time.Time
 	LoginLimits *LoginLimits
-	// BcryptCost 是这里生成哈希时的强度（只读模式下配置文件里的初始管理员），默认 ops.BcryptCost
+	// BcryptCost is the cost of hashes generated here (the initial administrator from the configuration
+	// file in read-only mode); defaults to ops.BcryptCost
 	BcryptCost int
 }
 
-// LoginLimits 是口令校验失败的上限，默认每个客户端 10 分钟 10 次、全局 100 次。
+// LoginLimits caps failed password checks; by default 10 per client and 100 overall in 10 minutes.
 type LoginLimits = loginLimits
 
-// Handler 是 /admin/ 下除 JSON API 以外的全部请求。
+// Handler serves every request under /admin/ except the JSON API.
 type Handler struct {
 	app      *app.App
 	ops      *ops.Ops
@@ -76,7 +82,7 @@ type Handler struct {
 	cost     int
 
 	cfgMu   sync.Mutex
-	cfgKey  string // 只读模式：初始管理员口令的指纹 → 它的 bcrypt 哈希
+	cfgKey  string // read-only mode: fingerprint of the initial administrator's password → its bcrypt hash
 	cfgHash []byte
 }
 
@@ -84,19 +90,19 @@ type authLevel int
 
 const (
 	authNone    authLevel = iota
-	authSession           // 登录即可
-	authFresh             // 登录，并且 10 分钟内输入过口令
+	authSession           // being logged in is enough
+	authFresh             // logged in, and the password was entered within the last 10 minutes
 )
 
 type route struct {
 	method, path string
 	auth         authLevel
-	write        bool   // 要 admin 角色
-	back         string // 要求重新输入口令的 POST：输完以后回到哪个页面
+	write        bool   // requires the admin role
+	back         string // POSTs that require re-authentication: the page to return to afterwards
 	run          func(c *ctx) error
 }
 
-// New 创建网页后台。
+// New creates the web console.
 func New(a *app.App, o *ops.Ops, opt Options) (*Handler, error) {
 	if opt.Log == nil {
 		opt.Log = slog.Default()
@@ -121,12 +127,13 @@ func New(a *app.App, o *ops.Ops, opt Options) (*Handler, error) {
 		return nil, err
 	}
 	h.routes = h.routeTable()
-	// 管理员的口令、角色、停用状态改了，或者被删了：结束他的全部会话
+	// An administrator's password, role or disabled state changed, or they were deleted: end all their
+	// sessions
 	o.OnAdminChange = func(name string) { h.sessions.endFor(name, "") }
 	return h, nil
 }
 
-// ctx 是一次请求。
+// ctx is one request.
 type ctx struct {
 	h      *Handler
 	w      http.ResponseWriter
@@ -135,22 +142,23 @@ type ctx struct {
 	lang   string // zh | en
 	theme  string // auto | light | dark
 	sess   *session
-	secure bool // 这次请求来自 https 的 public_url（决定会话 Cookie 的样式）
+	secure bool // this request came from the https public_url (decides the session cookie's form)
 	ip     netip.Addr
 	form   url.Values
 
-	// 表单出错时重新渲染页面用
+	// For re-rendering the page when a form has an error
 	status  int
 	formErr string
-	// 保存成功但有提醒时，不跳转，直接显示页面：成功提示和提醒
+	// When a save succeeds but comes with warnings, the page is shown directly instead of redirecting:
+	// the success notice and the warnings
 	flash    string
 	warnings []string
 }
 
-// httpError 是要以错误页回答的请求错误。
+// httpError is a request error to be answered with the error page.
 type httpError struct {
 	status int
-	key    string // 界面文案的键
+	key    string // key of the interface text
 }
 
 func (e *httpError) Error() string { return e.key }
@@ -179,15 +187,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// securityHeaders 是 /admin 下每个响应都带的头。
+// securityHeaders are the headers every response under /admin carries.
 func securityHeaders(https bool) map[string]string {
 	m := map[string]string{
 		"Content-Security-Policy": CSP,
 		"Cache-Control":           "no-store, private",
 		"Vary":                    "Cookie",
 		"X-Content-Type-Options":  "nosniff",
-		// 不用 no-referrer：那样浏览器在同源表单提交时会发 Origin: null，来源检查就失效了。
-		// same-origin 仍然不会把来源发给别的站点。
+		// Not no-referrer: with it, browsers send Origin: null on same-origin form submissions and the
+		// origin check stops working. same-origin still sends no referrer to other sites.
 		"Referrer-Policy":              "same-origin",
 		"X-Frame-Options":              "DENY",
 		"Cross-Origin-Opener-Policy":   "same-origin",
@@ -213,7 +221,8 @@ func (h *Handler) publicOrigin() (origin string, https bool) {
 
 func (h *Handler) publicHTTPS() bool { _, s := h.publicOrigin(); return s }
 
-// clientAddr 是请求方的地址：经过 client_ip.trusted_proxies 里的反向代理时取代理转来的地址。
+// clientAddr is the requester's address: when the request comes through a reverse proxy listed in
+// client_ip.trusted_proxies, the address the proxy forwards is used.
 func (h *Handler) clientAddr(r *http.Request) netip.Addr {
 	if c, _ := h.app.Runtime().IPs.ClientIP(r); c.IsValid() {
 		return c
@@ -293,7 +302,8 @@ func (h *Handler) dispatch(c *ctx) error {
 			return fail(http.StatusForbidden, "error.csrf")
 		}
 	}
-	// 口令是别人设的：改口令之前只能打开「我的账号」（和退出、确认身份）
+	// The password was set by someone else: until it is changed, only "My account" can be opened (plus
+	// logging out and confirming identity)
 	if c.sess.MustChange && !mustChangeAllowed[rt.path] {
 		return c.redirect("/admin/account")
 	}
@@ -310,11 +320,13 @@ func (h *Handler) dispatch(c *ctx) error {
 	return rt.run(c)
 }
 
-// checkOrigin 是每个 POST 的跨站检查：拒绝 Sec-Fetch-Site: cross-site，并要求 Origin 是允许的来源之一：
-// public_url 的来源，或者这次访问的 <协议>://<Host>（admin.public: false 时只限 localhost、IP）。
-// 协议也认 https：经终止 TLS 的反向代理（CDN、Ingress）来的请求到这里是明文，浏览器那边是 https 页面；
-// 同一个 Host 的 https 页面一定是这个站点自己的。Origin 是 https 时会话 Cookie 带 Secure。
-// mustChangeAllowed 是必须先改口令的会话能打开的页面。
+// checkOrigin is the cross-site check for every POST: it rejects Sec-Fetch-Site: cross-site and requires
+// Origin to be one of the allowed origins: the origin of public_url, or <scheme>://<Host> of this request
+// (only localhost and IP addresses when admin.public: false).
+// The https scheme is accepted too: requests through a TLS-terminating reverse proxy (CDN, Ingress) arrive
+// here in plain text while the browser shows an https page; an https page on the same Host must belong to
+// this site. When Origin is https the session cookie is Secure.
+// mustChangeAllowed are the pages a session that must change its password first can open.
 var mustChangeAllowed = map[string]bool{
 	"/admin/account": true, "/admin/account/password": true, "/admin/logout": true, "/admin/reauth": true,
 }
@@ -334,7 +346,7 @@ func (h *Handler) checkOrigin(c *ctx) error {
 	}
 	host := strings.ToLower(r.Host)
 	if pub, https := h.publicOrigin(); https && pub == "https://"+host {
-		return fail(http.StatusForbidden, "error.origin") // public_url 是 https 时，同一个域名的 http 页面不算
+		return fail(http.StatusForbidden, "error.origin") // with an https public_url, http pages on that domain do not count
 	}
 	if !h.app.Runtime().Mgmt.Public && !ops.DirectHost(host) {
 		return fail(http.StatusForbidden, "error.origin")
@@ -375,8 +387,9 @@ func (c *ctx) parseForm() error {
 	return nil
 }
 
-// sessionFrom 找请求带的会话。访问 https 的 public_url 时只认 __Host- Cookie：同一个上级域名下的兄弟站点
-// 可以替这个主机种普通 Cookie，但种不了 __Host- 的。其他时候两种都认。
+// sessionFrom finds the session the request carries. On the https public_url only the __Host- cookie is
+// accepted: a sibling site under the same parent domain can plant a plain cookie for this host, but not a
+// __Host- one. Otherwise both are accepted.
 func (h *Handler) sessionFrom(r *http.Request, now time.Time) *session {
 	names := []string{secureCookie, plainCookie}
 	if pub, https := h.publicOrigin(); https && strings.EqualFold(strings.TrimPrefix(pub, "https://"), r.Host) {
@@ -394,8 +407,9 @@ func sessionCookie(value string, secure bool, maxAge int) *http.Cookie {
 	if secure {
 		return &http.Cookie{Name: secureCookie, Value: value, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: maxAge}
 	}
-	// 明文 http 的页面：浏览器不接受 Secure Cookie（Safari），也没有意义
-	return &http.Cookie{Name: plainCookie, Value: value, Path: "/admin", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: maxAge} //nolint:gosec // 见上
+	// Plain-text http pages: browsers do not accept a Secure cookie there (Safari), and it would be
+	// pointless anyway
+	return &http.Cookie{Name: plainCookie, Value: value, Path: "/admin", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: maxAge} //nolint:gosec // see above
 }
 
 func (h *Handler) serveAsset(c *ctx, file string) error {
@@ -416,9 +430,9 @@ func (h *Handler) serveAsset(c *ctx, file string) error {
 	return nil
 }
 
-// ---- 跳转
+// ---- Redirects
 
-// here 是当前的路径和查询，用于 next 参数。
+// here is the current path and query, for the next parameter.
 func (c *ctx) here() string {
 	if c.r.URL.RawQuery != "" {
 		return c.r.URL.Path + "?" + c.r.URL.RawQuery
@@ -426,14 +440,15 @@ func (c *ctx) here() string {
 	return c.r.URL.Path
 }
 
-// redirect 是 303 跳转到后台里的一个地址。
+// redirect is a 303 redirect to an address in the console.
 func (c *ctx) redirect(to string) error {
 	c.w.Header().Set("Location", to)
 	c.w.WriteHeader(http.StatusSeeOther)
 	return nil
 }
 
-// done 是表单成功后的跳转：带上一条成功提示（键在 notices 里登记过）和提示里的名字。
+// done is the redirect after a successful form: it carries a success notice (a key registered in
+// notices) and the name used in the notice.
 func (c *ctx) done(path, notice, name string) error {
 	q := url.Values{"ok": {notice}}
 	if name != "" {
@@ -442,7 +457,9 @@ func (c *ctx) done(path, notice, name string) error {
 	return c.redirect(path + "?" + q.Encode())
 }
 
-// safeNext 是 next 参数指向的地址：只能是后台里的页面，否则回到概览。不接受绝对地址、//、反斜杠（防开放跳转）。
+// safeNext is the address the next parameter points to: it can only be a page in the console, otherwise
+// it falls back to the overview. Absolute URLs, // and backslashes are not accepted (against open
+// redirects).
 func safeNext(next string) string {
 	if next != "/admin" && !strings.HasPrefix(next, "/admin/") && !strings.HasPrefix(next, "/admin?") {
 		return "/admin/"
@@ -456,7 +473,7 @@ func safeNext(next string) string {
 	return next
 }
 
-// ---- 身份
+// ---- Identity
 
 func (c *ctx) actor() ops.Actor {
 	name := ""
@@ -466,7 +483,8 @@ func (c *ctx) actor() ops.Actor {
 	return ops.Actor{Kind: "admin", Name: name, IP: c.ip}
 }
 
-// account 找一个能登录的管理员：运营数据库里的；运营数据只读时，配置文件里的初始管理员。
+// account finds an administrator who can log in: one in the operational database, or, when the
+// operational data is read-only, the initial administrator from the configuration file.
 func (h *Handler) account(name string) (hash []byte, role string, mustChange, ok bool) {
 	for _, a := range h.app.Store.Data().Admins {
 		if a.Name == name {
@@ -480,7 +498,8 @@ func (h *Handler) account(name string) (hash []byte, role string, mustChange, ok
 	if h.app.Store.Writable() || ia.Username == "" || ia.Username != name {
 		return nil, "", false, false
 	}
-	// 只读模式：口令在配置里是明文（来自环境变量或文件），第一次用时算一次 bcrypt，口令变了再算
+	// Read-only mode: the password is in plain text in the configuration (from an environment variable
+	// or a file); bcrypt is computed on first use and again when the password changes
 	pw := ia.Password.Reveal()
 	key := hashID(pw)
 	h.cfgMu.Lock()
@@ -492,11 +511,12 @@ func (h *Handler) account(name string) (hash []byte, role string, mustChange, ok
 		}
 		h.cfgKey, h.cfgHash = key, hh
 	}
-	// 运营数据只读时口令只能在配置里改，不要求在后台改
+	// When the operational data is read-only the password can only be changed in the configuration, so
+	// changing it in the console is not required
 	return h.cfgHash, "admin", false, true
 }
 
-// dummyHash 让"用户不存在"和"口令错误"耗时相近。
+// dummyHash makes "no such user" and "wrong password" take about the same time.
 var dummyHash = sync.OnceValue(func() []byte {
 	b, _ := bcrypt.GenerateFromPassword([]byte("registry-mirrors-relay admin"), ops.BcryptCost)
 	return b
@@ -507,12 +527,13 @@ type checkResult struct {
 	role       string
 	mustChange bool
 	status     int
-	message    string // 界面文案的键
+	message    string // key of the interface text
 	wait       time.Duration
 }
 
-// checkPassword 校验管理员口令：排队一个一个地跑，受失败次数限制。失败在每个窗口、每个客户端只记两次审计
-// （第一次失败、开始被拦）。
+// checkPassword checks an administrator's password: checks run one at a time in a queue and are limited
+// by the number of failures. Failures are written to the audit log only twice per window and client (the
+// first failure, and when blocking starts).
 func (h *Handler) checkPassword(c *ctx, name, password, mode string) checkResult {
 	client := c.ip.String()
 	var res checkResult
@@ -545,7 +566,7 @@ func (h *Handler) checkPassword(c *ctx, name, password, mode string) checkResult
 	return res
 }
 
-// startSession 开始一个新会话（从不沿用请求带来的），设置 Cookie。
+// startSession starts a new session (never reusing the one the request carries) and sets the cookie.
 func (h *Handler) startSession(c *ctx, name, role string, mustChange bool) {
 	if c.sess != nil {
 		h.sessions.end(c.sess.idHash)
@@ -564,7 +585,8 @@ func (h *Handler) endSession(c *ctx) {
 	c.sess = nil
 }
 
-// Session 让 JSON API 也认网页后台的会话。写操作要带 X-CSRF-Token，并通过和表单一样的来源检查。
+// Session lets the JSON API accept web console sessions too. Writes must carry X-CSRF-Token and pass the
+// same origin check as forms.
 func (h *Handler) Session(r *http.Request) (ops.Actor, string, bool, error) {
 	now := h.now()
 	s := h.sessionFrom(r, now)
@@ -589,9 +611,9 @@ func (h *Handler) Session(r *http.Request) (ops.Actor, string, bool, error) {
 	return ops.Actor{Kind: "admin", Name: s.Admin, IP: h.clientAddr(r)}, s.Role, true, nil
 }
 
-// ---- 渲染
+// ---- Rendering
 
-// render 渲染一个页面。
+// render renders a page.
 func (h *Handler) render(c *ctx, page string, v *view) error {
 	v.c, v.h = c, h
 	if v.Notice == "" {
@@ -601,7 +623,7 @@ func (h *Handler) render(c *ctx, page string, v *view) error {
 	if err := h.tmpl.ExecuteTemplate(&buf, "page/"+page, v); err != nil {
 		return err
 	}
-	v.Body = template.HTML(buf.String()) //nolint:gosec // html/template 刚渲染出来的，已经转义过
+	v.Body = template.HTML(buf.String()) //nolint:gosec // just rendered by html/template, already escaped
 	buf.Reset()
 	if err := h.tmpl.ExecuteTemplate(&buf, "layout", v); err != nil {
 		return err
@@ -618,7 +640,8 @@ func (h *Handler) render(c *ctx, page string, v *view) error {
 	return nil
 }
 
-// renderError 以错误页回答。ops 的错误和请求错误给出说明，其他错误是 500，细节只写进日志。
+// renderError answers with the error page. ops errors and request errors come with an explanation; other
+// errors are a 500 and the details go only to the log.
 func (h *Handler) renderError(c *ctx, err error) {
 	status, msg := http.StatusInternalServerError, ""
 	var he *httpError
@@ -629,13 +652,13 @@ func (h *Handler) renderError(c *ctx, err error) {
 	case errors.As(err, &oe):
 		status, msg = oe.Status, oe.Message(c.lang)
 	default:
-		h.log.Error("管理后台出错", "path", c.r.URL.Path, "err", err)
+		h.log.Error("admin console error", "path", c.r.URL.Path, "err", err)
 		msg = tr(c.lang, "error.internalText")
 	}
 	c.status = status
 	v := &view{Title: errorTitle(c.lang, status), Data: map[string]any{"Status": status, "Message": msg}}
 	if rerr := h.render(c, "error", v); rerr != nil {
-		h.log.Error("渲染错误页失败", "err", rerr)
+		h.log.Error("render error page failed", "err", rerr)
 		http.Error(c.w, msg, status)
 	}
 }
@@ -654,7 +677,8 @@ func errorTitle(lang string, status int) string {
 	return tr(lang, "error.badRequestTitle")
 }
 
-// retry 处理表单的错误：ops 的错误（输入不对、重名、只读等）就带着说明和填过的值重新渲染 page，其他错误交上去。
+// retry handles form errors: for an ops error (invalid input, duplicate name, read-only and so on) it
+// re-renders page with the explanation and the values already filled in; other errors are passed up.
 func (c *ctx) retry(err error, page func(*ctx) error) error {
 	var oe *ops.Error
 	if !errors.As(err, &oe) {
@@ -664,5 +688,5 @@ func (c *ctx) retry(err error, page func(*ctx) error) error {
 	return page(c)
 }
 
-// Version 是页面页脚显示的版本。
+// Version is the version shown in the page footer.
 func Version() string { return version.Version }

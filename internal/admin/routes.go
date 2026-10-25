@@ -7,9 +7,10 @@ import (
 	"time"
 )
 
-// routeTable 是后台的全部路由：只有 GET 和 POST，每个写操作都是 POST。这张表就是后台的全部能力，
-// 测试把写操作逐个固定下来，多出来的会被发现。后台不碰 docker.sock、不执行命令，也不能向任意地址发请求
-// （只能探测配置里的上游）。
+// routeTable is every route of the console: only GET and POST, and every write is a POST. This table is
+// everything the console can do; the tests pin down the writes one by one, so any extra one is noticed.
+// The console does not touch docker.sock, does not run commands and cannot send requests to arbitrary
+// addresses (it can only probe the upstreams in the configuration).
 func (h *Handler) routeTable() []route {
 	get := func(path string, run func(*ctx) error) route {
 		return route{method: http.MethodGet, path: path, auth: authSession, run: run}
@@ -66,7 +67,8 @@ func (h *Handler) routeTable() []route {
 		get("/admin/config/export", h.configExport),
 		get("/admin/config/entrances", h.entrancesPage),
 		get("/admin/config/upstream", h.upstreamEditPage),
-		// 改配置：入口和上游决定拉取请求发到哪里，和管理员、令牌一样要最近输入过口令
+		// Configuration changes: entrances and upstreams decide where pull requests go, so like
+		// administrators and tokens they require a recently entered password
 		fresh("/admin/config/save", "/admin/config", h.configSave),
 		fresh("/admin/config/entrances/save", "/admin/config/entrances", h.entrancesSave),
 		fresh("/admin/config/upstream/save", "/admin/config", h.upstreamSave),
@@ -74,12 +76,13 @@ func (h *Handler) routeTable() []route {
 		get("/admin/system", h.systemPage),
 		post("/admin/reload", h.reload),
 		get("/admin/account", h.accountPage),
-		// 改自己的口令：只读角色也可以，但要最近输入过口令
+		// Changing one's own password: the read-only role can do it too, but needs a recently entered
+		// password
 		{method: http.MethodPost, path: "/admin/account/password", auth: authFresh, back: "/admin/account", run: h.passwordChange},
 	}
 }
 
-// WriteRoutes 列出所有 POST 路由（测试用来固定后台的写操作）。
+// WriteRoutes lists every POST route (the tests use it to pin down the console's writes).
 func (h *Handler) WriteRoutes() []string {
 	var out []string
 	for _, r := range h.routes {
@@ -91,7 +94,7 @@ func (h *Handler) WriteRoutes() []string {
 	return out
 }
 
-// ---- 登录、退出、重新输入口令、偏好
+// ---- Login, logout, re-authentication, preferences
 
 type loginData struct {
 	Next, Username string
@@ -154,12 +157,13 @@ func (h *Handler) reauth(c *ctx) error {
 	return c.redirect(next)
 }
 
-// prefs 记下界面语言和配色（Cookie），不需要登录：语言切换在登录页上也要能用。
+// prefs stores the interface language and colour scheme (cookies) and needs no login: switching the
+// language has to work on the login page too.
 func (h *Handler) prefs(c *ctx) error {
 	const year = 365 * 24 * 3600
 	set := func(name, value string) {
-		// 只有 https 的 public_url 时才能加 Secure，和会话 Cookie 一样
-		http.SetCookie(c.w, &http.Cookie{Name: name, Value: value, Path: "/admin", MaxAge: year, HttpOnly: true, //nolint:gosec // 见上
+		// Secure can only be set with an https public_url, as with the session cookie
+		http.SetCookie(c.w, &http.Cookie{Name: name, Value: value, Path: "/admin", MaxAge: year, HttpOnly: true, //nolint:gosec // see above
 			Secure: c.secure, SameSite: http.SameSiteLaxMode})
 	}
 	if l := c.form.Get("lang"); l == "zh" || l == "en" {
@@ -171,7 +175,8 @@ func (h *Handler) prefs(c *ctx) error {
 	return c.redirect(safeNext(c.form.Get("next")))
 }
 
-// notices 是 PRG 跳转后可以显示的成功提示：?ok=<键>&v=<名字>。只认这里登记的键。
+// notices are the success notices that can be shown after a PRG redirect: ?ok=<key>&v=<name>. Only the
+// keys registered here are accepted.
 var notices = []string{
 	"user.created", "user.updated", "user.deleted", "rule.added", "rule.deleted", "ban.added", "ban.deleted",
 	"host.added", "host.deleted", "site.saved", "site.reset", "admin.created", "admin.updated", "admin.deleted",
@@ -191,7 +196,7 @@ func (c *ctx) notice() string {
 	return tr(c.lang, "notice."+k, "v", q.Get("v"))
 }
 
-// fmtDur 把时长写成"2 天 3 小时""45 分钟"这样，只取最大的两个单位。
+// fmtDur writes a duration as "2 d 3 h" or "45 min", taking only the two largest units.
 func fmtDur(lang string, d time.Duration) string {
 	d = max(d, 0)
 	days, hours, mins := int(d/(24*time.Hour)), int(d%(24*time.Hour)/time.Hour), int(d%time.Hour/time.Minute)
@@ -211,7 +216,7 @@ func fmtDur(lang string, d time.Duration) string {
 	return part("dur.seconds", int(d/time.Second))
 }
 
-// ago 是现在距 t 多久，用于"最后使用"之类。
+// ago is how long ago t was, for things like "last used".
 func ago(lang string, now, t time.Time) string {
 	if t.IsZero() {
 		return "—"

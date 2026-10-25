@@ -7,8 +7,9 @@ import (
 	"strings"
 )
 
-// Secret 是一个密钥，从环境变量或文件读取（适合 k8s Secret 和 systemd LoadCredential）。
-// 也可以用 value 直接写在配置里，但 check 会警告。打印和序列化时一律显示为 [redacted]。
+// Secret is a secret read from an environment variable or a file (suited to k8s Secrets and systemd
+// LoadCredential). It can also be written inline in the configuration with value, but check warns about it.
+// It always prints and serialises as [redacted].
 type Secret struct {
 	Env   string `yaml:"env"`
 	File  string `yaml:"file"`
@@ -17,21 +18,21 @@ type Secret struct {
 	resolved string
 }
 
-// redacted 是密钥打印出来的样子。
+// redacted is how a secret looks when printed.
 const redacted = "[redacted]"
 
-// IsSet 表示配置里写了这个密钥。
+// IsSet reports whether the secret is set in the configuration.
 func (s Secret) IsSet() bool { return s.Env != "" || s.File != "" || s.Value != "" }
 
-// Reveal 返回解析后的明文。只在真正使用时调用，不要写进日志。
+// Reveal returns the resolved plain text. Call it only where the secret is actually used, and never log it.
 func (s Secret) Reveal() string { return s.resolved }
 
 func (s Secret) String() string { return redacted }
 
-// GoString 防止 %#v 打印出明文。
+// GoString keeps %#v from printing the plain text.
 func (s Secret) GoString() string { return redacted }
 
-// MarshalYAML 只输出来源，不输出明文。
+// MarshalYAML outputs only the source, never the plain text.
 func (s Secret) MarshalYAML() (any, error) {
 	switch {
 	case s.Env != "":
@@ -44,7 +45,7 @@ func (s Secret) MarshalYAML() (any, error) {
 	return nil, nil
 }
 
-// resolve 读取环境变量或文件。文件末尾的换行会去掉。
+// resolve reads the environment variable or the file. Trailing newlines in the file are removed.
 func (s *Secret) resolve() error {
 	n := 0
 	for _, v := range []string{s.Env, s.File, s.Value} {

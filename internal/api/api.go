@@ -1,12 +1,15 @@
-// Package api 是管理后台的 JSON API，路径都在 /admin/api/v1/ 下，自动化脚本和后台网页共用。
-// 校验和写入都在 internal/ops，这里只做认证、解析请求和输出 JSON。
+// Package api is the admin console's JSON API. Every path is under /admin/api/v1/, and it is shared by
+// automation scripts and the console's web pages. Validation and writes live in internal/ops; this
+// package only authenticates, parses requests and writes JSON.
 //
-// 安全：
-//   - 用 Authorization: Bearer <令牌> 认证（令牌来自配置的 admin.api_tokens 或在后台创建，只存 SHA-256）；
-//     网页后台的会话也能用，写操作要带 X-CSRF-Token（见 Options.Session）；
-//   - viewer 只能读，写操作要 admin；所有写操作记审计；
-//   - admin.public: false 时 Host 只接受 admin.public_url 的主机、localhost 或 IP（不对返回 421），防 DNS 重绑定；
-//   - 认证失败按 IP 限次数；请求体最多 64 KiB，只接受 JSON。
+// Security:
+//   - authentication with Authorization: Bearer <token> (tokens come from admin.api_tokens in the
+//     configuration or are created in the console; only their SHA-256 is stored); web console sessions
+//     work too, and writes must carry X-CSRF-Token (see Options.Session);
+//   - viewer can only read, writes require admin; every write is recorded in the audit log;
+//   - with admin.public: false, Host must be the admin.public_url host, localhost or an IP address
+//     (otherwise 421), against DNS rebinding;
+//   - failed authentication is limited per IP; request bodies are at most 64 KiB and only JSON is accepted.
 package api
 
 import (
@@ -28,19 +31,20 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/version"
 )
 
-// Prefix 是 API 的路径前缀。
+// Prefix is the API's path prefix.
 const Prefix = "/admin/api/v1"
 
-// Session 认证网页后台的会话，在请求没有 Authorization 头时调用。没有会话时 ok 为 false；
-// 有会话但写操作没通过 CSRF 或来源检查时返回 err（API 返回 403）。
+// Session authenticates a web console session; it is called when the request has no Authorization
+// header. ok is false when there is no session; err is returned when there is a session but a write fails
+// the CSRF or origin check (the API answers 403).
 type Session func(r *http.Request) (who ops.Actor, role string, ok bool, err error)
 
-// Options 是可选的设置。
+// Options are optional settings.
 type Options struct {
 	Session Session
 }
 
-// API 处理 /admin/api/v1/ 下的请求。
+// API handles requests under /admin/api/v1/.
 type API struct {
 	app *app.App
 	ops *ops.Ops
@@ -48,7 +52,7 @@ type API struct {
 	mux *http.ServeMux
 }
 
-// New 创建 API。
+// New creates the API.
 func New(a *app.App, o *ops.Ops, opt Options) *API {
 	x := &API{app: a, ops: o, opt: opt, mux: http.NewServeMux()}
 	r := func(pattern string, role string, h func(w http.ResponseWriter, r *http.Request, who ops.Actor)) {
@@ -121,7 +125,8 @@ func (x *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	x.mux.ServeHTTP(w, r)
 }
 
-// clientAddr 是请求方的地址：经过 client_ip.trusted_proxies 里的反向代理时取代理转来的地址。
+// clientAddr is the requester's address: when the request comes through a reverse proxy listed in
+// client_ip.trusted_proxies, the address the proxy forwards is used.
 func (x *API) clientAddr(r *http.Request) netip.Addr {
 	if c, _ := x.app.Runtime().IPs.ClientIP(r); c.IsValid() {
 		return c
@@ -170,7 +175,8 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-// writeOpsErr 输出 ops 返回的错误：*ops.Error 带它自己的状态码，其他错误是 500。
+// writeOpsErr writes an error returned by ops: an *ops.Error carries its own status code, other errors
+// are 500.
 func writeOpsErr(w http.ResponseWriter, err error) {
 	writeErr(w, ops.Status(err), err.Error())
 }
@@ -189,7 +195,7 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 
-// done 在 err 为 nil 时输出成功的结果，否则输出错误。
+// done writes the successful result when err is nil, and the error otherwise.
 func done(w http.ResponseWriter, err error, status int, v any) {
 	switch {
 	case err != nil:
@@ -201,10 +207,11 @@ func done(w http.ResponseWriter, err error, status int, v any) {
 	}
 }
 
-// ---- 状态与统计
+// ---- Status and statistics
 
-// statusReport 是和用法页 /status.json 一样的服务状态：总体状态、各上游近 24 小时的可用率、本站的请求成功率。
-// 用法页关掉了服务状态（site.show_status: false）时这里照样可以看。
+// statusReport is the same service status as the usage page's /status.json: the overall status, each
+// upstream's availability over the last 24 hours, and this site's request success rate. It is available
+// here even when the usage page has the service status turned off (site.show_status: false).
 func (x *API) statusReport(w http.ResponseWriter, _ *http.Request, _ ops.Actor) {
 	writeJSON(w, http.StatusOK, x.app.StatusReport())
 }
@@ -266,7 +273,7 @@ func (x *API) requests(w http.ResponseWriter, r *http.Request, _ ops.Actor) {
 	writeJSON(w, http.StatusOK, x.app.Stats.Recent(f, intParam(r, "limit", 100, 1, 5000)))
 }
 
-// ---- 上游
+// ---- Upstreams
 
 func (x *API) upstreams(w http.ResponseWriter, _ *http.Request, _ ops.Actor) {
 	writeJSON(w, http.StatusOK, x.ops.Upstreams())
@@ -293,7 +300,7 @@ func (x *API) delRedirectHost(w http.ResponseWriter, r *http.Request, who ops.Ac
 	done(w, x.ops.DeleteRedirectHost(who, r.PathValue("name"), r.PathValue("host")), http.StatusNoContent, nil)
 }
 
-// ---- 客户端账号
+// ---- Client accounts
 
 func (x *API) listUsers(w http.ResponseWriter, _ *http.Request, _ ops.Actor) {
 	writeJSON(w, http.StatusOK, x.ops.Users())
@@ -320,7 +327,7 @@ func (x *API) deleteUser(w http.ResponseWriter, r *http.Request, who ops.Actor) 
 	done(w, x.ops.DeleteUser(who, r.PathValue("name")), http.StatusNoContent, nil)
 }
 
-// ---- 规则与封禁
+// ---- Rules and bans
 
 func (x *API) listRules(w http.ResponseWriter, _ *http.Request, _ ops.Actor) {
 	writeJSON(w, http.StatusOK, x.ops.Rules())
@@ -385,7 +392,7 @@ func (x *API) testImage(w http.ResponseWriter, r *http.Request, _ ops.Actor) {
 	writeJSON(w, http.StatusOK, x.ops.TestImage(b.Image))
 }
 
-// ---- 令牌与管理员
+// ---- Tokens and administrators
 
 func (x *API) listTokens(w http.ResponseWriter, _ *http.Request, _ ops.Actor) {
 	writeJSON(w, http.StatusOK, x.ops.Tokens())
@@ -437,7 +444,7 @@ func (x *API) deleteAdmin(w http.ResponseWriter, r *http.Request, who ops.Actor)
 	done(w, x.ops.DeleteAdmin(who, r.PathValue("name")), http.StatusNoContent, nil)
 }
 
-// ---- 站点、审计、配置、重载
+// ---- Site, audit log, configuration, reload
 
 func (x *API) site(w http.ResponseWriter, _ *http.Request, _ ops.Actor) {
 	writeJSON(w, http.StatusOK, x.ops.Site())
@@ -467,7 +474,8 @@ func (x *API) audit(w http.ResponseWriter, r *http.Request, _ ops.Actor) {
 	writeJSON(w, http.StatusOK, x.app.Store.AuditLog(intParam(r, "limit", 100, 1, 1000)))
 }
 
-// config 是生效的配置（叠加了后台的修改）；?view=file 是只按配置文件的。
+// config is the effective configuration (with the console overrides applied); ?view=file is the
+// configuration file alone.
 func (x *API) config(w http.ResponseWriter, r *http.Request, _ ops.Actor) {
 	b, err := x.ops.ConfigText(r.URL.Query().Get("view"))
 	done(w, err, http.StatusOK, map[string]string{"yaml": string(b)})
@@ -477,7 +485,8 @@ func (x *API) listOverrides(w http.ResponseWriter, _ *http.Request, _ ops.Actor)
 	writeJSON(w, http.StatusOK, map[string]any{"editable": x.ops.ConfigEditable(), "overrides": x.ops.Overrides()})
 }
 
-// setOverride 的请求体是这一段的 JSON：limits、cache、proxy、site、upstreams/<名字> 是对象，entrances 是数组。
+// setOverride takes the section's JSON as the request body: limits, cache, proxy, site and
+// upstreams/<name> are objects, entrances is an array.
 func (x *API) setOverride(w http.ResponseWriter, r *http.Request, who ops.Actor) {
 	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 		writeErr(w, http.StatusUnsupportedMediaType, "请求体要用 application/json")
@@ -494,7 +503,7 @@ func (x *API) setOverride(w http.ResponseWriter, r *http.Request, who ops.Actor)
 		writeOpsErr(w, err)
 		return
 	}
-	// 全都和配置文件一样时这一处被去掉，override 为 null
+	// When everything matches the configuration file the override is removed and override is null
 	var cur *ops.OverrideView
 	for _, o := range x.ops.Overrides() {
 		if o.Key == key {
@@ -508,7 +517,8 @@ func (x *API) resetOverride(w http.ResponseWriter, r *http.Request, who ops.Acto
 	done(w, x.ops.ResetConfig(who, r.PathValue("key")), http.StatusNoContent, nil)
 }
 
-// exportConfig 导出生效中的后台修改：?format=overrides（默认，只有改过的部分）或 merged（合进配置文件）。
+// exportConfig exports the console overrides in effect: ?format=overrides (the default, only the changed
+// parts) or merged (merged into the configuration file).
 func (x *API) exportConfig(w http.ResponseWriter, r *http.Request, _ ops.Actor) {
 	b, err := x.ops.ExportConfig(r.URL.Query().Get("format"))
 	done(w, err, http.StatusOK, map[string]string{"yaml": string(b)})

@@ -1,8 +1,10 @@
-// Package limit 是限流和并发上限。
+// Package limit provides rate limits and concurrency caps.
 //
-// 客户端按登录的用户名计，没登录时按 IP 计（IPv6 按 /64，一台机器通常有整个 /64）。
-// manifest 请求用令牌桶（HEAD 按一个小权重算）；镜像层按每个客户端的并发流数限制；另有全局的并发上限。
-// 记住的客户端数有上限（LRU），超过时淘汰最久没来的，不会整表清空。
+// Clients are counted by their signed-in user name, or by IP when not signed in (IPv6 by /64, since a
+// machine usually has a whole /64). Manifest requests use a token bucket (HEAD counts with a small
+// weight); layers are limited by the number of concurrent streams per client; there are also global
+// concurrency caps. The number of remembered clients is bounded (LRU): beyond the limit the client
+// seen least recently is evicted, rather than clearing the whole table.
 package limit
 
 import (
@@ -14,7 +16,7 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/lru"
 )
 
-// Key 是客户端的计数键。
+// Key is the counting key for a client.
 func Key(user string, ip netip.Addr) string {
 	if user != "" {
 		return "user:" + user
@@ -27,16 +29,16 @@ func Key(user string, ip netip.Addr) string {
 	return "ip:" + ip.String()
 }
 
-// Config 是限流参数，热重载时整体替换。
+// Config holds the rate limit parameters and is replaced as a whole on hot reload.
 type Config struct {
-	ManifestRate         float64 // 每秒，0 表示不限
+	ManifestRate         float64 // per second, 0 means unlimited
 	ManifestBurst        int
 	HeadWeight           float64
-	BlobStreamsPerClient int // 0 表示不限
-	MaxInflight          int // 0 表示不限
-	MaxBlobStreams       int // 0 表示不限
+	BlobStreamsPerClient int // 0 means unlimited
+	MaxInflight          int // 0 means unlimited
+	MaxBlobStreams       int // 0 means unlimited
 	TrackedClients       int
-	AuthFailuresPerMin   int // 每个 IP 每分钟允许的登录失败次数，0 表示不限
+	AuthFailuresPerMin   int // sign-in failures allowed per IP per minute, 0 means unlimited
 	Exempt               []netip.Prefix
 }
 
@@ -46,22 +48,24 @@ type bucket struct {
 	last   time.Time
 }
 
-// Limiter 并发安全。计数状态在参数替换时保留。
+// Limiter is safe for concurrent use. Counter state is kept when the parameters are replaced.
 type Limiter struct {
 	cfg     atomic.Pointer[Config]
 	buckets *lru.Cache[string, *bucket]
 	authBkt *lru.Cache[string, *bucket]
 	now     func() time.Time
 
-	mu      sync.Mutex
-	streams map[string]int // 只记有流在进行的客户端，流结束就删掉，所以大小受并发数限制
+	mu sync.Mutex
+	// Only clients with streams in progress are recorded and they are removed when their streams
+	// end, so the size is bounded by concurrency
+	streams map[string]int
 
 	inflight    atomic.Int64
 	blobStreams atomic.Int64
 	limited     atomic.Uint64
 }
 
-// New 创建 Limiter。
+// New creates a Limiter.
 func New(c Config) *Limiter {
 	l := &Limiter{
 		buckets: lru.New[string, *bucket](max(c.TrackedClients, 1), 0),
@@ -72,7 +76,8 @@ func New(c Config) *Limiter {
 	return l
 }
 
-// SetConfig 替换参数（热重载）。已有的计数保留；TrackedClients 的变化在重启后生效。
+// SetConfig replaces the parameters (hot reload). Existing counters are kept; a change to
+// TrackedClients takes effect after a restart.
 func (l *Limiter) SetConfig(c Config) { l.cfg.Store(&c) }
 
 func (l *Limiter) exempt(ip netip.Addr) bool {
@@ -84,19 +89,20 @@ func (l *Limiter) exempt(ip netip.Addr) bool {
 	return false
 }
 
-// Override 是某个账号单独的限流（0 表示用默认值）。
+// Override is a per-account rate limit (0 means use the default).
 type Override struct {
 	ManifestRate float64
 	BlobStreams  int
 }
 
-// AllowManifest 对一次 manifest 请求扣令牌。不允许时返回建议的重试等待时间。
+// AllowManifest takes tokens for one manifest request. When the request is not allowed it returns the
+// suggested wait before retrying.
 func (l *Limiter) AllowManifest(key string, ip netip.Addr, head bool, ov Override) (bool, time.Duration) {
 	c := l.cfg.Load()
 	rate, burst := c.ManifestRate, float64(c.ManifestBurst)
 	if ov.ManifestRate > 0 {
 		rate = ov.ManifestRate
-		burst = max(burst, rate*60) // 单独放宽的账号，突发至少能用一分钟的量
+		burst = max(burst, rate*60) // an account with a raised limit gets a burst of at least one minute's worth
 	}
 	if rate <= 0 || l.exempt(ip) {
 		return true, 0
@@ -124,7 +130,8 @@ func (l *Limiter) AllowManifest(key string, ip netip.Addr, head bool, ov Overrid
 	return false, max(wait, time.Second)
 }
 
-// authBucket 返回这个 IP 的登录失败令牌桶（补满后可以失败 AuthFailuresPerMin 次，每分钟补回同样的数）。
+// authBucket returns the sign-in failure token bucket for this IP (when full it allows
+// AuthFailuresPerMin failures, and the same number is refilled every minute).
 func (l *Limiter) authBucket(ip netip.Addr) (*bucket, float64, float64) {
 	c := l.cfg.Load()
 	burst := float64(c.AuthFailuresPerMin)
@@ -137,7 +144,8 @@ func (l *Limiter) authBucket(ip netip.Addr) (*bucket, float64, float64) {
 	return b, burst, burst / 60
 }
 
-// AuthAllowed 判断这个 IP 现在能不能再尝试登录（只看，不扣）。
+// AuthAllowed reports whether this IP may attempt to sign in again now (it only checks and does not
+// take a token).
 func (l *Limiter) AuthAllowed(ip netip.Addr) (bool, time.Duration) {
 	if l.cfg.Load().AuthFailuresPerMin <= 0 {
 		return true, 0
@@ -155,7 +163,7 @@ func (l *Limiter) AuthAllowed(ip netip.Addr) (bool, time.Duration) {
 	return false, max(time.Duration((1-b.tokens)/rate*float64(time.Second)), time.Second)
 }
 
-// AuthFailed 记一次登录失败。
+// AuthFailed records one sign-in failure.
 func (l *Limiter) AuthFailed(ip netip.Addr) {
 	if l.cfg.Load().AuthFailuresPerMin <= 0 {
 		return
@@ -166,8 +174,8 @@ func (l *Limiter) AuthFailed(ip netip.Addr) {
 	b.mu.Unlock()
 }
 
-// AcquireBlob 占一个镜像层流的名额（每个客户端的和全局的）。ok 为 false 时 reason 是 client 或 global。
-// 成功时必须调用 release。
+// AcquireBlob takes a layer stream slot (both per client and global). When ok is false, reason is
+// client or global. On success, release must be called.
 func (l *Limiter) AcquireBlob(key string, ip netip.Addr, ov Override) (release func(), ok bool, reason string) {
 	c := l.cfg.Load()
 	if c.MaxBlobStreams > 0 && l.blobStreams.Add(1) > int64(c.MaxBlobStreams) {
@@ -207,7 +215,7 @@ func (l *Limiter) AcquireBlob(key string, ip netip.Addr, ov Override) (release f
 	return func() { once.Do(func() { l.blobStreams.Add(-1) }) }, true, ""
 }
 
-// AcquireInflight 占一个全局的请求名额。成功时必须调用 release。
+// AcquireInflight takes a global request slot. On success, release must be called.
 func (l *Limiter) AcquireInflight() (release func(), ok bool) {
 	c := l.cfg.Load()
 	n := l.inflight.Add(1)
@@ -220,14 +228,14 @@ func (l *Limiter) AcquireInflight() (release func(), ok bool) {
 	return func() { once.Do(func() { l.inflight.Add(-1) }) }, true
 }
 
-// Stats 是当前的计数。
+// Stats holds the current counters.
 type Stats struct {
 	Inflight, BlobStreams int64
 	Limited               uint64
 	TrackedClients        int
 }
 
-// Stats 返回计数。
+// Stats returns the counters.
 func (l *Limiter) Stats() Stats {
 	return Stats{Inflight: l.inflight.Load(), BlobStreams: l.blobStreams.Load(), Limited: l.limited.Load(), TrackedClients: l.buckets.Len()}
 }

@@ -1,4 +1,5 @@
-// Package ref 校验镜像名、tag 和 digest，语法和 OCI distribution 规范一致。
+// Package ref validates image names, tags and digests, using the syntax of the OCI distribution
+// specification.
 package ref
 
 import (
@@ -7,16 +8,17 @@ import (
 )
 
 var (
-	// 仓库名的一段：小写字母数字，中间可以有 .、_、__ 或若干个 -
+	// One component of a repository name: lowercase letters and digits, optionally separated by
+	// ., _, __ or one or more -
 	componentRe = regexp.MustCompile(`^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$`)
 	tagRe       = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
 	digestRe    = regexp.MustCompile(`^(?:sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128})$`)
 )
 
-// MaxNameLength 是仓库名（不含 registry）的最大长度。
+// MaxNameLength is the maximum length of a repository name (excluding the registry).
 const MaxNameLength = 255
 
-// ValidName 判断仓库名（如 library/nginx）是否合法。
+// ValidName reports whether a repository name (such as library/nginx) is valid.
 func ValidName(name string) bool {
 	if name == "" || len(name) > MaxNameLength {
 		return false
@@ -29,11 +31,11 @@ func ValidName(name string) bool {
 	return true
 }
 
-// ValidTag 判断 tag 是否合法。
+// ValidTag reports whether a tag is valid.
 func ValidTag(tag string) bool { return tagRe.MatchString(tag) }
 
-// ValidDigest 判断 digest 是否合法。只接受 sha256 和 sha512。
+// ValidDigest reports whether a digest is valid. Only sha256 and sha512 are accepted.
 func ValidDigest(d string) bool { return digestRe.MatchString(d) }
 
-// IsDigest 判断引用看起来是不是 digest（含冒号）。
+// IsDigest reports whether a reference looks like a digest (contains a colon).
 func IsDigest(r string) bool { return strings.Contains(r, ":") }

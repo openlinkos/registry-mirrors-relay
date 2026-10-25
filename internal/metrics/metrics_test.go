@@ -14,8 +14,8 @@ func TestExposition(t *testing.T) {
 	m.Log(&accesslog.Entry{Upstream: "docker.io", Kind: "blob", Status: 200, Size: 1000, Duration: 2 * time.Second})
 	m.Log(&accesslog.Entry{Upstream: "docker.io", Kind: "blob", Status: 206, Size: 10, Duration: 10 * time.Millisecond})
 	m.Log(&accesslog.Entry{Upstream: "ghcr.io", Kind: "manifest", Status: 404, Cache: "negative", Duration: time.Millisecond})
-	m.Register("relay_manifest_cache_bytes", "缓存占用", "gauge", func() []Sample { return []Sample{{Value: 4096}} })
-	m.Register("relay_upstream_breaker_open", "熔断", "gauge", func() []Sample {
+	m.Register("relay_manifest_cache_bytes", "Cache usage", "gauge", func() []Sample { return []Sample{{Value: 4096}} })
+	m.Register("relay_upstream_breaker_open", "Circuit breaker", "gauge", func() []Sample {
 		return []Sample{{Labels: Labels("upstream", `we"ird`), Value: 1}}
 	})
 	rec := httptest.NewRecorder()
@@ -36,10 +36,10 @@ func TestExposition(t *testing.T) {
 		"go_goroutines ",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("缺少：%s", want)
+			t.Errorf("missing: %s", want)
 		}
 	}
 	if !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain; version=0.0.4") {
-		t.Fatal("Content-Type 不对")
+		t.Fatal("wrong Content-Type")
 	}
 }

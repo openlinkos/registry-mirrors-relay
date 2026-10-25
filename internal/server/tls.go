@@ -17,13 +17,15 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
 )
 
-// tlsSetup 按 tls.mode 准备 HTTPS 入口：
-//   - files：读证书和私钥文件，文件变了自动换（证书续期后不用重启）；
-//   - acme：用 autocert 自动申请和续期，证书存在 tls.acme.cache_dir。TLS-ALPN-01 在 HTTPS 入口上完成，
-//     HTTP-01 在明文入口上完成（返回的 wrap 包在明文入口的 handler 外面，其余请求照常处理）。
+// tlsSetup prepares the HTTPS entrance according to tls.mode:
+//   - files: reads the certificate and private key files, and swaps them automatically when the files
+//     change (no restart needed after a certificate renewal);
+//   - acme: obtains and renews certificates automatically with autocert, stored in tls.acme.cache_dir.
+//     TLS-ALPN-01 is completed on the HTTPS entrance and HTTP-01 on the plain-text entrance (the returned
+//     wrap goes around the plain-text entrance's handler; other requests are handled as usual).
 //
-// ACME 只为 hosts 返回的域名申请证书（为 nil 时用 tls.acme.hosts），每次需要新证书时现取。
-// tls.mode 是 off 时返回 nil。
+// ACME only requests certificates for the domains hosts returns (tls.acme.hosts when nil), fetched afresh
+// each time a new certificate is needed. When tls.mode is off it returns nil.
 func tlsSetup(cfg *config.Config, log *slog.Logger, hosts func() []string) (conf *tls.Config, wrap func(http.Handler) http.Handler, err error) {
 	switch cfg.TLS.Mode {
 	case "files":
@@ -35,7 +37,7 @@ func tlsSetup(cfg *config.Config, log *slog.Logger, hosts func() []string) (conf
 	case "acme":
 		a := cfg.TLS.ACME
 		if err := os.MkdirAll(a.CacheDir, 0o700); err != nil {
-			return nil, nil, fmt.Errorf("tls.acme.cache_dir：%w", err)
+			return nil, nil, fmt.Errorf("tls.acme.cache_dir: %w", err)
 		}
 		if hosts == nil {
 			hosts = func() []string { return a.Hosts }
@@ -43,7 +45,7 @@ func tlsSetup(cfg *config.Config, log *slog.Logger, hosts func() []string) (conf
 		m := &autocert.Manager{
 			Prompt: autocert.AcceptTOS,
 			Cache:  autocert.DirCache(a.CacheDir),
-			// 只在缓存里没有这个域名的证书时调用
+			// Called only when the cache has no certificate for this domain
 			HostPolicy: func(ctx context.Context, host string) error {
 				return autocert.HostWhitelist(hosts()...)(ctx, host)
 			},
@@ -52,17 +54,19 @@ func tlsSetup(cfg *config.Config, log *slog.Logger, hosts func() []string) (conf
 		if a.DirectoryURL != "" {
 			m.Client = &acme.Client{DirectoryURL: a.DirectoryURL}
 		}
-		conf := m.TLSConfig() // 带上 acme-tls/1，用于 TLS-ALPN-01
+		conf := m.TLSConfig() // includes acme-tls/1, for TLS-ALPN-01
 		conf.MinVersion = tls.VersionTLS12
 		return conf, m.HTTPHandler, nil
 	}
 	return nil, nil, nil
 }
 
-// reloadEvery 是检查证书文件有没有变的最短间隔（握手时检查，不另开协程）。
+// reloadEvery is the minimum interval between checks for changed certificate files (checked during the
+// handshake, without a separate goroutine).
 var reloadEvery = 30 * time.Second
 
-// certReloader 在握手时按需重新读取证书文件：文件的修改时间或大小变了就重新加载，加载失败时继续用旧证书。
+// certReloader rereads the certificate files during the handshake as needed: it reloads them when their
+// modification time or size changes, and keeps the old certificate if loading fails.
 type certReloader struct {
 	certFile, keyFile string
 	log               *slog.Logger
@@ -89,11 +93,11 @@ func fileStamp(paths ...string) (string, error) {
 func (r *certReloader) load() error {
 	stamp, err := fileStamp(r.certFile, r.keyFile)
 	if err != nil {
-		return fmt.Errorf("读取证书：%w", err)
+		return fmt.Errorf("read certificate: %w", err)
 	}
 	c, err := tls.LoadX509KeyPair(r.certFile, r.keyFile)
 	if err != nil {
-		return fmt.Errorf("读取证书：%w", err)
+		return fmt.Errorf("read certificate: %w", err)
 	}
 	r.cert, r.stamp = &c, stamp
 	return nil
@@ -106,14 +110,14 @@ func (r *certReloader) get(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 		r.checked = now
 		if stamp, err := fileStamp(r.certFile, r.keyFile); err == nil && stamp != r.stamp {
 			if err := r.load(); err != nil {
-				r.log.Error("证书文件变了，但读取失败，继续用原来的证书", "err", err)
+				r.log.Error("certificate files changed but could not be read, keeping the previous certificate", "err", err)
 			} else {
-				r.log.Info("已重新加载证书", "cert", r.certFile)
+				r.log.Info("certificate reloaded", "cert", r.certFile)
 			}
 		}
 	}
 	if r.cert == nil {
-		return nil, errors.New("没有可用的证书")
+		return nil, errors.New("no certificate available")
 	}
 	return r.cert, nil
 }

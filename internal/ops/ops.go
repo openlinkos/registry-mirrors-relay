@@ -1,5 +1,6 @@
-// Package ops 是管理操作：校验输入、修改运营数据、记审计、重新生成 Runtime。
-// 管理 API 和网页后台都调用这里，两边的校验规则因此只有一份。
+// Package ops holds the management operations: validate the input, change the operational data,
+// write the audit log and rebuild the Runtime. Both the management API and the web console call
+// into it, so there is only one copy of the validation rules.
 package ops
 
 import (
@@ -17,21 +18,22 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/store"
 )
 
-// Actor 是执行操作的人或程序，写进审计。
+// Actor is the person or program performing an operation; it is written to the audit log.
 type Actor struct {
-	Kind string // token（API 令牌）| admin（后台登录）| cli | system
+	Kind string // token (API token) | admin (console login) | cli | system
 	Name string
 	IP   netip.Addr
 }
 
 func (a Actor) String() string { return a.Kind + ":" + a.Name }
 
-// Error 是可以告诉操作者的错误，带建议的 HTTP 状态码。说明见 messages.go，Error() 是中文。
+// Error is an error that can be shown to the operator, with a suggested HTTP status code. The
+// messages are in messages.go; Error() returns the Chinese one.
 type Error struct {
 	Status int
 	Key    string
-	Arg    string // 说明里的 {v}
-	Detail string // 附在说明后面的原始错误（例如配置文件哪里写错了）
+	Arg    string // the {v} in the message
+	Detail string // the original error appended to the message (for example, what is wrong in the configuration file)
 }
 
 func (e *Error) Error() string { return e.Message("zh") }
@@ -41,7 +43,7 @@ func notFound(key string) error  { return &Error{Status: http.StatusNotFound, Ke
 func conflict(key string) error  { return &Error{Status: http.StatusConflict, Key: key} }
 func forbidden(key string) error { return &Error{Status: http.StatusForbidden, Key: key} }
 
-// Status 返回错误对应的 HTTP 状态码：*Error 用它自己的，其他一律 500。
+// Status returns the HTTP status code for an error: an *Error uses its own, anything else is 500.
 func Status(err error) int {
 	var e *Error
 	if errors.As(err, &e) {
@@ -50,20 +52,21 @@ func Status(err error) int {
 	return http.StatusInternalServerError
 }
 
-// Ops 执行管理操作。
+// Ops performs management operations.
 type Ops struct {
 	app *app.App
-	// OnAdminChange 在后台管理员的口令、角色、停用状态改变或被删除后调用（网页后台用来结束他的会话）。
+	// OnAdminChange is called after a console administrator's password, role or disabled state changes,
+	// or after the administrator is deleted (the web console uses it to end their sessions).
 	OnAdminChange func(name string)
 }
 
-// New 创建 Ops。
+// New creates an Ops.
 func New(a *app.App) *Ops { return &Ops{app: a} }
 
-// App 返回底层的 App（只读的展示用）。
+// App returns the underlying App (for read-only display).
 func (o *Ops) App() *app.App { return o.app }
 
-// Audit 记一条审计。
+// Audit writes an audit log entry.
 func (o *Ops) Audit(who Actor, action, target, detail string) {
 	ip := ""
 	if who.IP.IsValid() {
@@ -72,7 +75,7 @@ func (o *Ops) Audit(who Actor, action, target, detail string) {
 	_ = o.app.Store.Audit(store.AuditEntry{Actor: who.String(), IP: ip, Action: action, Target: target, Detail: truncate(detail, 300)})
 }
 
-// change 修改运营数据、记审计、重新生成 Runtime。
+// change changes the operational data, writes the audit log and rebuilds the Runtime.
 func (o *Ops) change(who Actor, action, target, detail string, fn func(*store.Data) error) error {
 	err := o.app.Store.Update(fn)
 	switch {
@@ -88,7 +91,7 @@ func (o *Ops) change(who Actor, action, target, detail string, fn func(*store.Da
 	return nil
 }
 
-// Writable 表示运营数据能不能改。
+// Writable reports whether the operational data can be changed.
 func (o *Ops) Writable() bool { return o.app.Store.Writable() }
 
 func truncate(s string, n int) string {
@@ -98,14 +101,15 @@ func truncate(s string, n int) string {
 	return s[:n]
 }
 
-// GeneratePassword 生成一个随机口令（26 个字符的 base32，130 位）。
+// GeneratePassword generates a random password (26 base32 characters, 130 bits).
 func GeneratePassword() string { return rand.Text() }
 
-// HostAllowed 判断管理后台和 API 能不能用这个 Host 访问。
-//   - admin.public（默认）：任何域名都行。后台本来就对所有地址开放，DNS 重绑定拿到的也只是登录页，
-//     别的域名下没有会话 Cookie。
-//   - admin.public: false：只接受 public_url 的主机，或者 DirectHost（本机、SSH 转发、kubectl port-forward、
-//     局域网里用 IP 直接打开）。其他域名一律拒绝，防 DNS 重绑定把只在内网的后台暴露给外面的网页。
+// HostAllowed reports whether the admin console and API may be accessed with this Host.
+//   - admin.public (the default): any domain is fine. The console is open to every address anyway, DNS
+//     rebinding only gets the login page, and there is no session cookie under another domain.
+//   - admin.public: false: only the host of public_url, or a DirectHost (this machine, SSH forwarding,
+//     kubectl port-forward, opening it by IP on the LAN). Every other domain is refused, so that DNS
+//     rebinding cannot expose an internal-only console to outside web pages.
 func HostAllowed(a config.Admin, r *http.Request) bool {
 	host := strings.ToLower(r.Host)
 	if a.Public {
@@ -119,8 +123,8 @@ func HostAllowed(a config.Admin, r *http.Request) bool {
 	return DirectHost(host)
 }
 
-// DirectHost 判断 Host（可以带端口）是不是 localhost 或一个 IP 地址。DNS 重绑定要靠域名，用 IP 访问时不存在；
-// 带 zone 的 IPv6 不接受。
+// DirectHost reports whether the Host (a port is allowed) is localhost or an IP address. DNS rebinding
+// relies on a domain name, so it does not apply when accessing by IP; IPv6 with a zone is not accepted.
 func DirectHost(host string) bool {
 	if LoopbackHost(host) {
 		return true
@@ -133,7 +137,7 @@ func DirectHost(host string) bool {
 	return err == nil && a.Zone() == ""
 }
 
-// LoopbackHost 判断 Host（可以带端口）是不是 localhost 或回环地址。
+// LoopbackHost reports whether the Host (a port is allowed) is localhost or a loopback address.
 func LoopbackHost(host string) bool {
 	h := host
 	if hh, _, err := net.SplitHostPort(host); err == nil {

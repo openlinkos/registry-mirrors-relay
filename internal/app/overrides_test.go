@@ -17,7 +17,7 @@ import (
 
 func ptr(s string) *string { return &s }
 
-// rewrite 改配置文件并重新加载。
+// rewrite changes the configuration file and reloads it.
 func rewrite(t *testing.T, a *App, path, yaml string) {
 	t.Helper()
 	yaml = "data_dir: " + filepath.ToSlash(filepath.Dir(path)) + "\nlog: {access: {output: \"off\"}}\n" + yaml
@@ -55,52 +55,52 @@ func TestSetOverride(t *testing.T) {
 	}
 	rt := a.Runtime()
 	if rt.Config.Limits.ManifestRate != 7 || rt.Config.Limits.ManifestBurst != 20 || rt.FileConfig.Limits.ManifestRate != 2 {
-		t.Fatalf("生效的是叠加后的，FileConfig 是配置文件的：%+v %+v", rt.Config.Limits, rt.FileConfig.Limits)
+		t.Fatalf("the layered configuration should be in effect and FileConfig the file's: %+v %+v", rt.Config.Limits, rt.FileConfig.Limits)
 	}
 	if rt.Pool != first.Pool {
-		t.Fatal("只改限流，连接池应沿用")
+		t.Fatal("only the limits changed; the connection pool should be reused")
 	}
 	saved := a.Store.Data().ConfigOverrides["limits"]
 	if saved.UpdatedBy != "admin:alice" || saved.Base == "" || !strings.Contains(saved.Value, "manifest_burst") {
-		t.Fatalf("存下的修改：%+v", saved)
+		t.Fatalf("stored override: %+v", saved)
 	}
 	if st := stateOf(a, "limits"); st.State != OverrideActive {
-		t.Fatalf("状态：%+v", st)
+		t.Fatalf("state: %+v", st)
 	}
 
-	// 和配置文件一样的字段不存；全都一样时等于去掉
+	// Fields equal to the configuration file are not stored; when all are equal it amounts to removal
 	if _, err := a.SetOverride("limits", ptr("manifest_rate: 2\nmanifest_burst: 20"), "admin:alice"); err != nil {
 		t.Fatal(err)
 	}
 	if v := a.Store.Data().ConfigOverrides["limits"].Value; strings.Contains(v, "manifest_rate") {
-		t.Fatalf("和配置文件一样的字段不存：%q", v)
+		t.Fatalf("fields equal to the configuration file should not be stored: %q", v)
 	}
 	if _, err := a.SetOverride("limits", ptr("manifest_rate: 2"), "admin:alice"); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := a.Store.Data().ConfigOverrides["limits"]; ok || len(a.Runtime().Overrides) != 0 {
-		t.Fatal("全都和配置文件一样时去掉这一处")
+		t.Fatal("the override should be removed when everything equals the configuration file")
 	}
 
-	// 改上游的连接设置：新的连接池
+	// Changing the upstream connection settings: a new connection pool
 	before := a.Runtime()
 	if _, err := a.SetOverride("proxy", ptr("max_redirects: 5"), "admin:alice"); err != nil {
 		t.Fatal(err)
 	}
 	if a.Runtime().Pool == before.Pool {
-		t.Fatal("改了 proxy 应新建连接池")
+		t.Fatal("changing proxy should create a new connection pool")
 	}
-	// 去掉
+	// Remove
 	if _, err := a.SetOverride("proxy", nil, "admin:alice"); err != nil || a.Runtime().Config.Proxy.MaxRedirects != 3 {
-		t.Fatalf("重置后回到配置文件的值：%v %d", err, a.Runtime().Config.Proxy.MaxRedirects)
+		t.Fatalf("after a reset the configuration file's value should apply: %v %d", err, a.Runtime().Config.Proxy.MaxRedirects)
 	}
 
-	// 指标
+	// Metrics
 	_, _ = a.SetOverride("cache", ptr("tag_ttl: 1m"), "admin:alice")
 	rec := httptest.NewRecorder()
 	a.Metrics.ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
 	if !strings.Contains(rec.Body.String(), `relay_config_overrides{key="cache",state="active"} 1`) {
-		t.Fatalf("指标：\n%s", rec.Body.String())
+		t.Fatalf("metrics:\n%s", rec.Body.String())
 	}
 }
 
@@ -110,26 +110,26 @@ func TestSetOverrideRejectedChangesNothing(t *testing.T) {
 	data, rt := dataJSON(t, a), a.Runtime()
 	var oe *OverrideError
 	for _, c := range []struct{ key, value string }{
-		{"entrances", "- {hosts: [a.example.com], upstream: nope.example.com}"}, // 合起来通不过校验
-		{"limits", "tracked_clients: 5"},                                        // 不能改的字段
-		{"listen", "http: :80"},                                                 // 不能改的段
-		{"cache", "tag_ttl: soon"},                                              // 写法不对
+		{"entrances", "- {hosts: [a.example.com], upstream: nope.example.com}"}, // fails validation when combined
+		{"limits", "tracked_clients: 5"},                                        // a field that cannot be changed
+		{"listen", "http: :80"},                                                 // a section that cannot be changed
+		{"cache", "tag_ttl: soon"},                                              // malformed
 	} {
 		if _, err := a.SetOverride(c.key, ptr(c.value), "admin:alice"); !errors.As(err, &oe) {
-			t.Fatalf("%s 应被拒绝：%v", c.key, err)
+			t.Fatalf("%s should be rejected: %v", c.key, err)
 		}
 		if dataJSON(t, a) != data || a.Runtime() != rt {
-			t.Fatalf("%s 被拒绝时运营数据库和生效的设置都不能变", c.key)
+			t.Fatalf("%s: a rejected override must change neither the operational database nor the effective settings", c.key)
 		}
 	}
-	// 去掉不存在的修改：什么都不做
+	// Removing an override that does not exist: nothing happens
 	if _, err := a.SetOverride("cache", nil, "admin:alice"); err != nil || a.Runtime() != rt {
-		t.Fatalf("去掉不存在的修改：%v", err)
+		t.Fatalf("removing an override that does not exist: %v", err)
 	}
-	// 新的提醒
+	// New warnings
 	w, err := a.SetOverride("upstreams/cr.example.com", ptr("registry: registry.example.com"), "admin:alice")
 	if err != nil || !strings.Contains(strings.Join(w, "\n"), "token_realm_hosts") {
-		t.Fatalf("应返回这次修改带来的提醒：%v %v", w, err)
+		t.Fatalf("should return the warnings this change brings: %v %v", w, err)
 	}
 }
 
@@ -142,47 +142,49 @@ func TestOverridesAgainstFileChanges(t *testing.T) {
 		{"entrances", "- {hosts: [mirror.example.com]}\n- {hosts: [cr.example.com], upstream: cr.example.com}"},
 	} {
 		if _, err := a.SetOverride(c.key, ptr(c.value), "admin:alice"); err != nil {
-			t.Fatalf("%s：%v", c.key, err)
+			t.Fatalf("%s: %v", c.key, err)
 		}
 	}
 
-	// 配置文件改了限流（drift），并且给 quay.io 加了别名 cr.example.com，和后台新建的上游重名。
-	// 配置文件是基准：这个上游暂停，引用它的入口也跟着暂停，不相关的照常生效。
+	// The configuration file changes the limits (drift) and gives quay.io the alias cr.example.com,
+	// clashing with the upstream created in the console. The configuration file is the baseline: that
+	// upstream is suspended, the entrances that refer to it are suspended with it, unrelated overrides
+	// apply as usual.
 	rewrite(t, a, path, "limits:\n  manifest_rate: 3\nupstreams:\n  quay.io:\n    aliases: [cr.example.com]\n")
 	rt := a.Runtime()
 	if st := stateOf(a, "limits"); st.State != OverrideDrift || rt.Config.Limits.ManifestRate != 7 {
-		t.Fatalf("配置文件改过这个字段：仍以后台为准，标为 drift：%+v %v", st, rt.Config.Limits.ManifestRate)
+		t.Fatalf("the configuration file changed this field: the console should still win, marked drift: %+v %v", st, rt.Config.Limits.ManifestRate)
 	}
 	if st := stateOf(a, "upstreams/cr.example.com"); st.State != OverrideSuspended || !strings.Contains(st.Error, "cr.example.com") {
-		t.Fatalf("和配置文件冲突的修改暂停：%+v", st)
+		t.Fatalf("an override that conflicts with the configuration file should be suspended: %+v", st)
 	}
-	// 入口引用了暂停的上游，也跟着暂停；不相关的照常生效
+	// Entrances referring to the suspended upstream are suspended too; unrelated ones apply as usual
 	if st := stateOf(a, "entrances"); st.State != OverrideSuspended {
-		t.Fatalf("依赖暂停的上游的入口也暂停：%+v", st)
+		t.Fatalf("entrances that depend on the suspended upstream should be suspended too: %+v", st)
 	}
 	if st := stateOf(a, "upstreams/ghcr.io"); st.State != OverrideActive || !rt.Config.Upstreams["ghcr.io"].Disabled {
-		t.Fatalf("不冲突的照常生效：%+v", st)
+		t.Fatalf("non-conflicting overrides should apply as usual: %+v", st)
 	}
 	if rt.Config.Entrances[0].Hosts[0] != "*" {
-		t.Fatalf("入口用配置文件的：%+v", rt.Config.Entrances)
+		t.Fatalf("entrances should come from the configuration file: %+v", rt.Config.Entrances)
 	}
 	if len(a.Store.Data().ConfigOverrides) != 4 {
-		t.Fatal("暂停的修改仍然保存着")
+		t.Fatal("suspended overrides should still be stored")
 	}
 
-	// 暂停的修改不影响保存别的
+	// Suspended overrides do not stop others from being saved
 	if _, err := a.SetOverride("cache", ptr("tag_ttl: 1m"), "admin:alice"); err != nil {
 		t.Fatal(err)
 	}
 	if st := stateOf(a, "entrances"); st.State != OverrideSuspended {
-		t.Fatalf("保存别的修改时，暂停的保持暂停：%+v", st)
+		t.Fatalf("saving another override should keep the suspended one suspended: %+v", st)
 	}
 
-	// 冲突解决了就恢复：先上游、再入口，一次重新加载都恢复
+	// Once the conflict is resolved they resume: the upstream, then the entrances, all in one reload
 	rewrite(t, a, path, "limits:\n  manifest_rate: 3\n")
 	for _, k := range []string{"upstreams/cr.example.com", "entrances"} {
 		if st := stateOf(a, k); !st.Applied() {
-			t.Fatalf("%s 应恢复：%+v", k, st)
+			t.Fatalf("%s should resume: %+v", k, st)
 		}
 	}
 	var actions []string
@@ -191,7 +193,7 @@ func TestOverridesAgainstFileChanges(t *testing.T) {
 	}
 	for _, want := range []string{"config.override.suspended entrances", "config.override.resumed entrances"} {
 		if !slices.Contains(actions, want) {
-			t.Fatalf("审计里应有 %q：%v", want, actions)
+			t.Fatalf("the audit log should contain %q: %v", want, actions)
 		}
 	}
 }
@@ -219,34 +221,35 @@ func TestOverridesOnRestartAndConfigEditOff(t *testing.T) {
 	_, _ = a.SetOverride("limits", ptr("max_inflight: 50"), "admin:alice")
 	a.Close()
 
-	// 重启时配置文件和修改冲突：照常启动，冲突的暂停
+	// On restart the configuration file conflicts with an override: start as usual and suspend it
 	a = open("entrances:\n  - {hosts: [ghcr.example.com], upstream: ghcr.io}\n")
 	if st := stateOf(a, "upstreams/ghcr.io"); st.State != OverrideSuspended {
-		t.Fatalf("重启时冲突的修改暂停：%+v", st)
+		t.Fatalf("a conflicting override should be suspended on restart: %+v", st)
 	}
 	if a.Runtime().Config.Limits.MaxInflight != 50 {
-		t.Fatal("不冲突的照常生效")
+		t.Fatal("non-conflicting overrides should apply as usual")
 	}
-	// 在后台换掉引用 ghcr.io 的入口：冲突没了，暂停的修改跟着恢复
+	// Replace the entrances that refer to ghcr.io in the console: the conflict is gone and the suspended
+	// override resumes with it
 	if _, err := a.SetOverride("entrances", ptr("- {hosts: ['*']}"), "admin:alice"); err != nil {
 		t.Fatal(err)
 	}
 	if st := stateOf(a, "upstreams/ghcr.io"); st.State != OverrideActive || !a.Runtime().Config.Upstreams["ghcr.io"].Disabled {
-		t.Fatalf("冲突解决后暂停的修改恢复：%+v", st)
+		t.Fatalf("the suspended override should resume once the conflict is resolved: %+v", st)
 	}
 	a.Close()
 
-	// admin.config_edit: false：修改都不生效，不能保存，只能去掉
+	// admin.config_edit: false: no overrides apply, none can be saved, they can only be removed
 	a = open("admin: {config_edit: false}\n")
 	defer a.Close()
 	if st := stateOf(a, "limits"); st.State != OverrideIgnored || a.Runtime().Config.Limits.MaxInflight == 50 {
-		t.Fatalf("config_edit 关掉时修改不生效：%+v", st)
+		t.Fatalf("overrides should not apply with config_edit off: %+v", st)
 	}
 	if _, err := a.SetOverride("cache", ptr("tag_ttl: 1m"), "admin:alice"); !errors.Is(err, ErrConfigEditOff) {
-		t.Fatalf("config_edit 关掉时不能保存：%v", err)
+		t.Fatalf("nothing should be saved with config_edit off: %v", err)
 	}
 	if _, err := a.SetOverride("limits", nil, "admin:alice"); err != nil || stateOf(a, "upstreams/ghcr.io").State != OverrideIgnored {
-		t.Fatalf("可以去掉，其余仍是 ignored：%v %+v", err, a.Runtime().Overrides)
+		t.Fatalf("removal should work and the rest stay ignored: %v %+v", err, a.Runtime().Overrides)
 	}
 }
 
@@ -261,6 +264,6 @@ func TestSetOverrideReadOnly(t *testing.T) {
 	}
 	defer a.Close()
 	if _, err := a.SetOverride("limits", ptr("max_inflight: 5"), "admin:alice"); !errors.Is(err, store.ErrReadOnly) {
-		t.Fatalf("只读存储：%v", err)
+		t.Fatalf("read-only store: %v", err)
 	}
 }

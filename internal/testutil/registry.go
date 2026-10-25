@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-// 媒体类型
+// Media types
 const (
 	MediaIndex    = "application/vnd.oci.image.index.v1+json"
 	MediaManifest = "application/vnd.oci.image.manifest.v1+json"
@@ -26,22 +26,23 @@ const (
 	MediaLayer    = "application/vnd.oci.image.layer.v1.tar+gzip"
 )
 
-// Digest 返回内容的 sha256 digest。
+// Digest returns the sha256 digest of the content.
 func Digest(b []byte) string {
 	s := sha256.Sum256(b)
 	return "sha256:" + hex.EncodeToString(s[:])
 }
 
-// Image 是一个多架构镜像：index 指向两个平台的 manifest，每个 manifest 有一个 config 和两个层。
+// Image is a multi-architecture image: the index points to manifests for two platforms, and each
+// manifest has one config and two layers.
 type Image struct {
 	Repo      string
 	Tag       string
 	Index     []byte
 	Manifests map[string][]byte // digest → manifest
-	Blobs     map[string][]byte // digest → 内容
+	Blobs     map[string][]byte // digest → content
 }
 
-// IndexDigest 是 index 的 digest。
+// IndexDigest is the digest of the index.
 func (im *Image) IndexDigest() string { return Digest(im.Index) }
 
 type descriptor struct {
@@ -51,7 +52,7 @@ type descriptor struct {
 	Platform  map[string]string `json:"platform,omitempty"`
 }
 
-// NewImage 生成一个随机内容的镜像。layerSize 是每层的字节数。
+// NewImage generates an image with random content. layerSize is the size of each layer in bytes.
 func NewImage(t testing.TB, repo, tag string, layerSize int) *Image {
 	t.Helper()
 	im := &Image{Repo: repo, Tag: tag, Manifests: map[string][]byte{}, Blobs: map[string][]byte{}}
@@ -81,33 +82,35 @@ func NewImage(t testing.TB, repo, tag string, layerSize int) *Image {
 	return im
 }
 
-// Registry 是一个假的上游：registry 本身、令牌服务和存放 blob 的 CDN，可以分开放在不同主机上。
+// Registry is a fake upstream: the registry itself, a token service and a CDN that stores blobs,
+// which can be placed on separate hosts.
 type Registry struct {
-	Host     string // registry 主机，如 registry.test
-	AuthHost string // 令牌服务主机；为空表示不要求令牌
-	CDNHost  string // blob 重定向到这里；为空表示 registry 直接返回 blob
-	// ManifestHost 不为空时，manifest 请求先 307 到这台主机（模拟 registry.k8s.io → pkg.dev）
+	Host     string // registry host, e.g. registry.test
+	AuthHost string // token service host; empty means no token is required
+	CDNHost  string // blobs are redirected here; empty means the registry returns blobs directly
+	// When ManifestHost is set, manifest requests are first sent with a 307 to this host (simulating
+	// registry.k8s.io → pkg.dev)
 	ManifestHost string
 	Service      string
 
 	mu        sync.Mutex
-	images    map[string]*Image // repo → 镜像
-	Calls     map[string]int    // "方法 主机 路径种类" → 次数
-	AuthSeen  map[string]int    // 主机 → 收到带 Authorization 的请求次数
-	Protos    map[string]string // "主机 路径种类" → 最近一次请求的协议（HTTP/1.1、HTTP/2.0）
+	images    map[string]*Image // repo → image
+	Calls     map[string]int    // "method host path-kind" → count
+	AuthSeen  map[string]int    // host → number of requests received with Authorization
+	Protos    map[string]string // "host path-kind" → protocol of the latest request (HTTP/1.1, HTTP/2.0)
 	TokenReqs []url.Values
-	// Fail 可以让某个路径返回指定状态（测试错误映射），键是 "主机 路径"
+	// Fail makes a path return a given status (to test error mapping); the key is "host path"
 	Fail map[string]FailWith
 }
 
-// FailWith 描述一次故意的失败。
+// FailWith describes a deliberate failure.
 type FailWith struct {
 	Status int
 	Body   string
 	Header http.Header
 }
 
-// NewRegistry 在测试网络里启动一个假上游。
+// NewRegistry starts a fake upstream in the test network.
 func NewRegistry(t testing.TB, n *Net, host, authHost, cdnHost string) *Registry {
 	r := &Registry{Host: host, AuthHost: authHost, CDNHost: cdnHost, Service: host,
 		images: map[string]*Image{}, Calls: map[string]int{}, AuthSeen: map[string]int{}, Protos: map[string]string{}, Fail: map[string]FailWith{}}
@@ -121,34 +124,34 @@ func NewRegistry(t testing.TB, n *Net, host, authHost, cdnHost string) *Registry
 	return r
 }
 
-// ServeManifestHost 再启动 ManifestHost（和 registry 同一个处理器）。
+// ServeManifestHost also starts ManifestHost (with the same handler as the registry).
 func (r *Registry) ServeManifestHost(t testing.TB, n *Net, host string) {
 	r.ManifestHost = host
 	n.Serve(t, r, host)
 }
 
-// Add 加入一个镜像。
+// Add adds an image.
 func (r *Registry) Add(im *Image) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.images[im.Repo] = im
 }
 
-// Count 返回某类请求的次数。
+// Count returns the number of requests of a kind.
 func (r *Registry) Count(key string) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.Calls[key]
 }
 
-// Proto 返回某台主机上某类请求最近一次用的协议。
+// Proto returns the protocol used by the latest request of a kind on a host.
 func (r *Registry) Proto(key string) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.Protos[key]
 }
 
-// AuthCount 返回某台主机收到带 Authorization 的请求次数。
+// AuthCount returns the number of requests with Authorization that a host received.
 func (r *Registry) AuthCount(host string) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -277,7 +280,7 @@ func (r *Registry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		if r.CDNHost != "" {
-			// 带签名的地址：签名只对 GET 有效
+			// Signed URL: the signature is valid only for GET
 			w.Header().Set("Location", "https://"+r.CDNHost+"/blobs/"+ref+"?sig=s3cr3t&method=GET")
 			w.WriteHeader(http.StatusTemporaryRedirect)
 			return
@@ -298,7 +301,7 @@ func (r *Registry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 func (r *Registry) serveCDN(w http.ResponseWriter, req *http.Request) {
 	if req.URL.Query().Get("sig") != "s3cr3t" || req.Method != http.MethodGet {
-		// 和 S3 一样：签名绑定了方法，HEAD 会被拒绝
+		// As with S3: the signature is bound to the method, so HEAD is refused
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}

@@ -14,7 +14,7 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/ops"
 )
 
-// ---- 设置
+// ---- Settings
 
 type settingsData struct {
 	Site     ops.SiteView
@@ -45,13 +45,13 @@ func (h *Handler) siteReset(c *ctx) error {
 	return c.done("/admin/settings", "site.reset", "")
 }
 
-// ---- 管理员、令牌、登录会话
+// ---- Administrators, tokens, login sessions
 
 type adminsData struct {
 	Admins   []ops.AdminView
 	Tokens   []ops.TokenView
 	Sessions []session
-	Current  string // 当前会话的标识
+	Current  string // the handle of the current session
 }
 
 func (h *Handler) adminsPage(c *ctx) error {
@@ -112,7 +112,8 @@ func (h *Handler) tokenCreate(c *ctx) error {
 		Crumbs: []crumb{{tr(c.lang, "nav.admins"), "/admin/admins"}}, Data: secretData{Kind: "token", Name: name, Secret: tok, Back: "/admin/admins", Base: h.base(c.r)}})
 }
 
-// base 是浏览器访问后台用的地址（协议加 Host），用在示例命令里。Host 是 public_url 的域名时用 public_url。
+// base is the address the browser uses to reach the console (scheme plus Host), for the example
+// commands. When Host is the public_url domain, public_url is used.
 func (h *Handler) base(r *http.Request) string {
 	if pub, _ := h.publicOrigin(); pub != "" {
 		if u, err := url.Parse(pub); err == nil && strings.EqualFold(u.Host, r.Host) {
@@ -122,8 +123,8 @@ func (h *Handler) base(r *http.Request) string {
 	return requestBase(r)
 }
 
-// requestBase 是这次访问的地址。经终止 TLS 的反向代理来的请求到这里是明文，按 X-Forwarded-Proto 判断，
-// 只是用来显示，不涉及安全。
+// requestBase is the address of this request. Requests through a TLS-terminating reverse proxy arrive
+// here in plain text, so X-Forwarded-Proto decides; it is only for display and has no security role.
 func requestBase(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
@@ -153,7 +154,7 @@ func (h *Handler) sessionRevoke(c *ctx) error {
 	return c.done("/admin/admins", "session.revoked", s.Admin)
 }
 
-// ---- 系统
+// ---- System
 
 type systemData struct {
 	Version, Go, ConfigPath, StoreDriver, StorePath string
@@ -165,10 +166,10 @@ type systemData struct {
 	Reload                                          *app.ReloadStatus
 	Dropped                                         uint64
 	Config                                          string
-	// 管理入口（后台、API、指标）
-	MgmtAddr, PullAddr  string // MgmtAddr 为空表示和拉取入口共用端口
+	// Management entrance (console, API, metrics)
+	MgmtAddr, PullAddr  string // an empty MgmtAddr means the port is shared with the pull entrance
 	Allow, ProxiedAllow string
-	Public              bool // 后台和 API 对所有地址开放（admin.public）
+	Public              bool // the console and API are open to all addresses (admin.public)
 	Metrics, Pprof      bool
 }
 
@@ -203,7 +204,7 @@ func (h *Handler) reload(c *ctx) error {
 	return c.done("/admin/system", "reloaded", "")
 }
 
-// ---- 自己的账号
+// ---- Own account
 
 func (h *Handler) accountPage(c *ctx) error {
 	var me *ops.AdminView
@@ -223,7 +224,8 @@ func (h *Handler) passwordChange(c *ctx) error {
 		return h.accountPage(c)
 	}
 	name := c.sess.Admin
-	// 改了口令后这个管理员的会话全部结束（OnAdminChange），这里再给当前浏览器开一个新的
+	// Changing the password ends all of this administrator's sessions (OnAdminChange); a new one is then
+	// opened here for the current browser
 	if err := h.ops.UpdateAdmin(c.actor(), name, ops.AdminInput{Password: &pw}); err != nil {
 		return c.retry(err, h.accountPage)
 	}

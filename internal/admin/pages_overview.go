@@ -21,18 +21,18 @@ type overviewData struct {
 	Warnings  []string
 	Traffic   template.HTML
 	Requests  template.HTML
-	Peak      string // 24 小时里流量最高的 10 分钟
+	Peak      string // the busiest 10 minutes by traffic in the last 24 hours
 	Day       stats.Minute
 	Upstreams []ops.UpstreamView
-	Status    status.Report // 和用法页一样的服务状态：总体状态、本站近 24 小时的成功率
-	Interval  time.Duration // 上游探测的间隔，0 表示不探测
+	Status    status.Report // as on the usage page: overall status, this site's 24-hour success rate
+	Interval  time.Duration // the upstream probe interval; 0 means no probing
 	Images    []stats.Item
 	Clients   []stats.Item
 	Quota     *upstream.Quota
 	Uptime    string
 }
 
-// liveValues 是概览页上会自动刷新的数字（已格式化）。
+// liveValues are the numbers on the overview page that refresh automatically (already formatted).
 func (h *Handler) liveValues(lang string) map[string]string {
 	now := h.now()
 	series := h.app.Stats.Series(now.Add(-59 * time.Minute))
@@ -67,7 +67,7 @@ func (h *Handler) liveValues(lang string) map[string]string {
 	return out
 }
 
-// live 给概览页的脚本用：只读，返回 liveValues。
+// live is for the overview page's script: read-only, it returns liveValues.
 func (h *Handler) live(c *ctx) error {
 	b, _ := json.Marshal(h.liveValues(c.lang))
 	c.w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -81,7 +81,7 @@ func (h *Handler) overviewPage(c *ctx) error {
 	d := overviewData{Live: h.liveValues(c.lang), Upstreams: h.ops.Upstreams(), Status: h.app.StatusReport()}
 	d.Interval = time.Duration(d.Status.Interval) * time.Second
 
-	// 24 小时，每 10 分钟一个点
+	// 24 hours, one point every 10 minutes
 	series := h.app.Stats.Series(c.now.Add(-24*time.Hour + time.Minute))
 	const bucket = 10
 	var traffic, reqs, errs []float64
@@ -117,7 +117,7 @@ func (h *Handler) overviewPage(c *ctx) error {
 	}
 	d.Uptime = fmtDur(c.lang, c.now.Sub(h.app.Started))
 
-	// 需要注意的事
+	// Things that need attention
 	if st := h.app.LastReload(); st != nil {
 		if st.Err != "" {
 			d.Warnings = append(d.Warnings, tr(c.lang, "overview.reloadFailed", "error", st.Err))

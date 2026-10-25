@@ -12,12 +12,12 @@ func TestDirectHost(t *testing.T) {
 		"192.0.2.10":         true,
 		"192.0.2.10:8080":    true,
 		"[2001:db8::10]:443": true,
-		"[fe80::1%eth0]:80":  false, // 带 zone 的 IPv6
+		"[fe80::1%eth0]:80":  false, // IPv6 with a zone
 		"mirror.example.com": false,
-		"192.0.2.10.nip.io":  false, // 域名，可以被 DNS 重绑定
+		"192.0.2.10.nip.io":  false, // a domain name, open to DNS rebinding
 	} {
 		if got := DirectHost(host); got != want {
-			t.Errorf("%s：期望 %v，实际 %v", host, want, got)
+			t.Errorf("%s: got %v, want %v", host, got, want)
 		}
 	}
 }

@@ -36,23 +36,23 @@ func TestSeriesAndSummary(t *testing.T) {
 
 	series := c.Series(now.Add(-2 * time.Minute))
 	if len(series) != 3 || series[0].Requests != 11 || series[0].Status5xx != 1 || series[1].Requests != 0 || series[2].Status4xx != 1 {
-		t.Fatalf("每分钟的计数：%+v", series)
+		t.Fatalf("per-minute counters: %+v", series)
 	}
-	// 跨过整点：上一小时存进数据库
+	// crossing the hour boundary: the previous hour is saved to the database
 	now = now.Add(time.Hour)
 	c.Log(entry(now, "198.51.100.3", "quay.io/x/y", 200, 5000))
 	sum := c.Summarize(24*time.Hour, 10)
 	if sum.Totals.Requests != 13 || sum.Totals.Bytes != 15000 {
-		t.Fatalf("24 小时汇总：%+v", sum.Totals)
+		t.Fatalf("24-hour totals: %+v", sum.Totals)
 	}
 	if len(sum.Images) != 2 || sum.Images[0].Key != "docker.io/library/nginx" || sum.Images[0].Bytes != 10000 {
-		t.Fatalf("热门镜像：%+v", sum.Images)
+		t.Fatalf("top images: %+v", sum.Images)
 	}
 	if len(sum.Repeats) == 0 || sum.Repeats[0].Count != 10 || sum.Repeats[0].Key != "198.51.100.1 docker.io/library/nginx@sha256:aa" {
-		t.Fatalf("反复完整下载：%+v", sum.Repeats)
+		t.Fatalf("repeated full downloads: %+v", sum.Repeats)
 	}
 	if one := c.Summarize(time.Hour, 10); one.Totals.Requests != 1 {
-		t.Fatalf("最近 1 小时只含当前小时：%+v", one.Totals)
+		t.Fatalf("the last hour should include only the current hour: %+v", one.Totals)
 	}
 }
 
@@ -64,20 +64,20 @@ func TestRecentFilter(t *testing.T) {
 	}
 	all := c.Recent(Filter{}, recentSize*2)
 	if len(all) != recentSize {
-		t.Fatalf("环形缓冲应只留 %d 条：%d", recentSize, len(all))
+		t.Fatalf("ring buffer should keep only %d entries: %d", recentSize, len(all))
 	}
 	if got := c.Recent(Filter{ClientIP: "198.51.100.1"}, 10); len(got) != 10 || got[0].ClientIP != "198.51.100.1" {
-		t.Fatalf("按 IP 过滤：%d", len(got))
+		t.Fatalf("filter by IP: %d", len(got))
 	}
 	for _, r := range c.Recent(Filter{Status: 4}, 50) {
 		if r.Status/100 != 4 {
-			t.Fatalf("按 4xx 过滤：%d", r.Status)
+			t.Fatalf("filter by 4xx: %d", r.Status)
 		}
 	}
-	// 最新的在前
+	// newest first
 	c.Log(&accesslog.Entry{Time: now, ClientIP: "203.0.113.9", Status: 200})
 	if c.Recent(Filter{}, 1)[0].ClientIP != "203.0.113.9" {
-		t.Fatal("最新的应在前")
+		t.Fatal("the newest entry should come first")
 	}
 }
 
@@ -89,7 +89,7 @@ func TestTopKBounded(t *testing.T) {
 	k.Add("big", 1, 1_000_000)
 	top := k.Top(3)
 	if len(k.items) != 10 || top[0].Key != "big" {
-		t.Fatalf("前若干名：%+v（共 %d 项）", top, len(k.items))
+		t.Fatalf("top entries: %+v (%d items in total)", top, len(k.items))
 	}
 }
 
@@ -105,6 +105,6 @@ func TestUnlisted(t *testing.T) {
 func TestSeriesSinceInFuture(t *testing.T) {
 	c := New(nil)
 	if got := c.Series(time.Now().Add(time.Hour)); len(got) != 0 {
-		t.Fatalf("since 在将来时应返回空：%d", len(got))
+		t.Fatalf("since in the future should return nothing: %d", len(got))
 	}
 }

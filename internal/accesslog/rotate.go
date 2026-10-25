@@ -9,8 +9,9 @@ import (
 	"time"
 )
 
-// rotator 按大小轮转日志文件：access.log 写满后改名为 access-<时间>.log，只保留最新的 keep 个旧文件。
-// 旧文件的名字仍以 access 开头、.log 结尾，和 Caddy 一样，统计脚本按 access*.log 就能读全。
+// rotator rotates log files by size: once access.log is full it is renamed to access-<time>.log, and
+// only the newest keep old files are retained. Old file names still start with access and end in .log,
+// as with Caddy, so analysis scripts can read them all with access*.log.
 type rotator struct {
 	mu   sync.Mutex
 	path string
@@ -65,7 +66,7 @@ func (r *rotator) rotate() error {
 	}
 	ext := filepath.Ext(r.path)
 	base := strings.TrimSuffix(r.path, ext)
-	// Windows 的文件名不能有冒号
+	// Windows file names cannot contain colons
 	name := base + "-" + r.now().UTC().Format("2006-01-02T15-04-05.000") + ext
 	if err := os.Rename(r.path, name); err != nil {
 		return err
@@ -79,7 +80,7 @@ func (r *rotator) prune(base, ext string) {
 	if len(old) <= r.keep {
 		return
 	}
-	sort.Strings(old) // 时间戳格式按字典序就是时间顺序
+	sort.Strings(old) // the timestamp format sorts lexically in time order
 	for _, p := range old[:len(old)-r.keep] {
 		_ = os.Remove(p)
 	}

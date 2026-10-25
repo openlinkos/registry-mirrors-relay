@@ -1,7 +1,10 @@
-// Package breaker 是每个上游一个的熔断器：上游连续连不上时快速失败，不让请求在超时上越堆越多。
+// Package breaker provides one circuit breaker per upstream: when an upstream is repeatedly
+// unreachable, requests fail fast instead of piling up on timeouts.
 //
-// 状态：关闭（正常放行）→ 连续失败达到阈值 → 打开（冷却期内直接拒绝）→ 冷却期过后半开（只放一个请求试探）
-// → 试探成功回到关闭；试探失败重新打开，冷却时间加倍，不超过上限。
+// States: closed (requests pass normally) → consecutive failures reach the threshold → open (requests
+// are refused during the cooldown) → after the cooldown, half-open (a single probe request is let
+// through) → a successful probe returns to closed; a failed probe reopens the breaker and doubles the
+// cooldown, up to the limit.
 package breaker
 
 import (
@@ -17,7 +20,7 @@ const (
 	halfOpen
 )
 
-// Breaker 并发安全。nil 表示不熔断，所有方法都可以在 nil 上调用。
+// Breaker is safe for concurrent use. nil means no circuit breaking; all methods can be called on nil.
 type Breaker struct {
 	mu        sync.Mutex
 	threshold int
@@ -32,7 +35,7 @@ type Breaker struct {
 	probing  bool
 }
 
-// New 创建熔断器。threshold 为 0 时返回 nil（不熔断）。
+// New creates a breaker. When threshold is 0 it returns nil (no circuit breaking).
 func New(threshold int, cooldown, maxCooldown time.Duration) *Breaker {
 	if threshold <= 0 {
 		return nil
@@ -43,7 +46,8 @@ func New(threshold int, cooldown, maxCooldown time.Duration) *Breaker {
 	return &Breaker{threshold: threshold, base: cooldown, max: maxCooldown, cooldown: cooldown, now: time.Now}
 }
 
-// Allow 判断能否发请求；不能时返回还要等多久。允许的请求结束后必须调用 Done。
+// Allow reports whether a request may be sent; if not, it returns how much longer to wait. Done must
+// be called when an allowed request finishes.
 func (b *Breaker) Allow() (bool, time.Duration) {
 	if b == nil {
 		return true, 0
@@ -67,8 +71,8 @@ func (b *Breaker) Allow() (bool, time.Duration) {
 	return true, 0
 }
 
-// Done 记录一次请求的结果。failed 只应包含上游本身的问题（连不上、超时、502/503/504），
-// 不包括客户端自己断开。
+// Done records the result of a request. failed should cover only problems with the upstream itself
+// (unreachable, timeout, 502/503/504), not the client disconnecting on its own.
 func (b *Breaker) Done(failed bool) {
 	if b == nil {
 		return
@@ -91,7 +95,8 @@ func (b *Breaker) Done(failed bool) {
 	}
 }
 
-// Cancel 用在允许的请求没有结果时（例如客户端自己断开）：不改变状态，只让出试探名额。
+// Cancel is used when an allowed request has no result (for example the client disconnected on its
+// own): it leaves the state unchanged and only gives up the probe slot.
 func (b *Breaker) Cancel() {
 	if b == nil {
 		return
@@ -103,7 +108,7 @@ func (b *Breaker) Cancel() {
 	}
 }
 
-// Open 表示当前是否处于打开状态（给指标和后台看）。
+// Open reports whether the breaker is currently open (for metrics and the console).
 func (b *Breaker) Open() bool {
 	if b == nil {
 		return false

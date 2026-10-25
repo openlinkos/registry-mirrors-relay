@@ -9,16 +9,16 @@ import (
 	"time"
 )
 
-// Quota 是上游在响应头里报告的拉取额度（Docker Hub 的 Ratelimit-Limit、Ratelimit-Remaining）。
-// 只给管理后台看，不转给客户端。
+// Quota is the pull quota the upstream reports in its response headers (Docker Hub's Ratelimit-Limit and
+// Ratelimit-Remaining). It is shown only in the admin console, never passed to clients.
 type Quota struct {
 	Limit     int
 	Remaining int
-	Window    time.Duration // 额度的统计周期，上游没给时为 0
+	Window    time.Duration // quota window, 0 when the upstream does not give one
 	Observed  time.Time
 }
 
-// Quota 返回最近一次看到的额度，没看到过时为 nil。
+// Quota returns the most recently seen quota, or nil if none has been seen.
 func (u *Upstream) Quota() *Quota { return u.quota.Load() }
 
 func (u *Upstream) observeQuota(h http.Header) {
@@ -30,7 +30,7 @@ func (u *Upstream) observeQuota(h http.Header) {
 	u.quota.Store(&Quota{Limit: limit, Remaining: remaining, Window: window, Observed: time.Now()})
 }
 
-// parseRatelimit 解析 "100;w=21600" 这样的值。
+// parseRatelimit parses values such as "100;w=21600".
 func parseRatelimit(v string) (n int, window time.Duration, ok bool) {
 	if v == "" {
 		return 0, 0, false
@@ -50,7 +50,7 @@ func parseRatelimit(v string) (n int, window time.Duration, ok bool) {
 	return n, window, true
 }
 
-// Health 是一次连通探测的结果。
+// Health is the result of a connectivity probe.
 type Health struct {
 	OK      bool          `json:"ok"`
 	Status  int           `json:"status,omitempty"`
@@ -59,8 +59,8 @@ type Health struct {
 	Checked time.Time     `json:"checked"`
 }
 
-// Probe 请求一次上游的 /v2/（不带令牌，不算拉取次数）。返回 200 或 401 都说明 registry 在正常应答。
-// 探测不经过熔断器，也不影响它。
+// Probe requests the upstream's /v2/ once (without a token, not counted as a pull). Either 200 or 401 means
+// the registry is answering normally. Probes bypass the circuit breaker and do not affect it.
 func (u *Upstream) Probe(ctx context.Context) Health {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -81,7 +81,7 @@ func (u *Upstream) Probe(ctx context.Context) Health {
 	h.Status = resp.StatusCode
 	h.OK = resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusUnauthorized
 	if !h.OK {
-		h.Error = "上游返回 " + resp.Status
+		h.Error = "upstream returned " + resp.Status
 	}
 	return h
 }

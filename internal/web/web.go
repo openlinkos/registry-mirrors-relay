@@ -1,6 +1,9 @@
-// Package web 提供浏览器打开镜像域名时看到的用法页。页面最早来自 registry-mirrors-caddy 的 web/，三个仓库共用一份。
-// 页面纯静态、不加载外部资源；site.json 由配置生成，告诉页面各上游的加速域名、哪些要登录和页脚链接；
-// status.json 是服务状态（见 status 包），没有这个文件时页面不显示状态，所以页面在 Caddy 版里也能用。
+// Package web serves the usage page that a browser sees when it opens a mirror domain. The page
+// originally came from web/ in registry-mirrors-caddy, and the three repositories share one copy.
+// The page is purely static and loads no external resources; site.json is generated from the
+// configuration and tells the page each upstream's mirror domain, which ones require signing in, and
+// the footer links; status.json is the service status (see the status package), and without this file
+// the page shows no status, so the page also works in the Caddy edition.
 package web
 
 import (
@@ -19,16 +22,16 @@ import (
 //go:embed static
 var static embed.FS
 
-// 页面里各上游的键
+// Keys of the upstreams in the page
 var pageKeys = map[string]string{
 	"docker.io": "docker", "gcr.io": "gcr", "ghcr.io": "ghcr", "registry.k8s.io": "k8s", "quay.io": "quay",
 }
 
-// Handler 提供用法页的几个文件。
+// Handler serves the files of the usage page.
 type Handler struct {
 	files     map[string]file
-	siteLogin file       // 需要登录的入口看到的 site.json
-	report    func() any // status.json 的内容，nil 表示不提供
+	siteLogin file       // site.json as seen by entrances that require signing in
+	report    func() any // content of status.json, nil means it is not served
 	csp       string
 }
 
@@ -37,8 +40,9 @@ type file struct {
 	ctype string
 }
 
-// New 由配置生成 site.json，并计算页面内联脚本的哈希用于 CSP。report 生成 status.json，
-// 为 nil 或者 site.show_status 关掉时不提供。
+// New generates site.json from the configuration and computes the hash of the page's inline script for
+// the CSP. report produces status.json, which is not served when report is nil or site.show_status is
+// turned off.
 func New(cfg *config.Config, report func() any) (*Handler, error) {
 	h := &Handler{files: map[string]file{}}
 	if cfg.Site.ShowStatus {
@@ -68,7 +72,8 @@ func New(cfg *config.Config, report func() any) (*Handler, error) {
 		}
 	}
 
-	// 内联脚本按哈希放行；页面里有 style 属性，样式只能允许内联
+	// The inline script is allowed by its hash; the page has style attributes, so inline styles must
+	// be allowed
 	script := between(h.files["/index.html"].body, "<script>", "</script>")
 	sum := sha256.Sum256(script)
 	h.csp = "default-src 'none'; script-src 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'; " +
@@ -89,8 +94,10 @@ func between(b []byte, start, end string) []byte {
 	return nil
 }
 
-// siteJSON：domains 取每个固定上游入口的第一个域名；没有这种入口时为空，页面会按当前地址推导。
-// login_keys 是其中要登录才能拉取的；login 表示当前这个入口要登录，status 表示有 status.json。
+// siteJSON: domains takes the first domain of each entrance with a fixed upstream; when there is no
+// such entrance it is empty and the page derives the domains from the current address. login_keys are
+// those among them that require signing in to pull; login means the current entrance requires signing
+// in, and status means status.json is available.
 func siteJSON(cfg *config.Config, login, status bool) ([]byte, error) {
 	domains := map[string]string{}
 	loginKeys := []string{}
@@ -126,7 +133,9 @@ func siteJSON(cfg *config.Config, login, status bool) ([]byte, error) {
 	}, "", "  ")
 }
 
-// Serve 处理用法页的路径，处理了返回 true。login 表示这个入口拉取要登录。只接受 GET 和 HEAD，调用方已检查过方法。
+// Serve handles the usage page paths and returns true if it handled the request. login means pulls
+// through this entrance require signing in. Only GET and HEAD are accepted; the caller has already
+// checked the method.
 func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, login bool) bool {
 	f, ok := h.files[r.URL.Path]
 	cache := "no-cache"

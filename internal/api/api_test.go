@@ -89,33 +89,34 @@ func (e *env) call(t *testing.T, method, path, token string, body any) (int, map
 func TestAuthAndRoles(t *testing.T) {
 	e := newEnv(t, nil)
 	if code, _, _ := e.call(t, "GET", "/status", "", nil); code != 401 {
-		t.Fatalf("没带令牌应返回 401：%d", code)
+		t.Fatalf("no token should return 401: %d", code)
 	}
 	if code, _, _ := e.call(t, "GET", "/status", viewerTok, nil); code != 200 {
-		t.Fatalf("viewer 可以读：%d", code)
+		t.Fatalf("viewer can read: %d", code)
 	}
 	if code, m, _ := e.call(t, "GET", "/status/report", viewerTok, nil); code != 200 || m["status"] == nil || m["upstreams"] == nil {
-		t.Fatalf("服务状态报告：%d %v", code, m)
+		t.Fatalf("service status report: %d %v", code, m)
 	}
 	if code, _, _ := e.call(t, "POST", "/bans", viewerTok, map[string]string{"cidr": "198.51.100.7", "duration": "1h"}); code != 403 {
-		t.Fatalf("viewer 不能写：%d", code)
+		t.Fatalf("viewer cannot write: %d", code)
 	}
-	// admin.public（默认）时任何域名都行；public: false 时的 421 见 admin 包的 TestHostCheck
+	// With admin.public (the default) any domain works; for the 421 with public: false see TestHostCheck in
+	// the admin package
 	req, _ := http.NewRequest("GET", e.srv.URL+Prefix+"/status", nil)
 	req.Host = "mirror.example.test"
 	req.Header.Set("Authorization", "Bearer "+adminTok)
 	resp, _ := http.DefaultClient.Do(req)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("admin.public 时用域名访问 API：%d", resp.StatusCode)
+		t.Fatalf("API reached by domain name with admin.public: %d", resp.StatusCode)
 	}
-	// 认证失败太多次
+	// Too many failed authentications
 	var last int
 	for i := 0; i < 12; i++ {
 		last, _, _ = e.call(t, "GET", "/status", "wrong-token", nil)
 	}
 	if last != 429 {
-		t.Fatalf("认证失败太多次应返回 429：%d", last)
+		t.Fatalf("too many failed authentications should return 429: %d", last)
 	}
 }
 
@@ -123,17 +124,17 @@ func TestUsers(t *testing.T) {
 	e := newEnv(t, nil)
 	code, _, raw := e.call(t, "POST", "/users", adminTok, map[string]any{"name": "ci", "password": "correct horse battery", "manifest_rate": 10})
 	if code != 201 {
-		t.Fatalf("创建用户：%d %s", code, raw)
+		t.Fatalf("create user: %d %s", code, raw)
 	}
 	u := e.app.Runtime().Users["ci"]
 	if u == nil || u.Source != "store" || u.ManifestRPS != 10 {
-		t.Fatalf("用户应立即生效：%+v", u)
+		t.Fatalf("the user should take effect immediately: %+v", u)
 	}
 	if ok, _ := e.app.Auth.Verify(u, "correct horse battery"); !ok {
-		t.Fatal("口令应能校验")
+		t.Fatal("the password should verify")
 	}
 	if code, _, _ := e.call(t, "POST", "/users", adminTok, map[string]any{"name": "ci", "password": "correct horse battery"}); code != 409 {
-		t.Fatal("重名应返回 409")
+		t.Fatal("a duplicate name should return 409")
 	}
 	for _, b := range []map[string]any{
 		{"name": "bad name", "password": "correct horse battery"},
@@ -143,68 +144,68 @@ func TestUsers(t *testing.T) {
 		{"name": "x", "password": "correct horse battery", "extra": 1},
 	} {
 		if code, _, _ := e.call(t, "POST", "/users", adminTok, b); code != 400 {
-			t.Errorf("应拒绝 %v：%d", b, code)
+			t.Errorf("should reject %v: %d", b, code)
 		}
 	}
 	if code, _, _ := e.call(t, "PATCH", "/users/ci", adminTok, map[string]any{"disabled": true}); code != 200 || !e.app.Runtime().Users["ci"].Disabled {
-		t.Fatal("停用应生效")
+		t.Fatal("disabling should take effect")
 	}
 	code, _, raw = e.call(t, "GET", "/users", viewerTok, nil)
 	if code != 200 || strings.Contains(string(raw), "$2a$") || !strings.Contains(string(raw), `"ci"`) {
-		t.Fatalf("列表不应含哈希：%s", raw)
+		t.Fatalf("the list should not contain hashes: %s", raw)
 	}
 	if code, _, _ := e.call(t, "DELETE", "/users/ci", adminTok, nil); code != 204 || e.app.Runtime().Users["ci"] != nil {
-		t.Fatal("删除应生效")
+		t.Fatal("the delete should take effect")
 	}
 	if code, _, _ := e.call(t, "DELETE", "/users/ci", adminTok, nil); code != 404 {
-		t.Fatal("删除不存在的用户应返回 404")
+		t.Fatal("deleting a user that does not exist should return 404")
 	}
 }
 
 func TestRulesAndBans(t *testing.T) {
 	e := newEnv(t, nil)
 	ip := netip.MustParseAddr("198.51.100.7")
-	if code, _, raw := e.call(t, "POST", "/bans", adminTok, map[string]string{"cidr": "198.51.100.7", "duration": "2h", "reason": "刷流量"}); code != 201 {
-		t.Fatalf("封禁：%d %s", code, raw)
+	if code, _, raw := e.call(t, "POST", "/bans", adminTok, map[string]string{"cidr": "198.51.100.7", "duration": "2h", "reason": "traffic abuse"}); code != 201 {
+		t.Fatalf("ban: %d %s", code, raw)
 	}
 	if ok, _ := e.app.Runtime().IPRules.Decide(ip, time.Now()); ok {
-		t.Fatal("封禁应立即生效")
+		t.Fatal("the ban should take effect immediately")
 	}
 	if code, _, _ := e.call(t, "POST", "/bans", adminTok, map[string]string{"cidr": "0.0.0.0/0", "duration": "1h"}); code != 400 {
-		t.Fatal("不能封掉所有地址")
+		t.Fatal("must not ban every address")
 	}
 	if code, _, _ := e.call(t, "DELETE", "/bans?cidr=198.51.100.7", adminTok, nil); code != 204 {
-		t.Fatal("解除封禁")
+		t.Fatal("unban")
 	}
 	if ok, _ := e.app.Runtime().IPRules.Decide(ip, time.Now()); !ok {
-		t.Fatal("解除封禁应立即生效")
+		t.Fatal("the unban should take effect immediately")
 	}
 
-	if code, _, raw := e.call(t, "POST", "/rules/image", adminTok, map[string]any{"pattern": "ghcr.io/evil/**", "kind": "deny", "status": 451, "message": "投诉屏蔽"}); code != 201 {
-		t.Fatalf("加镜像规则：%d %s", code, raw)
+	if code, _, raw := e.call(t, "POST", "/rules/image", adminTok, map[string]any{"pattern": "ghcr.io/evil/**", "kind": "deny", "status": 451, "message": "blocked after a complaint"}); code != 201 {
+		t.Fatalf("add image rule: %d %s", code, raw)
 	}
 	_, m, _ := e.call(t, "POST", "/rules/image/test", viewerTok, map[string]string{"image": "ghcr.io/evil/miner:latest"})
 	if m["allowed"] != false || m["status"].(float64) != 451 || m["image"] != "ghcr.io/evil/miner" {
-		t.Fatalf("测试镜像：%v", m)
+		t.Fatalf("test image: %v", m)
 	}
 	_, m, _ = e.call(t, "POST", "/rules/image/test", viewerTok, map[string]string{"image": "nginx:1.27"})
 	if m["allowed"] != true || m["image"] != "docker.io/library/nginx" {
-		t.Fatalf("没写上游时按 Docker Hub：%v", m)
+		t.Fatalf("Docker Hub when no upstream is given: %v", m)
 	}
 	if code, _, _ := e.call(t, "POST", "/rules/image", adminTok, map[string]any{"pattern": "example.org/x", "kind": "deny"}); code != 400 {
-		t.Fatal("没配置的上游应拒绝")
+		t.Fatal("an upstream that is not configured should be rejected")
 	}
 	if code, _, _ := e.call(t, "POST", "/rules/ip", adminTok, map[string]any{"cidr": "203.0.113.0/24", "kind": "deny"}); code != 201 {
-		t.Fatal("加 IP 规则")
+		t.Fatal("add IP rule")
 	}
 	_, m, _ = e.call(t, "GET", "/rules", viewerTok, nil)
 	if len(m["images"].([]any)) != 1 || len(m["ip"].([]any)) != 1 {
-		t.Fatalf("规则列表：%v", m)
+		t.Fatalf("rule list: %v", m)
 	}
-	// 审计
+	// Audit log
 	code, _, raw := e.call(t, "GET", "/audit", viewerTok, nil)
 	if code != 200 || !strings.Contains(string(raw), `"ban.add"`) || !strings.Contains(string(raw), `"token:ops"`) {
-		t.Fatalf("审计：%s", raw)
+		t.Fatalf("audit log: %s", raw)
 	}
 }
 
@@ -213,94 +214,94 @@ func TestTokensAndRedirectHosts(t *testing.T) {
 	_, m, _ := e.call(t, "POST", "/tokens", adminTok, map[string]string{"name": "ci", "role": "viewer"})
 	tok, _ := m["token"].(string)
 	if !strings.HasPrefix(tok, "rmr_") {
-		t.Fatalf("应返回新令牌：%v", m)
+		t.Fatalf("should return the new token: %v", m)
 	}
 	if code, _, _ := e.call(t, "GET", "/status", tok, nil); code != 200 {
-		t.Fatal("新令牌应能用")
+		t.Fatal("the new token should work")
 	}
 	if code, _, _ := e.call(t, "POST", "/tokens", adminTok, map[string]string{"name": "ops", "role": "viewer"}); code != 409 {
-		t.Fatal("和配置里的令牌重名应拒绝")
+		t.Fatal("a name already used by a configured token should be rejected")
 	}
 	if code, _, _ := e.call(t, "DELETE", "/tokens/ci", adminTok, nil); code != 204 {
-		t.Fatal("删除令牌")
+		t.Fatal("delete token")
 	}
 	if code, _, _ := e.call(t, "GET", "/status", tok, nil); code != 401 {
-		t.Fatal("删掉的令牌不能再用")
+		t.Fatal("a deleted token must no longer work")
 	}
 
 	if code, _, raw := e.call(t, "POST", "/upstreams/quay.io/redirect-hosts", adminTok, map[string]string{"host": "cdn99.quay.io"}); code != 201 {
-		t.Fatalf("加重定向主机：%d %s", code, raw)
+		t.Fatalf("add redirect host: %d %s", code, raw)
 	}
 	if code, _, _ := e.call(t, "POST", "/upstreams/quay.io/redirect-hosts", adminTok, map[string]string{"host": "*.evil.com"}); code != 400 {
-		t.Fatal("不接受通配")
+		t.Fatal("wildcards are not accepted")
 	}
 	_, _, raw := e.call(t, "GET", "/upstreams", viewerTok, nil)
 	if !strings.Contains(string(raw), `cdn99\\.quay\\.io`) {
-		t.Fatalf("白名单应带上新主机（转义成正则）：%s", raw)
+		t.Fatalf("the allowlist should include the new host (escaped as a regular expression): %s", raw)
 	}
 }
 
 func TestReadOnlyStoreAndMisc(t *testing.T) {
 	e := newEnv(t, store.NewReadOnly())
 	if code, m, _ := e.call(t, "POST", "/bans", adminTok, map[string]string{"cidr": "198.51.100.7", "duration": "1h"}); code != 409 || !strings.Contains(m["error"].(string), "只读") {
-		t.Fatalf("只读存储应返回 409：%d %v", code, m)
+		t.Fatalf("a read-only store should return 409: %d %v", code, m)
 	}
 	if code, _, _ := e.call(t, "POST", "/reload", adminTok, map[string]string{}); code != 422 {
-		t.Fatalf("没有配置文件时重载应返回 422：%d", code)
+		t.Fatalf("reload without a configuration file should return 422: %d", code)
 	}
 	for _, p := range []string{"/stats/series?minutes=10", "/stats/summary?hours=24", "/requests?limit=5", "/config", "/tokens", "/upstreams"} {
 		if code, _, raw := e.call(t, "GET", p, viewerTok, nil); code != 200 {
-			t.Errorf("%s：%d %s", p, code, raw)
+			t.Errorf("%s: %d %s", p, code, raw)
 		}
 	}
 	_, m, _ := e.call(t, "GET", "/config", viewerTok, nil)
 	if y := m["yaml"].(string); strings.Contains(y, adminTok) || !strings.Contains(y, "T_ADMIN") {
-		t.Fatal("配置里不能有明文令牌")
+		t.Fatal("the configuration must not contain plain-text tokens")
 	}
-	// 不是 JSON 的请求体
+	// A request body that is not JSON
 	req, _ := http.NewRequest("POST", e.srv.URL+Prefix+"/bans", strings.NewReader("cidr=1"))
 	req.Header.Set("Authorization", "Bearer "+adminTok)
 	resp, _ := http.DefaultClient.Do(req)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnsupportedMediaType {
-		t.Fatalf("非 JSON 应返回 415：%d", resp.StatusCode)
+		t.Fatalf("non-JSON should return 415: %d", resp.StatusCode)
 	}
 }
 
 func TestAdminsAndSite(t *testing.T) {
 	e := newEnv(t, nil)
 	if code, _, raw := e.call(t, "POST", "/admins", adminTok, map[string]string{"name": "alice", "password": "alice-password-1", "role": "admin"}); code != 201 {
-		t.Fatalf("创建管理员：%d %s", code, raw)
+		t.Fatalf("create administrator: %d %s", code, raw)
 	}
 	if code, _, _ := e.call(t, "POST", "/admins", adminTok, map[string]string{"name": "alice", "password": "alice-password-1", "role": "admin"}); code != 409 {
-		t.Fatal("重名应返回 409")
+		t.Fatal("a duplicate name should return 409")
 	}
 	if code, _, _ := e.call(t, "POST", "/admins", adminTok, map[string]string{"name": "bob", "password": "short", "role": "admin"}); code != 400 {
-		t.Fatal("口令太短应返回 400")
+		t.Fatal("a password that is too short should return 400")
 	}
 	if code, m, _ := e.call(t, "PATCH", "/admins/alice", adminTok, map[string]any{"role": "viewer"}); code != 409 || !strings.Contains(m["error"].(string), "至少要留一个") {
-		t.Fatalf("不能去掉最后一个 admin：%d %v", code, m)
+		t.Fatalf("cannot remove the last admin: %d %v", code, m)
 	}
 	_, _, raw := e.call(t, "GET", "/admins", viewerTok, nil)
 	if strings.Contains(string(raw), "$2a$") || !strings.Contains(string(raw), `"alice"`) {
-		t.Fatalf("列表不含哈希：%s", raw)
+		t.Fatalf("the list contains no hashes: %s", raw)
 	}
 	if code, _, _ := e.call(t, "DELETE", "/admins/alice", adminTok, nil); code != 409 {
-		t.Fatal("不能删掉最后一个 admin")
+		t.Fatal("cannot delete the last admin")
 	}
 
 	code, m, raw := e.call(t, "PUT", "/site", adminTok, map[string]any{"name": "Test Mirrors", "operator": "Test Org", "links": map[string]string{"status": "https://status.example.org"}})
 	if code != 200 || m["source"] != "store" || e.app.Runtime().Site.Name != "Test Mirrors" {
-		t.Fatalf("站点信息：%d %s", code, raw)
+		t.Fatalf("site information: %d %s", code, raw)
 	}
 	if code, _, _ := e.call(t, "PUT", "/site", adminTok, map[string]any{"name": "x", "links": map[string]string{"status": "javascript:alert(1)"}}); code != 400 {
-		t.Fatal("链接只接受 http(s)")
+		t.Fatal("links accept only http(s)")
 	}
 	if code, m, _ := e.call(t, "DELETE", "/site", adminTok, nil); code != 200 || m["source"] != "config" {
-		t.Fatalf("改回配置文件：%d %v", code, m)
+		t.Fatalf("back to the configuration file: %d %v", code, m)
 	}
 	if code, _, _ := e.call(t, "POST", "/upstreams/nope.example/check", adminTok, nil); code != 404 {
-		t.Fatalf("探测不存在的上游：%d", code)
+		t.Fatalf("probe an upstream that does not exist: %d", code)
 	}
 }
 
@@ -308,21 +309,21 @@ func TestConfigOverrides(t *testing.T) {
 	e := newEnv(t, nil)
 	code, m, raw := e.call(t, "PUT", "/config/overrides/limits", adminTok, map[string]any{"max_inflight": 50, "manifest_rate": 2})
 	if code != 200 || e.app.Runtime().Config.Limits.MaxInflight != 50 {
-		t.Fatalf("改限流：%d %s", code, raw)
+		t.Fatalf("change limits: %d %s", code, raw)
 	}
-	// manifest_rate 和配置文件（默认值）一样，不存
+	// manifest_rate is the same as in the configuration file (the default), so it is not stored
 	if ov := m["override"].(map[string]any); ov["state"] != "active" || strings.Contains(ov["value"].(string), "manifest_rate") {
-		t.Fatalf("返回存下的修改：%v", ov)
+		t.Fatalf("returns the stored override: %v", ov)
 	}
 	code, _, raw = e.call(t, "PUT", "/config/overrides/upstreams/cr.example.com", adminTok, map[string]any{"registry": "registry.example.com"})
 	if code != 200 || !strings.Contains(string(raw), "token_realm_hosts") {
-		t.Fatalf("新建上游，返回提醒：%d %s", code, raw)
+		t.Fatalf("create upstream, warnings returned: %d %s", code, raw)
 	}
 	if code, _, _ := e.call(t, "PUT", "/config/overrides/entrances", adminTok, []map[string]any{{"hosts": []string{"cr.example.com"}, "upstream": "cr.example.com"}, {"hosts": []string{"*"}}}); code != 200 {
-		t.Fatalf("改入口：%d", code)
+		t.Fatalf("change entrances: %d", code)
 	}
 	if e := e.app.Runtime().Router.Entrance("cr.example.com"); e == nil || e.Upstream != "cr.example.com" {
-		t.Fatal("新入口应立即生效")
+		t.Fatal("the new entrance should take effect immediately")
 	}
 	for _, c := range []struct {
 		path string
@@ -335,48 +336,48 @@ func TestConfigOverrides(t *testing.T) {
 		{"/config/overrides/entrances", []map[string]any{{"hosts": []string{"x.example.com"}, "upstream": "nope.example.com"}}, 422},
 	} {
 		if code, m, _ := e.call(t, "PUT", c.path, adminTok, c.body); code != c.code || !strings.Contains(m["error"].(string), "没有保存") {
-			t.Errorf("%s：%d %v", c.path, code, m)
+			t.Errorf("%s: %d %v", c.path, code, m)
 		}
 	}
 	if code, _, _ := e.call(t, "PUT", "/config/overrides/limits", viewerTok, map[string]any{"max_inflight": 1}); code != 403 {
-		t.Fatal("viewer 不能改")
+		t.Fatal("viewer cannot change")
 	}
 	code, m, _ = e.call(t, "GET", "/config/overrides", viewerTok, nil)
 	if code != 200 || m["editable"] != true || len(m["overrides"].([]any)) != 3 {
-		t.Fatalf("列表：%d %v", code, m)
+		t.Fatalf("list: %d %v", code, m)
 	}
 	_, m, _ = e.call(t, "GET", "/config", viewerTok, nil)
 	if !strings.Contains(m["yaml"].(string), "max_inflight: 50") {
-		t.Fatal("生效的配置叠加了后台的修改")
+		t.Fatal("the effective configuration includes the console overrides")
 	}
 	_, m, _ = e.call(t, "GET", "/config?view=file", viewerTok, nil)
 	if strings.Contains(m["yaml"].(string), "max_inflight: 50") {
-		t.Fatal("view=file 只按配置文件")
+		t.Fatal("view=file uses only the configuration file")
 	}
 	_, m, _ = e.call(t, "GET", "/config/export", viewerTok, nil)
 	if y := m["yaml"].(string); !strings.Contains(y, "max_inflight: 50") || !strings.Contains(y, "cr.example.com") {
-		t.Fatalf("导出：%s", y)
+		t.Fatalf("export: %s", y)
 	}
 	_, m, _ = e.call(t, "GET", "/config/export?format=merged", viewerTok, nil)
 	if y := m["yaml"].(string); !strings.Contains(y, "T_ADMIN") || !strings.Contains(y, "max_inflight: 50") {
-		t.Fatalf("合并导出：%s", y)
+		t.Fatalf("merged export: %s", y)
 	}
 	if code, _, _ := e.call(t, "GET", "/config/export?format=zip", viewerTok, nil); code != 400 {
-		t.Fatal("不认识的格式")
+		t.Fatal("unknown format")
 	}
 	if code, _, _ := e.call(t, "DELETE", "/config/overrides/limits", adminTok, nil); code != 204 || e.app.Runtime().Config.Limits.MaxInflight == 50 {
-		t.Fatal("重置后回到配置文件的值")
+		t.Fatal("after a reset the configuration file's value applies again")
 	}
 	if code, _, _ := e.call(t, "DELETE", "/config/overrides/limits", adminTok, nil); code != 404 {
-		t.Fatal("重置没改过的返回 404")
+		t.Fatal("resetting something unchanged returns 404")
 	}
 	_, _, raw = e.call(t, "GET", "/audit", viewerTok, nil)
 	if !strings.Contains(string(raw), `"config.override.set"`) || !strings.Contains(string(raw), `"config.override.reset"`) {
-		t.Fatalf("审计：%s", raw)
+		t.Fatalf("audit log: %s", raw)
 	}
-	// 只读存储
+	// Read-only store
 	ro := newEnv(t, store.NewReadOnly())
 	if code, _, _ := ro.call(t, "PUT", "/config/overrides/limits", adminTok, map[string]any{"max_inflight": 5}); code != 409 {
-		t.Fatalf("只读存储：%d", code)
+		t.Fatalf("read-only store: %d", code)
 	}
 }

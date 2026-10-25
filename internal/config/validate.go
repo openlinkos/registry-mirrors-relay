@@ -12,11 +12,11 @@ import (
 	"strings"
 )
 
-// CompileHostPatterns 把主机名正则合成一个，加上锚点并且不区分大小写。
-// 匹配时请先把主机名转成小写、去掉末尾的点。
+// CompileHostPatterns joins the host name patterns into one anchored, case-insensitive expression.
+// Before matching, convert the host name to lower case and strip any trailing dot.
 func CompileHostPatterns(patterns []string) (*regexp.Regexp, error) {
 	if len(patterns) == 0 {
-		return regexp.MustCompile(`^\b$`), nil // 什么都不匹配
+		return regexp.MustCompile(`^\b$`), nil // matches nothing
 	}
 	parts := make([]string, len(patterns))
 	for i, p := range patterns {
@@ -28,7 +28,7 @@ func CompileHostPatterns(patterns []string) (*regexp.Regexp, error) {
 	return regexp.Compile(`(?i)^(?:` + strings.Join(parts, "|") + `)$`)
 }
 
-// ParsePrefixes 解析 CIDR、单个 IP，以及关键字 private_ranges、loopback。
+// ParsePrefixes parses CIDRs, single IPs and the keywords private_ranges and loopback.
 func ParsePrefixes(items []string) ([]netip.Prefix, error) {
 	var out []netip.Prefix
 	for _, raw := range items {
@@ -56,11 +56,13 @@ func ParsePrefixes(items []string) ([]netip.Prefix, error) {
 	return out, nil
 }
 
-// MaxACMEHosts 是 ACME 最多申请证书的域名数：入口可以在后台改，数量要有上限，免得撞上证书签发的频率限制。
+// MaxACMEHosts is the maximum number of domains ACME obtains certificates for: entrances can be changed in the
+// console, so their number needs a cap to avoid hitting the certificate issuance rate limits.
 const MaxACMEHosts = 100
 
 var (
-	// accountRe 是账号、令牌名的写法（客户端账号、后台管理员、API 令牌共用）
+	// accountRe is the syntax of account and token names (shared by client accounts, console administrators and
+	// API tokens)
 	accountRe      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 	upstreamNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:[0-9]{1,5})?$`)
 	hostRe         = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$`)
@@ -71,7 +73,7 @@ func validate(c *Config, res *Result) []error {
 	bad := func(format string, a ...any) { errs = append(errs, fmt.Errorf(format, a...)) }
 	warn := func(format string, a ...any) { res.Warnings = append(res.Warnings, fmt.Sprintf(format, a...)) }
 
-	// 监听地址
+	// Listen addresses
 	for name, addr := range map[string]string{
 		"listen.http": c.Listen.HTTP, "listen.https": c.Listen.HTTPS, "listen.admin": c.Listen.Admin,
 	} {
@@ -124,7 +126,7 @@ func validate(c *Config, res *Result) []error {
 		bad("tls.mode 只能是 off、files、acme，现在是 %q", c.TLS.Mode)
 	}
 
-	// 客户端 IP
+	// Client IP
 	trusted, err := ParsePrefixes(c.ClientIP.TrustedProxies)
 	if err != nil {
 		bad("client_ip.trusted_proxies：%v", err)
@@ -138,7 +140,7 @@ func validate(c *Config, res *Result) []error {
 		warn("client_ip.trusted_proxies 为空：客户端 IP 取 TCP 来源地址。放在 CDN 或反向代理之后时，请写上它们的回源地址段")
 	}
 
-	// 上游
+	// Upstreams
 	names := make([]string, 0, len(c.Upstreams))
 	for n := range c.Upstreams {
 		names = append(names, n)
@@ -199,7 +201,7 @@ func validate(c *Config, res *Result) []error {
 		}
 	}
 
-	// 入口
+	// Entrances
 	seen := map[string]string{}
 	if len(c.Entrances) == 0 {
 		bad("至少要有一个入口（entrances）")
@@ -253,7 +255,7 @@ func validate(c *Config, res *Result) []error {
 		}
 	}
 
-	// 访问控制
+	// Access control
 	if _, err := ParsePrefixes(c.Access.IPAllow); err != nil {
 		bad("access.ip_allow：%v", err)
 	}
@@ -281,7 +283,7 @@ func validate(c *Config, res *Result) []error {
 		}
 	}
 
-	// 限流、缓存、超时
+	// Rate limits, cache, timeouts
 	l := c.Limits
 	for name, v := range map[string]float64{
 		"limits.manifest_rate": l.ManifestRate, "limits.head_weight": l.HeadWeight,
@@ -316,7 +318,7 @@ func validate(c *Config, res *Result) []error {
 		bad("timeouts.write_idle、upstream_read_idle、read_header 都要大于 0")
 	}
 
-	// 管理后台
+	// Admin console
 	switch c.Admin.Store.Driver {
 	case "bolt", "none":
 	default:
@@ -330,7 +332,7 @@ func validate(c *Config, res *Result) []error {
 			warn("admin.public_url 用的是 http：后台的口令和会话会明文经过网络，建议放在 https 反向代理之后")
 		}
 	}
-	// 管理入口（后台、API、指标）的访问范围
+	// Who may reach the management entrance (console, API, metrics)
 	for _, l := range []struct {
 		name string
 		list []string
@@ -394,7 +396,7 @@ func validate(c *Config, res *Result) []error {
 		bad("admin.initial_admin.username 只能用字母、数字和 . _ -，最长 64 个字符")
 	}
 
-	// 日志
+	// Logs
 	switch c.Log.Level {
 	case "debug", "info", "warn", "error":
 	default:
@@ -427,7 +429,8 @@ func isLoopbackListen(addr string) bool {
 	return err == nil && a.IsLoopback()
 }
 
-// checkImagePattern 要求规则写全上游，并且上游是已配置的，避免写成 library/nginx 却以为禁掉了。
+// checkImagePattern requires a rule to name its upstream in full, and the upstream to be configured, so that
+// nobody writes library/nginx believing it is denied.
 func checkImagePattern(p string, c *Config) error {
 	reg, rest, ok := strings.Cut(p, "/")
 	if !ok || rest == "" {
@@ -449,7 +452,7 @@ func checkImagePattern(p string, c *Config) error {
 	return nil
 }
 
-// Port 返回监听地址里的端口号，解析失败时返回 0。
+// Port returns the port number in a listen address, or 0 if it cannot be parsed.
 func Port(addr string) int {
 	_, p, err := net.SplitHostPort(addr)
 	if err != nil {

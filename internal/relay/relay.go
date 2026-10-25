@@ -1,5 +1,6 @@
-// Package relay 处理拉取请求：找入口、解析路径、转发给上游，按响应头策略把结果流式写回客户端。
-// 镜像数据只经过内存里的一小块缓冲，不写盘。
+// Package relay handles pull requests: it finds the entrance, parses the path, forwards the request to the
+// upstream and streams the result back to the client according to the response header policy.
+// Image data only passes through a small in-memory buffer and is never written to disk.
 package relay
 
 import (
@@ -24,25 +25,27 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/upstream"
 )
 
-// Deps 是 Handler 用到的组件。设置每个请求都从 App 的当前 Runtime 读，热重载后立即生效。
+// Deps holds the components the Handler uses. Settings are read from the App's current Runtime on every
+// request, so a hot reload takes effect immediately.
 type Deps struct {
 	App *app.App
 	Log *slog.Logger
 }
 
-// Handler 处理拉取入口上的所有请求（/healthz、/readyz 由 server 包处理）。
+// Handler handles all requests on the pull entrance (/healthz and /readyz are handled by the server package).
 type Handler struct {
 	Deps
 	bufs sync.Pool
 }
 
-// New 创建 Handler。转发缓冲的大小取启动时的配置（改了要重启）。
+// New creates a Handler. The forwarding buffer size comes from the configuration at startup (changing it
+// requires a restart).
 func New(d Deps) *Handler {
 	size := int(d.App.Runtime().Config.Proxy.BufferSize)
 	return &Handler{Deps: d, bufs: sync.Pool{New: func() any { b := make([]byte, size); return &b }}}
 }
 
-// manifestAccept 是客户端没带 Accept 时，向上游要 manifest 用的默认值。
+// manifestAccept is the default Accept used to request a manifest from the upstream when the client sends none.
 const manifestAccept = manifest.DefaultAccept
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +63,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		e.Duration = time.Since(start)
 		e.Status, e.Size = rec.status, rec.size
 		if e.Status == 0 {
-			e.Status = 499 // 没来得及写响应，客户端已经走了
+			e.Status = 499 // the client left before a response was written
 		}
 		if e.Error == "" {
 			e.Error = accesslog.NoteFrom(r.Context())
@@ -69,14 +72,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		e.RespContentType = rec.Header().Get("Content-Type")
 		h.App.Log(e)
 		if p != nil {
-			panic(p) // http.ErrAbortHandler：让客户端看到连接中断，而不是一个被截断却看似完整的响应
+			panic(p) // http.ErrAbortHandler: the client sees a broken connection, not a truncated response that looks complete
 		}
 	}()
 	release, ok := h.App.Limiter.AcquireInflight()
 	if !ok {
 		e.Limited = true
 		rec.Header().Set("Retry-After", "1")
-		writeError(rec, r, http.StatusServiceUnavailable, "TOOMANYREQUESTS", "服务繁忙，稍后再试")
+		writeError(rec, r, http.StatusServiceUnavailable, "TOOMANYREQUESTS", "server busy, try again later")
 		return
 	}
 	defer release()
@@ -86,18 +89,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Entry, rt *app.Runtime, client netip.Addr) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
-		writeError(w, r, http.StatusMethodNotAllowed, "UNSUPPORTED", "只支持拉取（GET、HEAD）")
+		writeError(w, r, http.StatusMethodNotAllowed, "UNSUPPORTED", "only pull is supported (GET, HEAD)")
 		return
 	}
 	if r.ContentLength > 1024 || (r.ContentLength < 0 && len(r.TransferEncoding) > 0) {
-		writeError(w, r, http.StatusRequestEntityTooLarge, "SIZE_INVALID", "请求体太大")
+		writeError(w, r, http.StatusRequestEntityTooLarge, "SIZE_INVALID", "request body too large")
 		return
 	}
 	ent := rt.Router.Entrance(r.Host)
 	isV2 := r.URL.Path == "/v2" || strings.HasPrefix(r.URL.Path, "/v2/")
 	if ent == nil {
 		if isV2 {
-			writeError(w, r, http.StatusNotFound, "NAME_UNKNOWN", "这个域名没有配置入口")
+			writeError(w, r, http.StatusNotFound, "NAME_UNKNOWN", "no entrance configured for this host")
 		} else {
 			http.NotFound(w, r)
 		}
@@ -106,7 +109,7 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 	e.Entrance = ent.Name
 	if ok, reason := rt.IPRules.Decide(client, time.Now()); !ok {
 		e.Error = reason
-		writeError(w, r, http.StatusForbidden, "DENIED", "拒绝访问")
+		writeError(w, r, http.StatusForbidden, "DENIED", "access denied")
 		return
 	}
 	if !isV2 {
@@ -138,7 +141,7 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 	}
 	up := rt.Pool.Get(t.Upstream)
 	if up == nil {
-		writeError(w, r, http.StatusNotFound, "NAME_UNKNOWN", "没有配置上游 "+t.Upstream)
+		writeError(w, r, http.StatusNotFound, "NAME_UNKNOWN", "upstream not configured: "+t.Upstream)
 		return
 	}
 	e.Upstream, e.Image, e.Kind, e.Ref = t.Upstream, t.Upstream+"/"+t.Repo, t.Kind.String(), t.Ref
@@ -149,7 +152,7 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 		return
 	}
 
-	// 限流：镜像层按并发流数，其余按令牌桶
+	// Rate limits: layers by number of concurrent streams, everything else by token bucket
 	var ov limit.Override
 	name := ""
 	if user != nil {
@@ -163,9 +166,9 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 			e.Limited = true
 			w.Header().Set("Retry-After", "5")
 			if reason == "global" {
-				writeError(w, r, http.StatusServiceUnavailable, "TOOMANYREQUESTS", "服务繁忙，稍后再试")
+				writeError(w, r, http.StatusServiceUnavailable, "TOOMANYREQUESTS", "server busy, try again later")
 			} else {
-				writeError(w, r, http.StatusTooManyRequests, "TOOMANYREQUESTS", "同时下载的镜像层太多")
+				writeError(w, r, http.StatusTooManyRequests, "TOOMANYREQUESTS", "too many concurrent layer downloads")
 			}
 			return
 		}
@@ -173,7 +176,7 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 	} else if ok, wait := h.App.Limiter.AllowManifest(key, client, r.Method == http.MethodHead, ov); !ok {
 		e.Limited = true
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds()+0.999)))
-		writeError(w, r, http.StatusTooManyRequests, "TOOMANYREQUESTS", "请求太频繁，稍后再试")
+		writeError(w, r, http.StatusTooManyRequests, "TOOMANYREQUESTS", "too many requests, try again later")
 		return
 	}
 
@@ -183,8 +186,9 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 	h.proxy(w, r, e, up, t)
 }
 
-// page 提供用法页、site.json 和 status.json。入口的 page 是 public（默认）时谁都能看，auth: basic 也只管拉取；
-// login 时先要登录（和拉取同一套账号）；off 时不提供，只剩拉取。
+// page serves the usage page, site.json and status.json. When the entrance's page is public (the default)
+// anyone can view them, and auth: basic only applies to pulls; with login, visitors must sign in first (with
+// the same accounts as for pulls); with off, they are not served and only pulls remain.
 func (h *Handler) page(w http.ResponseWriter, r *http.Request, e *accesslog.Entry, rt *app.Runtime, client netip.Addr, ent *route.Entrance) {
 	switch ent.Page {
 	case "off":
@@ -202,12 +206,12 @@ func (h *Handler) page(w http.ResponseWriter, r *http.Request, e *accesslog.Entr
 	}
 }
 
-// basicAuth 校验入口要求的登录，失败时写好响应并返回 nil。
+// basicAuth checks the sign-in the entrance requires; on failure it writes the response and returns nil.
 func (h *Handler) basicAuth(w http.ResponseWriter, r *http.Request, e *accesslog.Entry, rt *app.Runtime, client netip.Addr) *access.User {
 	if ok, wait := h.App.Limiter.AuthAllowed(client); !ok {
 		e.Limited = true
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds()+0.999)))
-		writeError(w, r, http.StatusTooManyRequests, "TOOMANYREQUESTS", "登录失败次数太多，稍后再试")
+		writeError(w, r, http.StatusTooManyRequests, "TOOMANYREQUESTS", "too many failed sign-in attempts, try again later")
 		return nil
 	}
 	name, pass, ok := r.BasicAuth()
@@ -219,7 +223,7 @@ func (h *Handler) basicAuth(w http.ResponseWriter, r *http.Request, e *accesslog
 	good, err := h.App.Auth.Verify(u, pass)
 	if errors.Is(err, access.ErrBusy) {
 		w.Header().Set("Retry-After", "1")
-		writeError(w, r, http.StatusServiceUnavailable, "UNAVAILABLE", "服务繁忙，稍后再试")
+		writeError(w, r, http.StatusServiceUnavailable, "UNAVAILABLE", "server busy, try again later")
 		return nil
 	}
 	if !good {
@@ -231,14 +235,14 @@ func (h *Handler) basicAuth(w http.ResponseWriter, r *http.Request, e *accesslog
 	return u
 }
 
-// challenge 要求客户端用 Basic 登录（docker login 会据此发送账号）。
+// challenge asks the client to sign in with Basic auth (docker login sends the account in response).
 func challenge(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Www-Authenticate", `Basic realm="registry-mirrors-relay", charset="UTF-8"`)
-	writeError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "需要登录")
+	writeError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
 }
 
-// requestHeaders 是转发给上游的请求头：只有 Accept，blob 再加 Range、If-Range。
-// 不转发客户端的 Authorization、Cookie、X-Forwarded-*、User-Agent。
+// requestHeaders returns the request headers forwarded to the upstream: only Accept, plus Range and If-Range
+// for blobs. The client's Authorization, Cookie, X-Forwarded-* and User-Agent are not forwarded.
 func requestHeaders(r *http.Request, k route.Kind) http.Header {
 	h := http.Header{}
 	accept := strings.Join(r.Header.Values("Accept"), ", ")
@@ -275,8 +279,8 @@ func (h *Handler) proxy(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 	defer func() { _ = resp.Body.Close() }()
 	e.Hops = resp.Hops
 	if resp.PassLocation != "" {
-		// 白名单外的重定向：原样交给客户端，客户端会直连这个地址
-		h.Log.Info("重定向不在白名单内，交给客户端", "upstream", up.Name, "location_host", hostOf(resp.PassLocation))
+		// Redirect outside the allowlist: pass it to the client as is; the client connects to that address directly
+		h.Log.Info("redirect not in allowlist, passed to client", "upstream", up.Name, "location_host", hostOf(resp.PassLocation))
 		h.App.Stats.UnlistedRedirect(up.Name, hostOf(resp.PassLocation))
 		w.Header().Set("Location", resp.PassLocation)
 		w.Header().Set("Cache-Control", "no-store")
@@ -287,14 +291,15 @@ func (h *Handler) proxy(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 	status := resp.StatusCode
 	switch {
 	case status == http.StatusUnauthorized:
-		// 上游最终仍要求认证：通常是镜像不存在或是私有的。给客户端 401 会让它去要令牌，而我们不发令牌
-		writeError(w, r, http.StatusNotFound, notFoundCode(t.Kind), "镜像不存在或需要登录")
+		// The upstream still requires authentication in the end: usually the image does not exist or is private.
+		// A 401 would make the client ask for a token, and we do not issue tokens
+		writeError(w, r, http.StatusNotFound, notFoundCode(t.Kind), "image not found or authentication required")
 		return
 	case status >= 400:
 		h.passError(w, r, resp, t)
 		return
 	case status >= 300 && status != http.StatusNotModified:
-		writeError(w, r, http.StatusBadGateway, "UNKNOWN", "上游返回了意外的状态 "+strconv.Itoa(status))
+		writeError(w, r, http.StatusBadGateway, "UNKNOWN", "upstream returned unexpected status "+strconv.Itoa(status))
 		return
 	}
 
@@ -318,7 +323,7 @@ func (h *Handler) proxy(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 	}
 	switch {
 	case !isDigest || t.Kind == route.KindTags:
-		hd.Set("Cache-Control", "no-store") // tag 会变
+		hd.Set("Cache-Control", "no-store") // tags can change
 	case h.App.Runtime().Config.Proxy.CDNCacheDigests:
 		hd.Set("Cache-Control", "public, max-age=31536000, immutable")
 	default:
@@ -328,10 +333,10 @@ func (h *Handler) proxy(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 	}
 
 	if resp.Probed {
-		// HEAD 跟随重定向时用 GET Range: bytes=0-0 探测：按总长度回答
+		// A HEAD that followed a redirect was probed with GET Range: bytes=0-0: answer with the total length
 		size := probedSize(resp.Response)
 		if size < 0 {
-			writeError(w, r, http.StatusBadGateway, "UNKNOWN", "无法确定镜像层大小")
+			writeError(w, r, http.StatusBadGateway, "UNKNOWN", "cannot determine layer size")
 			return
 		}
 		hd.Del("Content-Range")
@@ -346,7 +351,7 @@ func (h *Handler) proxy(w http.ResponseWriter, r *http.Request, e *accesslog.Ent
 	if err := h.stream(w, resp.Body, cancel); err != nil {
 		e.Error = err.Error()
 		if !errors.Is(err, errClientGone) {
-			h.Log.Warn("转发中断", "upstream", up.Name, "path", t.UpstreamPath(), "err", err)
+			h.Log.Warn("transfer interrupted", "upstream", up.Name, "path", t.UpstreamPath(), "err", err)
 		}
 		panic(http.ErrAbortHandler)
 	}
@@ -362,7 +367,8 @@ func hostOf(raw string) string {
 	return raw
 }
 
-// probedSize 从 Range: bytes=0-0 的响应里取总长度。上游忽略了 Range、直接返回 200 时用 Content-Length。
+// probedSize takes the total length from the response to Range: bytes=0-0. If the upstream ignored the Range
+// and returned 200, it uses Content-Length.
 func probedSize(resp *http.Response) int64 {
 	if resp.StatusCode == http.StatusPartialContent {
 		cr := resp.Header.Get("Content-Range") // bytes 0-0/12345
@@ -380,14 +386,15 @@ func probedSize(resp *http.Response) int64 {
 }
 
 var (
-	errClientGone   = errors.New("客户端断开或写超时")
-	errUpstreamIdle = errors.New("上游长时间没有数据")
+	errClientGone   = errors.New("client disconnected or write timed out")
+	errUpstreamIdle = errors.New("upstream sent no data for too long")
 )
 
-// stream 把上游的正文写给客户端。没有总超时：读上游、写客户端各自有空闲超时，只要一直有进展就继续。
+// stream writes the upstream body to the client. There is no overall timeout: reading from the upstream and
+// writing to the client each have an idle timeout, and the transfer continues as long as it keeps progressing.
 func (h *Handler) stream(w http.ResponseWriter, body io.Reader, cancel context.CancelFunc) error {
 	rc := http.NewResponseController(w)
-	_ = rc.Flush() // 先把响应头发出去
+	_ = rc.Flush() // send the response headers first
 	defer func() { _ = rc.SetWriteDeadline(time.Time{}) }()
 
 	bp := h.bufs.Get().(*[]byte)
@@ -402,7 +409,7 @@ func (h *Handler) stream(w http.ResponseWriter, body io.Reader, cancel context.C
 		idle.Lock()
 		timedOut = true
 		idle.Unlock()
-		cancel() // 取消上游请求，正在阻塞的 Read 会返回
+		cancel() // cancel the upstream request so a blocked Read returns
 	})
 	defer timer.Stop()
 
@@ -433,7 +440,7 @@ func (h *Handler) stream(w http.ResponseWriter, body io.Reader, cancel context.C
 func (h *Handler) upstreamError(w http.ResponseWriter, r *http.Request, e *accesslog.Entry, err error) {
 	e.Error = err.Error()
 	if r.Context().Err() != nil {
-		return // 客户端已经走了
+		return // the client has already left
 	}
 	var re *upstream.RedirectError
 	var be *upstream.BlockedError
@@ -442,19 +449,19 @@ func (h *Handler) upstreamError(w http.ResponseWriter, r *http.Request, e *acces
 	switch {
 	case errors.As(err, &co):
 		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(co.RetryAfter.Seconds()+0.5))))
-		writeError(w, r, http.StatusServiceUnavailable, "UNAVAILABLE", "上游暂时不可用，稍后再试")
+		writeError(w, r, http.StatusServiceUnavailable, "UNAVAILABLE", "upstream temporarily unavailable, try again later")
 	case errors.As(err, &re):
-		writeError(w, r, http.StatusBadGateway, "UNKNOWN", "上游重定向到了不允许的地址")
+		writeError(w, r, http.StatusBadGateway, "UNKNOWN", "upstream redirected to a disallowed address")
 	case errors.As(err, &be):
-		h.Log.Warn("拦下了到非公网地址的上游连接", "err", err)
-		writeError(w, r, http.StatusBadGateway, "UNKNOWN", "上游地址不可用")
+		h.Log.Warn("blocked upstream connection to a non-public address", "err", err)
+		writeError(w, r, http.StatusBadGateway, "UNKNOWN", "upstream address unavailable")
 	case errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()):
 		w.Header().Set("Retry-After", "10")
-		writeError(w, r, http.StatusGatewayTimeout, "UNAVAILABLE", "上游超时")
+		writeError(w, r, http.StatusGatewayTimeout, "UNAVAILABLE", "upstream timed out")
 	default:
-		h.Log.Warn("上游请求失败", "err", err)
+		h.Log.Warn("upstream request failed", "err", err)
 		w.Header().Set("Retry-After", "10")
-		writeError(w, r, http.StatusBadGateway, "UNAVAILABLE", "上游暂时不可用")
+		writeError(w, r, http.StatusBadGateway, "UNAVAILABLE", "upstream temporarily unavailable")
 	}
 }
 

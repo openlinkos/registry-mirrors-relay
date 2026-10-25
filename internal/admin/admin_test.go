@@ -40,7 +40,7 @@ type env struct {
 	mu     sync.Mutex
 	clock  time.Time
 	origin string
-	host   string // 不为空时作为请求的 Host
+	host   string // used as the request's Host when not empty
 }
 
 func (e *env) now() time.Time {
@@ -129,7 +129,8 @@ func (r resp) cookie(name string) *http.Cookie {
 	return nil
 }
 
-// do 发一个请求。cookies 是 名字=值 的列表；POST 默认带上正确的 Origin 和表单类型。
+// do sends a request. cookies is a list of name=value pairs; POSTs carry the correct Origin and form
+// content type by default.
 func (e *env) do(method, path string, form url.Values, cookies []string, hdr map[string]string) resp {
 	e.t.Helper()
 	var body io.Reader
@@ -171,23 +172,23 @@ func (e *env) get(path string, cookies ...string) resp { return e.do("GET", path
 var csrfRe = regexp.MustCompile(`name="_csrf" value="([^"]+)"`)
 
 type testSession struct {
-	cookie string // 名字=值
+	cookie string // name=value
 	csrf   string
 }
 
-// login 登录并取出会话 Cookie 和 CSRF 令牌。
+// login logs in and extracts the session cookie and the CSRF token.
 func (e *env) login(user, pw string) testSession {
 	e.t.Helper()
 	r := e.do("POST", "/admin/login", url.Values{"username": {user}, "password": {pw}, "next": {"/admin/"}}, nil, nil)
 	if r.StatusCode != http.StatusSeeOther {
-		e.t.Fatalf("登录 %s：%d %s", user, r.StatusCode, r.body)
+		e.t.Fatalf("login %s: %d %s", user, r.StatusCode, r.body)
 	}
 	c := r.Cookies()[0]
 	s := testSession{cookie: c.Name + "=" + c.Value}
 	page := e.get("/admin/", s.cookie)
 	m := csrfRe.FindStringSubmatch(page.body)
 	if m == nil {
-		e.t.Fatalf("页面里没有 CSRF 令牌：%d %s", page.StatusCode, page.body)
+		e.t.Fatalf("no CSRF token in the page: %d %s", page.StatusCode, page.body)
 	}
 	s.csrf = m[1]
 	return s
@@ -206,7 +207,7 @@ func TestSecurityHeaders(t *testing.T) {
 	e := newEnv(t, envOpts{})
 	r := e.get("/admin/login")
 	if r.StatusCode != 200 {
-		t.Fatalf("登录页：%d", r.StatusCode)
+		t.Fatalf("login page: %d", r.StatusCode)
 	}
 	want := map[string]string{
 		"Content-Security-Policy":      "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; require-trusted-types-for 'script'; trusted-types 'none'",
@@ -223,73 +224,74 @@ func TestSecurityHeaders(t *testing.T) {
 	}
 	for k, v := range want {
 		if got := r.Header.Get(k); got != v {
-			t.Errorf("%s = %q，应为 %q", k, got, v)
+			t.Errorf("%s = %q, want %q", k, got, v)
 		}
 	}
 	if r.Header.Get("Strict-Transport-Security") != "" {
-		t.Error("没有 https 的 public_url 时不应发 HSTS")
+		t.Error("HSTS must not be sent without an https public_url")
 	}
-	// 根路径和 /admin
+	// The root path and /admin
 	if r := e.get("/admin"); r.StatusCode != 303 || r.Header.Get("Location") != "/admin/" {
-		t.Errorf("/admin 应跳到 /admin/：%d %s", r.StatusCode, r.Header.Get("Location"))
+		t.Errorf("/admin should redirect to /admin/: %d %s", r.StatusCode, r.Header.Get("Location"))
 	}
 	if r := e.get("/admin/"); r.StatusCode != 303 || r.Header.Get("Location") != "/admin/login?next=%2Fadmin%2F" {
-		t.Errorf("没登录应跳到登录页：%d %s", r.StatusCode, r.Header.Get("Location"))
+		t.Errorf("not logged in should redirect to the login page: %d %s", r.StatusCode, r.Header.Get("Location"))
 	}
 	if r := e.do("PUT", "/admin/", nil, nil, nil); r.StatusCode != 405 || r.Header.Get("Allow") != "GET, POST" {
-		t.Errorf("只允许 GET 和 POST：%d %s", r.StatusCode, r.Header.Get("Allow"))
+		t.Errorf("only GET and POST are allowed: %d %s", r.StatusCode, r.Header.Get("Allow"))
 	}
 	if r := e.get("/admin/nope"); r.StatusCode != 404 {
-		t.Errorf("不存在的页面：%d", r.StatusCode)
+		t.Errorf("page that does not exist: %d", r.StatusCode)
 	}
 }
 
 func TestHostCheck(t *testing.T) {
-	// 默认 admin.public：任何域名都能打开；经终止 TLS 的反向代理来的 https 页面可以登录，会话 Cookie 带 Secure
+	// Default admin.public: any domain can open the console; an https page through a TLS-terminating
+	// reverse proxy can log in, and the session cookie is Secure
 	pub := newEnv(t, envOpts{})
 	pub.host, pub.origin = "mirror.example.test", "https://mirror.example.test"
 	if r := pub.get("/admin/login"); r.StatusCode != 200 {
-		t.Fatalf("admin.public 时任何域名都能打开：%d", r.StatusCode)
+		t.Fatalf("with admin.public any domain can open the console: %d", r.StatusCode)
 	}
 	r := pub.do("POST", "/admin/login", url.Values{"username": {"alice"}, "password": {alicePW}}, nil, nil)
 	if c := r.cookie(secureCookie); r.StatusCode != http.StatusSeeOther || c == nil || !c.Secure {
-		t.Fatalf("https 页面登录用 __Host- Cookie：%d %+v", r.StatusCode, r.Cookies())
+		t.Fatalf("login from an https page uses the __Host- cookie: %d %+v", r.StatusCode, r.Cookies())
 	}
 	pub.origin = "http://mirror.example.test"
 	if r := pub.do("POST", "/admin/login", url.Values{"username": {"alice"}, "password": {alicePW}}, nil, nil); r.StatusCode != http.StatusSeeOther || r.cookie(plainCookie) == nil {
-		t.Fatalf("明文 http 页面也能登录（普通 Cookie）：%d", r.StatusCode)
+		t.Fatalf("a plain http page can log in too (plain cookie): %d", r.StatusCode)
 	}
 	for _, o := range []string{"https://evil.example.test", "https://mirror.example.test.evil.example", "null"} {
 		pub.origin = o
 		if r := pub.do("POST", "/admin/login", url.Values{"username": {"alice"}, "password": {alicePW}}, nil, nil); r.StatusCode != http.StatusForbidden {
-			t.Fatalf("来源 %s 不是这个站点：%d", o, r.StatusCode)
+			t.Fatalf("origin %s is not this site: %d", o, r.StatusCode)
 		}
 	}
 
-	// admin.public: false：只接受 public_url、localhost 和 IP，防 DNS 重绑定
+	// admin.public: false: only public_url, localhost and IP addresses are accepted, against DNS rebinding
 	e := newEnv(t, envOpts{yaml: "admin: {public: false}\n"})
 	e.host = "admin.evil.example"
 	if r := e.get("/admin/login"); r.StatusCode != http.StatusMisdirectedRequest {
-		t.Fatalf("没配置 public_url 时只接受回环地址：%d", r.StatusCode)
+		t.Fatalf("without public_url only loopback addresses are accepted: %d", r.StatusCode)
 	}
 	if r := e.get(api.Prefix + "/status"); r.StatusCode != http.StatusMisdirectedRequest {
-		t.Fatalf("API 也一样：%d", r.StatusCode)
+		t.Fatalf("the API too: %d", r.StatusCode)
 	}
 	e.host = "localhost"
 	if r := e.get("/admin/login"); r.StatusCode != 200 {
-		t.Fatalf("localhost 可以：%d", r.StatusCode)
+		t.Fatalf("localhost is allowed: %d", r.StatusCode)
 	}
-	// 局域网里用 IP 直接打开：没有 DNS 重绑定的问题
+	// Opening directly by IP on a LAN: no DNS rebinding problem
 	for _, h := range []string{"192.0.2.10:8080", "[2001:db8::10]:8080"} {
 		e.host = h
 		if r := e.get("/admin/login"); r.StatusCode != 200 {
-			t.Fatalf("IP %s 可以：%d", h, r.StatusCode)
+			t.Fatalf("IP %s is allowed: %d", h, r.StatusCode)
 		}
 	}
-	// 用 IP 打开时，Origin 就是 http://<IP>，可以登录
+	// When opened by IP, Origin is http://<IP> and login works
 	e.host, e.origin = "192.0.2.10:8080", "http://192.0.2.10:8080"
 	if r := e.do("POST", "/admin/login", url.Values{"username": {"alice"}, "password": {alicePW}}, nil, nil); r.StatusCode != http.StatusSeeOther {
-		t.Fatalf("用 IP 打开后台应能登录：%d", r.StatusCode)
+		t.Fatalf("the console opened by IP should allow login: %d", r.StatusCode)
 	}
 }
 
@@ -297,40 +299,40 @@ func TestLoginAndCookieFlags(t *testing.T) {
 	e := newEnv(t, envOpts{})
 	r := e.do("POST", "/admin/login", url.Values{"username": {"alice"}, "password": {"wrong-password-1"}}, nil, nil)
 	if r.StatusCode != 401 || !strings.Contains(r.body, tr("zh", "auth.bad")) || len(r.Cookies()) != 0 {
-		t.Fatalf("口令错误：%d", r.StatusCode)
+		t.Fatalf("wrong password: %d", r.StatusCode)
 	}
 	r = e.do("POST", "/admin/login", url.Values{"username": {"nobody"}, "password": {"whatever-123456"}}, nil, nil)
 	if r.StatusCode != 401 {
-		t.Fatalf("用户不存在也是 401：%d", r.StatusCode)
+		t.Fatalf("an unknown user is also 401: %d", r.StatusCode)
 	}
 	r = e.do("POST", "/admin/login", url.Values{"username": {"alice"}, "password": {alicePW}, "next": {"/admin/rules?x=1"}}, nil, nil)
 	if r.StatusCode != 303 || r.Header.Get("Location") != "/admin/rules?x=1" {
-		t.Fatalf("登录后跳到 next：%d %s", r.StatusCode, r.Header.Get("Location"))
+		t.Fatalf("after login, redirect to next: %d %s", r.StatusCode, r.Header.Get("Location"))
 	}
 	c := r.cookie(plainCookie)
 	if c == nil || !c.HttpOnly || c.Secure || c.Path != "/admin" || c.SameSite != http.SameSiteStrictMode || c.MaxAge != 0 {
-		t.Fatalf("回环地址上的会话 Cookie：%+v", c)
+		t.Fatalf("session cookie on a loopback address: %+v", c)
 	}
 	if !strings.Contains(r.Header.Get("Set-Cookie"), "SameSite=Strict") {
-		t.Fatalf("Set-Cookie：%s", r.Header.Get("Set-Cookie"))
+		t.Fatalf("Set-Cookie: %s", r.Header.Get("Set-Cookie"))
 	}
 	page := e.get("/admin/", plainCookie+"="+c.Value)
 	if page.StatusCode != 200 || !strings.Contains(page.body, "alice") {
-		t.Fatalf("登录后能看概览：%d", page.StatusCode)
+		t.Fatalf("the overview is visible after login: %d", page.StatusCode)
 	}
-	// 开放跳转
+	// Open redirect
 	r = e.do("POST", "/admin/login", url.Values{"username": {"alice"}, "password": {alicePW}, "next": {"//evil.example/"}}, nil, nil)
 	if r.Header.Get("Location") != "/admin/" {
-		t.Fatalf("next 不能指向别的站点：%s", r.Header.Get("Location"))
+		t.Fatalf("next must not point to another site: %s", r.Header.Get("Location"))
 	}
-	// 退出
+	// Logout
 	s := testSession{cookie: plainCookie + "=" + c.Value}
 	s.csrf = csrfRe.FindStringSubmatch(page.body)[1]
 	if r := e.post(s, "/admin/logout", nil); r.StatusCode != 303 || r.Header.Get("Location") != "/admin/login" {
-		t.Fatalf("退出：%d", r.StatusCode)
+		t.Fatalf("logout: %d", r.StatusCode)
 	}
 	if r := e.get("/admin/", s.cookie); r.StatusCode != 303 {
-		t.Fatalf("退出后会话失效：%d", r.StatusCode)
+		t.Fatalf("the session is invalid after logout: %d", r.StatusCode)
 	}
 	log := e.app.Store.AuditLog(100)
 	var actions []string
@@ -338,7 +340,7 @@ func TestLoginAndCookieFlags(t *testing.T) {
 		actions = append(actions, a.Action)
 	}
 	if strings.Count(strings.Join(actions, ","), "login.failed") != 1 || !slices.Contains(actions, "login") || !slices.Contains(actions, "logout") {
-		t.Fatalf("审计：失败只记第一次，登录、退出都要记：%v", actions)
+		t.Fatalf("audit log: only the first failure is recorded, login and logout both are: %v", actions)
 	}
 }
 
@@ -348,22 +350,22 @@ func TestSecureCookieBehindHTTPS(t *testing.T) {
 	r := e.do("POST", "/admin/login", url.Values{"username": {"alice"}, "password": {alicePW}}, nil, nil)
 	c := r.cookie(secureCookie)
 	if r.StatusCode != 303 || c == nil || !c.Secure || !c.HttpOnly || c.Path != "/" || c.SameSite != http.SameSiteLaxMode {
-		t.Fatalf("https 时用 __Host- Cookie：%d %+v", r.StatusCode, r.Cookies())
+		t.Fatalf("https uses the __Host- cookie: %d %+v", r.StatusCode, r.Cookies())
 	}
 	if r.Header.Get("Strict-Transport-Security") != "max-age=31536000" {
-		t.Fatal("https 的 public_url 要发 HSTS")
+		t.Fatal("an https public_url must send HSTS")
 	}
 	if r := e.get("/admin/", secureCookie+"="+c.Value); r.StatusCode != 200 {
-		t.Fatalf("带 __Host- Cookie 能访问：%d", r.StatusCode)
+		t.Fatalf("the __Host- cookie gives access: %d", r.StatusCode)
 	}
-	// 同一个会话 ID 放在普通 Cookie 里不认（兄弟子域名可以种普通 Cookie）
+	// The same session ID in a plain cookie is not accepted (a sibling subdomain can plant plain cookies)
 	if r := e.get("/admin/", plainCookie+"="+c.Value); r.StatusCode != 303 {
-		t.Fatalf("https 下不认普通 Cookie：%d", r.StatusCode)
+		t.Fatalf("a plain cookie is not accepted under https: %d", r.StatusCode)
 	}
-	// http 的来源不行
+	// An http origin is not accepted
 	e.origin = "http://admin.example.test"
 	if r := e.do("POST", "/admin/login", url.Values{"username": {"alice"}, "password": {alicePW}}, nil, nil); r.StatusCode != 403 {
-		t.Fatalf("来源要和 public_url 完全一致：%d", r.StatusCode)
+		t.Fatalf("the origin must match public_url exactly: %d", r.StatusCode)
 	}
 }
 
@@ -373,7 +375,7 @@ func TestPostChecks(t *testing.T) {
 	form := func() url.Values {
 		return url.Values{"_csrf": {s.csrf}, "cidr": {"198.51.100.7"}, "duration": {"1h"}}
 	}
-	// 改掉第一个字符；原来就是 x 时改成 y，否则改出来的还是同一个令牌
+	// Change the first character; if it already is x, use y, otherwise the result is the same token
 	wrong := "x" + s.csrf[1:]
 	if wrong == s.csrf {
 		wrong = "y" + s.csrf[1:]
@@ -384,41 +386,41 @@ func TestPostChecks(t *testing.T) {
 		form url.Values
 		want int
 	}{
-		{"没有 Origin", map[string]string{"Origin": ""}, form(), 403},
-		{"外来 Origin", map[string]string{"Origin": "http://evil.example"}, form(), 403},
-		{"跨站", map[string]string{"Sec-Fetch-Site": "cross-site"}, form(), 403},
-		{"没有 CSRF", nil, url.Values{"cidr": {"198.51.100.7"}, "duration": {"1h"}}, 403},
-		{"错误的 CSRF", nil, url.Values{"_csrf": {wrong}, "cidr": {"198.51.100.7"}, "duration": {"1h"}}, 403},
-		{"不是表单", map[string]string{"Content-Type": "application/json"}, form(), 415},
+		{"no Origin", map[string]string{"Origin": ""}, form(), 403},
+		{"foreign Origin", map[string]string{"Origin": "http://evil.example"}, form(), 403},
+		{"cross-site", map[string]string{"Sec-Fetch-Site": "cross-site"}, form(), 403},
+		{"no CSRF", nil, url.Values{"cidr": {"198.51.100.7"}, "duration": {"1h"}}, 403},
+		{"wrong CSRF", nil, url.Values{"_csrf": {wrong}, "cidr": {"198.51.100.7"}, "duration": {"1h"}}, 403},
+		{"not a form", map[string]string{"Content-Type": "application/json"}, form(), 415},
 	}
 	for _, c := range cases {
 		if r := e.do("POST", "/admin/bans/add", c.form, []string{s.cookie}, c.hdr); r.StatusCode != c.want {
-			t.Errorf("%s：%d，应为 %d", c.name, r.StatusCode, c.want)
+			t.Errorf("%s: %d, want %d", c.name, r.StatusCode, c.want)
 		}
 	}
 	if len(e.app.Runtime().Data.Bans) != 0 {
-		t.Fatal("被拒绝的请求不能生效")
+		t.Fatal("rejected requests must not take effect")
 	}
-	r := e.post(s, "/admin/bans/add", url.Values{"cidr": {"198.51.100.7"}, "duration": {"1h"}, "reason": {"测试"}})
+	r := e.post(s, "/admin/bans/add", url.Values{"cidr": {"198.51.100.7"}, "duration": {"1h"}, "reason": {"test"}})
 	if r.StatusCode != 303 || r.Header.Get("Location") != "/admin/rules?ok=ban.added&v=198.51.100.7%2F32" {
-		t.Fatalf("封禁：%d %s", r.StatusCode, r.Header.Get("Location"))
+		t.Fatalf("ban: %d %s", r.StatusCode, r.Header.Get("Location"))
 	}
 	if page := e.get(r.Header.Get("Location"), s.cookie); !strings.Contains(page.body, "已封禁 198.51.100.7/32。") {
-		t.Fatal("跳转回来后应显示成功提示")
+		t.Fatal("the success notice should show after the redirect")
 	}
-	// 只读角色
+	// Read-only role
 	v := e.login("victor", victorPW)
 	if r := e.post(v, "/admin/bans/delete", url.Values{"cidr": {"198.51.100.7"}}); r.StatusCode != 403 {
-		t.Fatalf("只读角色不能修改：%d", r.StatusCode)
+		t.Fatalf("the read-only role cannot modify: %d", r.StatusCode)
 	}
-	// 没登录的 POST 跳到登录页
+	// A POST without login redirects to the login page
 	if r := e.do("POST", "/admin/bans/add", form(), nil, nil); r.StatusCode != 303 || r.Header.Get("Location") != "/admin/login" {
-		t.Fatalf("没登录：%d %s", r.StatusCode, r.Header.Get("Location"))
+		t.Fatalf("not logged in: %d %s", r.StatusCode, r.Header.Get("Location"))
 	}
-	// 表单的错误：带着说明重新渲染
+	// Form errors: re-rendered with the explanation
 	r = e.post(s, "/admin/bans/add", url.Values{"cidr": {"0.0.0.0/0"}, "duration": {"1h"}})
 	if r.StatusCode != 400 || !strings.Contains(r.body, "不能整段放开或封掉所有地址") || !strings.Contains(r.body, `value="0.0.0.0/0"`) {
-		t.Fatalf("错误应重新渲染并保留填过的值：%d", r.StatusCode)
+		t.Fatalf("an error should re-render and keep the filled-in values: %d", r.StatusCode)
 	}
 }
 
@@ -429,17 +431,17 @@ func TestLoginRateLimit(t *testing.T) {
 	}
 	for i := 1; i <= 10; i++ {
 		if r := try("wrong-password-1"); r.StatusCode != 401 {
-			t.Fatalf("第 %d 次失败应返回 401：%d", i, r.StatusCode)
+			t.Fatalf("failure %d should return 401: %d", i, r.StatusCode)
 		}
 	}
 	r := try(alicePW)
 	if r.StatusCode != 429 || r.Header.Get("Retry-After") == "" || len(r.Cookies()) != 0 {
-		t.Fatalf("10 次失败后口令正确也要拒绝：%d %s", r.StatusCode, r.Header.Get("Retry-After"))
+		t.Fatalf("after 10 failures even the right password is rejected: %d %s", r.StatusCode, r.Header.Get("Retry-After"))
 	}
 	try(alicePW)
 	e.advance(10*time.Minute + time.Second)
 	if r := try(alicePW); r.StatusCode != 303 {
-		t.Fatalf("窗口过去后可以登录：%d", r.StatusCode)
+		t.Fatalf("login works once the window has passed: %d", r.StatusCode)
 	}
 	var failed, blocked int
 	for _, a := range e.app.Store.AuditLog(100) {
@@ -451,7 +453,7 @@ func TestLoginRateLimit(t *testing.T) {
 		}
 	}
 	if failed != 1 || blocked != 1 {
-		t.Fatalf("每个窗口只记一次失败和一次封锁：failed=%d blocked=%d", failed, blocked)
+		t.Fatalf("one failure and one block are recorded per window: failed=%d blocked=%d", failed, blocked)
 	}
 }
 
@@ -460,19 +462,19 @@ func TestSessionExpiry(t *testing.T) {
 	s := e.login("alice", alicePW)
 	e.advance(31 * time.Minute)
 	if r := e.get("/admin/rules", s.cookie); r.StatusCode != 303 || r.Header.Get("Location") != "/admin/login?next=%2Fadmin%2Frules" {
-		t.Fatalf("空闲 30 分钟后要重新登录：%d %s", r.StatusCode, r.Header.Get("Location"))
+		t.Fatalf("log in again after 30 minutes idle: %d %s", r.StatusCode, r.Header.Get("Location"))
 	}
 	s = e.login("alice", alicePW)
 	start := e.now()
 	for e.now().Sub(start) < 12*time.Hour-29*time.Minute {
 		e.advance(29 * time.Minute)
 		if r := e.get("/admin/", s.cookie); r.StatusCode != 200 {
-			t.Fatalf("一直有操作时 12 小时内有效（%s）：%d", e.now().Sub(start), r.StatusCode)
+			t.Fatalf("valid for 12 hours with continuous activity (%s): %d", e.now().Sub(start), r.StatusCode)
 		}
 	}
 	e.advance(29 * time.Minute)
 	if r := e.get("/admin/", s.cookie); r.StatusCode != 303 {
-		t.Fatalf("登录满 12 小时后失效（%s）：%d", e.now().Sub(start), r.StatusCode)
+		t.Fatalf("invalid 12 hours after login (%s): %d", e.now().Sub(start), r.StatusCode)
 	}
 }
 
@@ -481,24 +483,24 @@ func TestFreshForSensitiveActions(t *testing.T) {
 	s := e.login("alice", alicePW)
 	r := e.post(s, "/admin/tokens/create", url.Values{"name": {"ci"}, "role": {"viewer"}})
 	if r.StatusCode != 200 || !strings.Contains(r.body, "rmr_") {
-		t.Fatalf("刚登录时可以直接创建令牌：%d", r.StatusCode)
+		t.Fatalf("a token can be created right after login: %d", r.StatusCode)
 	}
 	e.advance(11 * time.Minute)
 	r = e.post(s, "/admin/tokens/create", url.Values{"name": {"ci2"}, "role": {"viewer"}})
 	if r.StatusCode != 303 || r.Header.Get("Location") != "/admin/reauth?next=%2Fadmin%2Fadmins" {
-		t.Fatalf("超过 10 分钟要重新输入口令：%d %s", r.StatusCode, r.Header.Get("Location"))
+		t.Fatalf("re-authentication is required after 10 minutes: %d %s", r.StatusCode, r.Header.Get("Location"))
 	}
 	if r := e.get("/admin/reauth?next=%2Fadmin%2Fadmins", s.cookie); r.StatusCode != 200 {
-		t.Fatalf("确认身份页：%d", r.StatusCode)
+		t.Fatalf("re-authentication page: %d", r.StatusCode)
 	}
 	if r := e.post(s, "/admin/reauth", url.Values{"password": {"wrong-password-1"}, "next": {"/admin/admins"}}); r.StatusCode != 401 {
-		t.Fatalf("口令错误：%d", r.StatusCode)
+		t.Fatalf("wrong password: %d", r.StatusCode)
 	}
 	if r := e.post(s, "/admin/reauth", url.Values{"password": {alicePW}, "next": {"/admin/admins"}}); r.StatusCode != 303 || r.Header.Get("Location") != "/admin/admins" {
-		t.Fatalf("确认身份后回到原页面：%d %s", r.StatusCode, r.Header.Get("Location"))
+		t.Fatalf("back to the original page after re-authentication: %d %s", r.StatusCode, r.Header.Get("Location"))
 	}
 	if r := e.post(s, "/admin/tokens/create", url.Values{"name": {"ci2"}, "role": {"viewer"}}); r.StatusCode != 200 {
-		t.Fatalf("确认身份后可以创建：%d", r.StatusCode)
+		t.Fatalf("can create after re-authentication: %d", r.StatusCode)
 	}
 }
 
@@ -514,19 +516,19 @@ func TestWriteRoutesPinned(t *testing.T) {
 		"/admin/upstreams/hosts/delete", "/admin/users/create", "/admin/users/delete", "/admin/users/update",
 	}
 	if got := e.h.WriteRoutes(); !slices.Equal(got, want) {
-		t.Fatalf("后台的写操作变了：\n%v", got)
+		t.Fatalf("the console's writes changed:\n%v", got)
 	}
-	// 敏感操作都要求最近输入过口令
+	// Sensitive operations all require a recently entered password
 	for _, r := range e.h.routes {
 		sensitive := strings.HasPrefix(r.path, "/admin/admins/") || strings.HasPrefix(r.path, "/admin/tokens/") ||
 			strings.HasPrefix(r.path, "/admin/config/") || r.path == "/admin/sessions/revoke" || r.path == "/admin/account/password"
 		if r.method == http.MethodPost && sensitive && r.auth != authFresh {
-			t.Errorf("%s 应要求重新输入口令", r.path)
+			t.Errorf("%s should require re-authentication", r.path)
 		}
 	}
 }
 
-// fillStats 造一些请求记录，让各个页面都有内容。
+// fillStats creates some request records so that every page has content.
 func fillStats(a *app.App) {
 	for i := range 6 {
 		a.Log(&accesslog.Entry{Time: time.Now(), ClientIP: "198.51.100.9", Method: "GET", Host: "mirror.test",
@@ -547,34 +549,35 @@ var (
 	iconUse      = regexp.MustCompile(`<use href="#i-([a-z0-9-]+)"/>`)
 )
 
-// checkPage 是每个页面都要满足的：没有内联样式、内联脚本、事件属性；用到的图标都有 symbol；没有漏翻的文案。
+// checkPage is what every page must satisfy: no inline styles, inline scripts or event attributes; every
+// icon used has a symbol; no untranslated text.
 func checkPage(t *testing.T, name, body string) {
 	t.Helper()
 	if inlineStyle.MatchString(body) {
-		t.Errorf("%s 有内联样式", name)
+		t.Errorf("%s has inline styles", name)
 	}
 	for _, m := range inlineScript.FindAllStringSubmatch(body, -1) {
 		if !strings.Contains(m[1], "src=") {
-			t.Errorf("%s 有内联脚本", name)
+			t.Errorf("%s has an inline script", name)
 		}
 	}
 	if eventAttr.MatchString(body) {
-		t.Errorf("%s 有事件属性", name)
+		t.Errorf("%s has event attributes", name)
 	}
 	if strings.Contains(body, "<script>alert(1)") {
-		t.Errorf("%s 没有转义", name)
+		t.Errorf("%s is not escaped", name)
 	}
 	for _, m := range iconUse.FindAllStringSubmatch(body, -1) {
 		if !strings.Contains(body, `<symbol id="i-`+m[1]+`"`) {
-			t.Errorf("%s 用了图标 %s 但没有 symbol", name, m[1])
+			t.Errorf("%s uses icon %s but has no symbol", name, m[1])
 		}
 	}
 	if strings.Contains(body, spriteMark) {
-		t.Errorf("%s 的图标占位没有替换", name)
+		t.Errorf("%s: the icon placeholder was not replaced", name)
 	}
 	for k := range messagesZH {
 		if strings.Contains(body, ">"+k+"<") || strings.Contains(body, `"`+k+`"`) {
-			t.Errorf("%s 里有没翻译的键 %s", name, k)
+			t.Errorf("%s has untranslated key %s", name, k)
 		}
 	}
 }
@@ -583,7 +586,7 @@ func TestPagesRender(t *testing.T) {
 	e := newEnv(t, envOpts{yaml: "entrances:\n  - {name: mirror, hosts: [mirror.test]}\n  - {hosts: [ghcr.test], upstream: ghcr.io, auth: basic}\n"})
 	admin := e.login("alice", alicePW)
 	if r := e.post(admin, "/admin/users/create", url.Values{"name": {"bob"}, "password": {"bob-password-123"}, "manifest_rate": {"5"}}); r.StatusCode != 303 {
-		t.Fatalf("建账号：%d %s", r.StatusCode, r.body)
+		t.Fatalf("create account: %d %s", r.StatusCode, r.body)
 	}
 	e.post(admin, "/admin/rules/image/add", url.Values{"pattern": {"ghcr.io/evil/**"}, "kind": {"deny"}, "status": {"451"}})
 	e.app.Stats.UnlistedRedirect("quay.io", "cdn99.quay.io")
@@ -606,11 +609,11 @@ func TestPagesRender(t *testing.T) {
 					want = 404
 				}
 				if r.StatusCode != want {
-					t.Fatalf("%s（%s）：%d %s", p, lang, r.StatusCode, r.body)
+					t.Fatalf("%s (%s): %d %s", p, lang, r.StatusCode, r.body)
 				}
 				checkPage(t, p+" "+lang, r.body)
 				if lang == "en" && !strings.Contains(r.body, `<html lang="en"`) {
-					t.Errorf("%s 应是英文", p)
+					t.Errorf("%s should be in English", p)
 				}
 			}
 		}
@@ -619,45 +622,45 @@ func TestPagesRender(t *testing.T) {
 		r := e.get(p)
 		checkPage(t, p, r.body)
 	}
-	// 只读角色看不到修改的表单
+	// The read-only role does not see the edit forms
 	if r := e.get("/admin/users", viewer.cookie); strings.Contains(r.body, `action="/admin/users/create"`) {
-		t.Error("只读角色不应看到新建表单")
+		t.Error("the read-only role should not see the create form")
 	}
 	if r := e.get("/admin/users", admin.cookie); !strings.Contains(r.body, `action="/admin/users/create"`) {
-		t.Error("管理员应看到新建表单")
+		t.Error("an administrator should see the create form")
 	}
-	// 概览的实时数字
+	// Live numbers on the overview
 	r := e.get("/admin/live", admin.cookie)
 	var live map[string]string
 	if r.StatusCode != 200 || json.Unmarshal([]byte(r.body), &live) != nil || live["rpm"] == "" {
-		t.Fatalf("/admin/live：%d %s", r.StatusCode, r.body)
+		t.Fatalf("/admin/live: %d %s", r.StatusCode, r.body)
 	}
 	if r := e.do("GET", "/admin/live", nil, []string{admin.cookie}, map[string]string{"Sec-Fetch-Site": "cross-site"}); r.StatusCode != 403 {
-		t.Fatalf("/admin/live 不接受跨站：%d", r.StatusCode)
+		t.Fatalf("/admin/live does not accept cross-site requests: %d", r.StatusCode)
 	}
 }
 
 func TestMessagesComplete(t *testing.T) {
 	for k := range messagesZH {
 		if _, ok := messagesEN[k]; !ok {
-			t.Errorf("英文缺 %s", k)
+			t.Errorf("English is missing %s", k)
 		}
 	}
 	for k := range messagesEN {
 		if _, ok := messagesZH[k]; !ok {
-			t.Errorf("中文缺 %s", k)
+			t.Errorf("Chinese is missing %s", k)
 		}
 	}
-	// 模板和代码里用到的键都要有
+	// Every key used in the templates and the code must exist
 	used := regexp.MustCompile(`\.T "([a-zA-Z0-9_.]+)"|tr\((?:c\.)?lang, "([a-zA-Z0-9_.]+)"|fail\(http\.\w+, "([a-zA-Z0-9_.]+)"|message: "([a-zA-Z0-9_.]+)"`)
 	check := func(name string, b []byte) {
 		for _, m := range used.FindAllStringSubmatch(string(b), -1) {
 			k := m[1] + m[2] + m[3] + m[4]
 			if strings.HasSuffix(k, ".") {
-				continue // 拼出来的键，下面单独检查
+				continue // a composed key, checked separately below
 			}
 			if _, ok := messagesZH[k]; !ok {
-				t.Errorf("%s 用了没有的键 %s", name, k)
+				t.Errorf("%s uses missing key %s", name, k)
 			}
 		}
 	}
@@ -676,20 +679,20 @@ func TestMessagesComplete(t *testing.T) {
 		b, _ := os.ReadFile(f)
 		check(f, b)
 	}
-	// 拼出来的键
+	// Composed keys
 	for _, k := range []string{"theme.auto", "theme.light", "theme.dark", "role.admin", "role.viewer", "abuse.hours1", "abuse.hours24", "abuse.hours168"} {
 		if _, ok := messagesZH[k]; !ok {
-			t.Errorf("缺 %s", k)
+			t.Errorf("missing %s", k)
 		}
 	}
 	for _, k := range ops.SiteLinkKeys {
 		if _, ok := messagesZH["settings.link."+k]; !ok {
-			t.Errorf("缺 settings.link.%s", k)
+			t.Errorf("missing settings.link.%s", k)
 		}
 	}
 	for _, k := range []string{"builtin", "config", "console"} {
 		if _, ok := messagesZH["config.source."+k]; !ok {
-			t.Errorf("缺 config.source.%s", k)
+			t.Errorf("missing config.source.%s", k)
 		}
 	}
 	for _, key := range append(append([]string{}, config.OverrideSections...), "upstreams/x.example.com") {
@@ -697,25 +700,25 @@ func TestMessagesComplete(t *testing.T) {
 		if sec == key {
 			for _, k := range []string{"cfg." + key, "cfg." + key + "Help"} {
 				if _, ok := messagesZH[k]; !ok {
-					t.Errorf("缺 %s", k)
+					t.Errorf("missing %s", k)
 				}
 			}
 		}
 		for _, f := range config.OverrideFields(key) {
 			if _, ok := messagesZH["cfg."+sec+"."+f]; !ok {
-				t.Errorf("缺 cfg.%s.%s", sec, f)
+				t.Errorf("missing cfg.%s.%s", sec, f)
 			}
 		}
 	}
 	for _, n := range notices {
 		if _, ok := messagesZH["notice."+n]; !ok {
-			t.Errorf("缺 notice.%s", n)
+			t.Errorf("missing notice.%s", n)
 		}
 	}
 	for _, g := range navTable {
 		for _, it := range g.items {
 			if _, ok := messagesZH["nav."+it[0]]; !ok {
-				t.Errorf("缺 nav.%s", it[0])
+				t.Errorf("missing nav.%s", it[0])
 			}
 		}
 	}
@@ -727,33 +730,33 @@ func TestAssets(t *testing.T) {
 	for _, name := range []string{"ui.css", "admin.css", "admin.js", "favicon.svg", "logo.svg"} {
 		u := e.h.assets.url(name)
 		if !strings.Contains(page, u) && name != "logo.svg" {
-			t.Errorf("页面里应引用 %s", u)
+			t.Errorf("the page should reference %s", u)
 		}
 		r := e.get(u)
 		if r.StatusCode != 200 || r.Header.Get("Cache-Control") != "private, max-age=31536000, immutable" {
-			t.Fatalf("%s：%d %s", u, r.StatusCode, r.Header.Get("Cache-Control"))
+			t.Fatalf("%s: %d %s", u, r.StatusCode, r.Header.Get("Cache-Control"))
 		}
 		wantCSP := CSP
 		if strings.HasSuffix(name, ".svg") {
 			wantCSP = SVGCSP
 		}
 		if r.Header.Get("Content-Security-Policy") != wantCSP {
-			t.Errorf("%s 的 CSP：%s", name, r.Header.Get("Content-Security-Policy"))
+			t.Errorf("%s CSP: %s", name, r.Header.Get("Content-Security-Policy"))
 		}
 	}
 	css := e.get(e.h.assets.url("ui.css")).body
 	m := regexp.MustCompile(`url\((fonts/Geist-Variable\.[0-9a-f]{10}\.woff2)\)`).FindStringSubmatch(css)
 	if m == nil || strings.Contains(css, "url(fonts/Geist-Variable.woff2)") {
-		t.Fatal("样式表里的字体地址应改成带哈希的")
+		t.Fatal("font URLs in the stylesheet should be rewritten to hashed names")
 	}
 	if r := e.get("/admin/assets/" + m[1]); r.StatusCode != 200 || r.Header.Get("Content-Type") != "font/woff2" {
-		t.Fatalf("字体：%d %s", r.StatusCode, r.Header.Get("Content-Type"))
+		t.Fatalf("font: %d %s", r.StatusCode, r.Header.Get("Content-Type"))
 	}
 	if r := e.get("/admin/assets/ui.css"); r.StatusCode != 404 {
-		t.Fatalf("不带哈希的名字不提供：%d", r.StatusCode)
+		t.Fatalf("names without a hash are not served: %d", r.StatusCode)
 	}
 	if r := e.do("POST", e.h.assets.url("admin.css"), url.Values{}, nil, nil); r.StatusCode != 405 {
-		t.Fatalf("静态文件只能 GET：%d", r.StatusCode)
+		t.Fatalf("static files are GET only: %d", r.StatusCode)
 	}
 }
 
@@ -761,20 +764,20 @@ func TestPrefs(t *testing.T) {
 	e := newEnv(t, envOpts{})
 	r := e.do("POST", "/admin/prefs", url.Values{"lang": {"en"}, "theme": {"dark"}, "next": {"/admin/login"}}, nil, nil)
 	if r.StatusCode != 303 || r.Header.Get("Location") != "/admin/login" || r.cookie(langCookie) == nil || r.cookie(themeCookie) == nil {
-		t.Fatalf("偏好：%d %v", r.StatusCode, r.Cookies())
+		t.Fatalf("prefs: %d %v", r.StatusCode, r.Cookies())
 	}
 	page := e.get("/admin/login", langCookie+"=en", themeCookie+"=dark")
 	if !strings.Contains(page.body, `<html lang="en" data-theme="dark">`) || !strings.Contains(page.body, "Sign in") {
-		t.Fatal("应是英文、深色")
+		t.Fatal("should be English and dark")
 	}
 	if r := e.do("POST", "/admin/prefs", url.Values{"lang": {"en"}}, nil, map[string]string{"Origin": "http://evil.example"}); r.StatusCode != 403 {
-		t.Fatalf("偏好也要检查来源：%d", r.StatusCode)
+		t.Fatalf("prefs must check the origin too: %d", r.StatusCode)
 	}
 	if got := negotiateLang("", "en-US,en;q=0.9,zh;q=0.8"); got != "en" {
-		t.Fatalf("Accept-Language：%s", got)
+		t.Fatalf("Accept-Language: %s", got)
 	}
 	if got := negotiateLang("", "fr, zh-CN;q=0.5"); got != "zh" {
-		t.Fatalf("Accept-Language：%s", got)
+		t.Fatalf("Accept-Language: %s", got)
 	}
 }
 
@@ -793,7 +796,7 @@ func TestSafeNext(t *testing.T) {
 		"/admin/ok\r\nSet-Cookie": "/admin/",
 	} {
 		if got := safeNext(in); got != want {
-			t.Errorf("safeNext(%q) = %q，应为 %q", in, got, want)
+			t.Errorf("safeNext(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -801,54 +804,55 @@ func TestSafeNext(t *testing.T) {
 func TestCRUDAndOwnPassword(t *testing.T) {
 	e := newEnv(t, envOpts{})
 	s := e.login("alice", alicePW)
-	// 不填口令时生成一个，只显示一次
+	// Without a password one is generated and shown only once
 	r := e.post(s, "/admin/users/create", url.Values{"name": {"ci"}})
 	if r.StatusCode != 200 || !strings.Contains(r.body, `id="secret-value"`) {
-		t.Fatalf("生成口令：%d", r.StatusCode)
+		t.Fatalf("generate password: %d", r.StatusCode)
 	}
 	pw := regexp.MustCompile(`id="secret-value">([^<]+)<`).FindStringSubmatch(r.body)[1]
 	if ok, _ := e.app.Auth.Verify(e.app.Runtime().Users["ci"], pw); !ok {
-		t.Fatal("生成的口令应能用")
+		t.Fatal("the generated password should work")
 	}
 	if r := e.post(s, "/admin/users/create", url.Values{"name": {"ci"}, "password": {"another-password"}}); r.StatusCode != 409 {
-		t.Fatalf("重名：%d", r.StatusCode)
+		t.Fatalf("duplicate name: %d", r.StatusCode)
 	}
 	if r := e.post(s, "/admin/users/update", url.Values{"name": {"ci"}, "disabled": {"on"}, "manifest_rate": {"3"}}); r.StatusCode != 303 {
-		t.Fatalf("修改：%d %s", r.StatusCode, r.body)
+		t.Fatalf("update: %d %s", r.StatusCode, r.body)
 	}
 	if u := e.app.Runtime().Users["ci"]; !u.Disabled || u.ManifestRPS != 3 {
-		t.Fatalf("修改应生效：%+v", u)
+		t.Fatalf("the update should take effect: %+v", u)
 	}
 	if r := e.post(s, "/admin/users/delete", url.Values{"name": {"ci"}}); r.StatusCode != 303 || e.app.Runtime().Users["ci"] != nil {
-		t.Fatalf("删除：%d", r.StatusCode)
+		t.Fatalf("delete: %d", r.StatusCode)
 	}
 
-	// 管理员：不能删自己；改了别人的角色，那人的会话结束
+	// Administrators: cannot delete themselves; changing someone else's role ends that person's sessions
 	v := e.login("victor", victorPW)
 	if r := e.post(s, "/admin/admins/delete", url.Values{"name": {"alice"}}); r.StatusCode != 403 {
-		t.Fatalf("不能删除自己：%d", r.StatusCode)
+		t.Fatalf("cannot delete oneself: %d", r.StatusCode)
 	}
 	if r := e.post(s, "/admin/admins/update", url.Values{"name": {"victor"}, "role": {"admin"}}); r.StatusCode != 303 {
-		t.Fatalf("改角色：%d %s", r.StatusCode, r.body)
+		t.Fatalf("change role: %d %s", r.StatusCode, r.body)
 	}
 	if r := e.get("/admin/", v.cookie); r.StatusCode != 303 {
-		t.Fatalf("改了角色后旧会话结束：%d", r.StatusCode)
+		t.Fatalf("the old session ends after the role change: %d", r.StatusCode)
 	}
 	if r := e.post(s, "/admin/admins/create", url.Values{"name": {"carol"}, "password": {"short"}, "role": {"viewer"}}); r.StatusCode != 400 {
-		t.Fatalf("口令太短：%d", r.StatusCode)
+		t.Fatalf("password too short: %d", r.StatusCode)
 	}
 
-	// 改自己的口令：另一个浏览器的会话结束，当前浏览器换一个新会话
+	// Changing one's own password: the session in another browser ends, and the current browser gets a new
+	// session
 	other := e.login("alice", alicePW)
 	r = e.post(s, "/admin/account/password", url.Values{"password": {"alice-new-password"}, "confirm": {"alice-new-password"}})
 	if r.StatusCode != 303 || r.cookie(plainCookie) == nil {
-		t.Fatalf("改口令：%d %s", r.StatusCode, r.body)
+		t.Fatalf("change password: %d %s", r.StatusCode, r.body)
 	}
 	if r := e.get("/admin/", other.cookie); r.StatusCode != 303 {
-		t.Fatal("其他会话应结束")
+		t.Fatal("other sessions should end")
 	}
 	if r := e.get("/admin/", plainCookie+"="+r.cookie(plainCookie).Value); r.StatusCode != 200 {
-		t.Fatal("当前浏览器拿到新会话")
+		t.Fatal("the current browser should get a new session")
 	}
 	e.login("alice", "alice-new-password")
 }
@@ -857,7 +861,7 @@ func TestAPIWithSession(t *testing.T) {
 	e := newEnv(t, envOpts{})
 	s := e.login("alice", alicePW)
 	if r := e.get(api.Prefix+"/status", s.cookie); r.StatusCode != 200 {
-		t.Fatalf("会话能读 API：%d", r.StatusCode)
+		t.Fatalf("a session can read the API: %d", r.StatusCode)
 	}
 	body := `{"cidr":"198.51.100.8","duration":"1h"}`
 	call := func(hdr map[string]string) int {
@@ -875,16 +879,16 @@ func TestAPIWithSession(t *testing.T) {
 		return r.StatusCode
 	}
 	if c := call(map[string]string{"Origin": e.origin}); c != 403 {
-		t.Fatalf("写操作没带 X-CSRF-Token：%d", c)
+		t.Fatalf("write without X-CSRF-Token: %d", c)
 	}
 	if c := call(map[string]string{"X-CSRF-Token": s.csrf}); c != 403 {
-		t.Fatalf("写操作没带 Origin：%d", c)
+		t.Fatalf("write without Origin: %d", c)
 	}
 	if c := call(map[string]string{"X-CSRF-Token": s.csrf, "Origin": e.origin}); c != 201 {
-		t.Fatalf("会话加 CSRF 可以写：%d", c)
+		t.Fatalf("a session plus CSRF can write: %d", c)
 	}
 	if r := e.get(api.Prefix + "/status"); r.StatusCode != 401 {
-		t.Fatalf("没有会话也没有令牌：%d", r.StatusCode)
+		t.Fatalf("neither session nor token: %d", r.StatusCode)
 	}
 }
 
@@ -894,20 +898,20 @@ func TestReadOnlyStoreWithConfigAdmin(t *testing.T) {
 	s := e.login("root", "config-admin-password")
 	page := e.get("/admin/users", s.cookie)
 	if !strings.Contains(page.body, tr("zh", "readonly.banner")) || strings.Contains(page.body, `action="/admin/users/create"`) {
-		t.Fatal("只读时显示提示，不显示表单")
+		t.Fatal("read-only shows the notice and no forms")
 	}
 	if r := e.post(s, "/admin/bans/add", url.Values{"cidr": {"198.51.100.7"}, "duration": {"1h"}}); r.StatusCode != 409 || !strings.Contains(r.body, "只读") {
-		t.Fatalf("只读时修改返回 409：%d", r.StatusCode)
+		t.Fatalf("changes return 409 when read-only: %d", r.StatusCode)
 	}
 	if r := e.get("/admin/account", s.cookie); !strings.Contains(r.body, tr("zh", "account.fromConfig")) {
-		t.Fatal("配置文件里的管理员要在配置里改口令")
+		t.Fatal("an administrator from the configuration file changes the password in the configuration")
 	}
 }
 
 func TestNoAdmins(t *testing.T) {
 	e := newEnv(t, envOpts{noAdm: true})
 	if r := e.get("/admin/login"); !strings.Contains(r.body, tr("zh", "auth.noAdminsTitle")) {
-		t.Fatal("没有管理员时登录页要说明怎么创建")
+		t.Fatal("with no administrators the login page should explain how to create one")
 	}
 }
 
@@ -920,11 +924,11 @@ func TestFmtDur(t *testing.T) {
 		50*time.Hour + 30*time.Minute: "2 天 2 小时",
 	} {
 		if got := fmtDur("zh", d); got != want {
-			t.Errorf("fmtDur(%s) = %q，应为 %q", d, got, want)
+			t.Errorf("fmtDur(%s) = %q, want %q", d, got, want)
 		}
 	}
 	if got := fmtDur("en", 90*time.Minute); got != "1 h 30 min" {
-		t.Errorf("英文：%q", got)
+		t.Errorf("English: %q", got)
 	}
 }
 
@@ -932,47 +936,47 @@ func TestInitialAdminMustChangePassword(t *testing.T) {
 	t.Setenv("T_INIT_PW", "initial-admin-password")
 	e := newEnv(t, envOpts{noAdm: true, yaml: "admin:\n  initial_admin: {username: root, password: {env: T_INIT_PW}}\n"})
 	if a := e.app.Store.Data().Admins; len(a) != 1 || !a[0].MustChange {
-		t.Fatalf("按 initial_admin 建的管理员必须先改口令：%+v", a)
+		t.Fatalf("an administrator created from initial_admin must change the password first: %+v", a)
 	}
 	r := e.do("POST", "/admin/login", url.Values{"username": {"root"}, "password": {"initial-admin-password"}, "next": {"/admin/rules"}}, nil, nil)
 	if r.StatusCode != 303 || r.Header.Get("Location") != "/admin/account" {
-		t.Fatalf("登录后先去改口令：%d %s", r.StatusCode, r.Header.Get("Location"))
+		t.Fatalf("after login, change the password first: %d %s", r.StatusCode, r.Header.Get("Location"))
 	}
 	c := plainCookie + "=" + r.cookie(plainCookie).Value
 	for _, p := range []string{"/admin/", "/admin/rules", "/admin/admins", "/admin/live"} {
 		if r := e.get(p, c); r.StatusCode != 303 || r.Header.Get("Location") != "/admin/account" {
-			t.Errorf("%s 在改口令之前不能打开：%d %s", p, r.StatusCode, r.Header.Get("Location"))
+			t.Errorf("%s must not open before the password is changed: %d %s", p, r.StatusCode, r.Header.Get("Location"))
 		}
 	}
 	page := e.get("/admin/account", c)
 	if page.StatusCode != 200 || !strings.Contains(page.body, tr("zh", "account.mustChangeTitle")) {
-		t.Fatalf("我的账号页要说明原因：%d", page.StatusCode)
+		t.Fatalf("the My account page should explain why: %d", page.StatusCode)
 	}
 	s := testSession{cookie: c, csrf: csrfRe.FindStringSubmatch(page.body)[1]}
 	if r := e.post(s, "/admin/bans/add", url.Values{"cidr": {"198.51.100.7"}, "duration": {"1h"}}); r.StatusCode != 303 || r.Header.Get("Location") != "/admin/account" {
-		t.Fatalf("写操作也不行：%d", r.StatusCode)
+		t.Fatalf("writes are blocked too: %d", r.StatusCode)
 	}
 	if r := e.get(api.Prefix+"/status", c); r.StatusCode != 403 {
-		t.Fatalf("API 也不能用会话访问：%d", r.StatusCode)
+		t.Fatalf("the API cannot be used with the session either: %d", r.StatusCode)
 	}
-	// 原样再设一遍不行
+	// Setting the same password again is not allowed
 	if r := e.post(s, "/admin/account/password", url.Values{"password": {"initial-admin-password"}, "confirm": {"initial-admin-password"}}); r.StatusCode != 400 || !strings.Contains(r.body, "新口令不能和原来的一样") {
-		t.Fatalf("不能沿用原来的口令：%d", r.StatusCode)
+		t.Fatalf("cannot keep the old password: %d", r.StatusCode)
 	}
 	r = e.post(s, "/admin/account/password", url.Values{"password": {"root-own-password-1"}, "confirm": {"root-own-password-1"}})
 	if r.StatusCode != 303 {
-		t.Fatalf("改口令：%d %s", r.StatusCode, r.body)
+		t.Fatalf("change password: %d %s", r.StatusCode, r.body)
 	}
 	c = plainCookie + "=" + r.cookie(plainCookie).Value
 	if r := e.get("/admin/rules", c); r.StatusCode != 200 {
-		t.Fatalf("改完口令后可以使用：%d", r.StatusCode)
+		t.Fatalf("usable after the password change: %d", r.StatusCode)
 	}
 	if e.app.Store.Data().Admins[0].MustChange {
-		t.Fatal("改完口令后不再要求")
+		t.Fatal("no longer required after the password change")
 	}
-	// 配置里的旧口令不能再登录
+	// The old password from the configuration can no longer log in
 	if r := e.do("POST", "/admin/login", url.Values{"username": {"root"}, "password": {"initial-admin-password"}}, nil, nil); r.StatusCode != 401 {
-		t.Fatalf("旧口令应失效：%d", r.StatusCode)
+		t.Fatalf("the old password should no longer work: %d", r.StatusCode)
 	}
 }
 
@@ -980,32 +984,32 @@ func TestPasswordsSetByOthersMustChange(t *testing.T) {
 	e := newEnv(t, envOpts{})
 	s := e.login("alice", alicePW)
 	if r := e.post(s, "/admin/admins/create", url.Values{"name": {"carol"}, "password": {"carol"}, "role": {"viewer"}}); r.StatusCode != 400 {
-		t.Fatalf("口令不能等于用户名：%d", r.StatusCode)
+		t.Fatalf("the password must not equal the user name: %d", r.StatusCode)
 	}
 	if r := e.post(s, "/admin/admins/create", url.Values{"name": {"carol"}, "password": {"carol-temp-password"}, "role": {"viewer"}}); r.StatusCode != 303 {
-		t.Fatalf("新建管理员：%d %s", r.StatusCode, r.body)
+		t.Fatalf("create administrator: %d %s", r.StatusCode, r.body)
 	}
 	if r := e.get("/admin/admins", s.cookie); !strings.Contains(r.body, tr("zh", "admins.mustChange")) {
-		t.Fatal("列表里要标出待改口令")
+		t.Fatal("the list should mark the pending password change")
 	}
 	r := e.do("POST", "/admin/login", url.Values{"username": {"carol"}, "password": {"carol-temp-password"}}, nil, nil)
 	if r.Header.Get("Location") != "/admin/account" {
-		t.Fatalf("别人建的账号第一次登录先改口令：%s", r.Header.Get("Location"))
+		t.Fatalf("an account created by someone else changes the password at first login: %s", r.Header.Get("Location"))
 	}
-	// 重设别人的口令：对方也要先改
+	// Resetting someone else's password: they must change it first too
 	if r := e.post(s, "/admin/admins/update", url.Values{"name": {"victor"}, "role": {"viewer"}, "password": {"victor-reset-password"}}); r.StatusCode != 303 {
-		t.Fatalf("重设口令：%d", r.StatusCode)
+		t.Fatalf("reset password: %d", r.StatusCode)
 	}
 	if r := e.do("POST", "/admin/login", url.Values{"username": {"victor"}, "password": {"victor-reset-password"}}, nil, nil); r.Header.Get("Location") != "/admin/account" {
-		t.Fatalf("被重设口令的管理员先改口令：%s", r.Header.Get("Location"))
+		t.Fatalf("an administrator whose password was reset changes it first: %s", r.Header.Get("Location"))
 	}
-	// 改自己的口令不会触发
+	// Changing one's own password does not trigger this
 	if r := e.post(s, "/admin/account/password", url.Values{"password": {"alice-second-password"}, "confirm": {"alice-second-password"}}); r.StatusCode != 303 {
-		t.Fatalf("改自己的口令：%d", r.StatusCode)
+		t.Fatalf("change own password: %d", r.StatusCode)
 	}
 	for _, a := range e.app.Store.Data().Admins {
 		if a.Name == "alice" && a.MustChange {
-			t.Fatal("自己改的口令不需要再改")
+			t.Fatal("a password one set oneself need not be changed again")
 		}
 	}
 }
@@ -1013,106 +1017,106 @@ func TestPasswordsSetByOthersMustChange(t *testing.T) {
 func TestConfigPages(t *testing.T) {
 	e := newEnv(t, envOpts{yaml: "limits: {manifest_rate: 3}\n"})
 	s := e.login("alice", alicePW)
-	// 限流：只存和配置文件不同的字段
+	// Limits: only the fields that differ from the configuration file are stored
 	form := url.Values{"key": {"limits"}}
 	for _, f := range config.OverrideFields("limits") {
 		form.Set(f, config.FieldText(e.app.Runtime().Config, "limits", f))
 	}
 	form.Set("max_inflight", "77")
 	if r := e.post(s, "/admin/config/save", form); r.StatusCode != 303 || r.Header.Get("Location") != "/admin/config?ok=config.saved&v=limits" {
-		t.Fatalf("保存：%d %s", r.StatusCode, r.body)
+		t.Fatalf("save: %d %s", r.StatusCode, r.body)
 	}
 	if v := e.app.Store.Data().ConfigOverrides["limits"].Value; v != "max_inflight: 77\n" || e.app.Runtime().Config.Limits.MaxInflight != 77 {
-		t.Fatalf("存下的修改：%q", v)
+		t.Fatalf("stored override: %q", v)
 	}
 	r := e.get("/admin/config?ok=config.saved&v=limits", s.cookie)
 	if !strings.Contains(r.body, "max_inflight: 77") || !strings.Contains(r.body, `action="/admin/config/reset"`) {
-		t.Fatal("配置页列出修改，能重置")
+		t.Fatal("the configuration page should list the override and allow resetting it")
 	}
 	checkPage(t, "config", r.body)
-	// 填错：带着说明和填过的值重新显示，不保存
+	// Invalid input: redisplayed with the explanation and the filled-in values, not saved
 	form.Set("max_inflight", "lots")
 	if r := e.post(s, "/admin/config/save", form); r.StatusCode != 400 || !strings.Contains(r.body, `value="lots"`) {
-		t.Fatalf("填错：%d", r.StatusCode)
+		t.Fatalf("invalid input: %d", r.StatusCode)
 	}
 	if r := e.post(s, "/admin/config/save", url.Values{"key": {"listen"}}); r.StatusCode != 400 {
-		t.Fatalf("不能改的段：%d", r.StatusCode)
+		t.Fatalf("a section that cannot be changed: %d", r.StatusCode)
 	}
-	// 开关：没勾选按 false
+	// Switches: unticked counts as false
 	if r := e.post(s, "/admin/config/save", url.Values{"key": {"site"}}); r.StatusCode != 303 || e.app.Runtime().Site.ShowStatus {
-		t.Fatalf("关掉服务状态：%d", r.StatusCode)
+		t.Fatalf("turn off the service status: %d", r.StatusCode)
 	}
 
-	// 新建上游，再加一个固定转发到它的入口
+	// Create an upstream, then add an entrance that always forwards to it
 	r = e.post(s, "/admin/config/upstream/save", url.Values{"new": {"1"}, "upstream": {"CR.example.com"}, "registry": {"registry.example.com"},
 		"token_realm_hosts": {"auth.example.com"}, "unlisted_redirect": {"pass"}})
 	if r.StatusCode != 303 || e.app.Runtime().Config.Upstreams["cr.example.com"] == nil {
-		t.Fatalf("新建上游：%d %s", r.StatusCode, r.body)
+		t.Fatalf("create upstream: %d %s", r.StatusCode, r.body)
 	}
 	if r := e.post(s, "/admin/config/upstream/save", url.Values{"new": {"1"}, "upstream": {"ghcr.io"}, "registry": {"x.example.com"}}); r.StatusCode != 409 {
-		t.Fatalf("和已有的重名：%d", r.StatusCode)
+		t.Fatalf("same name as an existing one: %d", r.StatusCode)
 	}
 	if r := e.post(s, "/admin/config/upstream/save", url.Values{"new": {"1"}, "upstream": {"nodot"}}); r.StatusCode != 400 {
-		t.Fatalf("名字不对：%d", r.StatusCode)
+		t.Fatalf("invalid name: %d", r.StatusCode)
 	}
-	// 没写 token_realm_hosts：保存，但直接显示提醒
+	// No token_realm_hosts: saved, but the warning is shown directly
 	r = e.post(s, "/admin/config/upstream/save", url.Values{"new": {"1"}, "upstream": {"bare.example.com"}, "registry": {"bare.example.com"}})
 	if r.StatusCode != 200 || !strings.Contains(r.body, "token_realm_hosts") || !strings.Contains(r.body, "ol-alert-success") {
-		t.Fatalf("有提醒时直接显示：%d", r.StatusCode)
+		t.Fatalf("shown directly when there are warnings: %d", r.StatusCode)
 	}
 	checkPage(t, "upstream warnings", r.body)
 	r = e.get("/admin/config/entrances", s.cookie)
 	checkPage(t, "entrances", r.body)
 	if !strings.Contains(r.body, `name="rows" value="3"`) {
-		t.Fatal("一个入口加两行空的")
+		t.Fatal("one entrance plus two empty rows")
 	}
 	ent := url.Values{"rows": {"3"},
 		"name_0": {"default"}, "hosts_0": {"*"}, "upstream_0": {""}, "default_upstream_0": {"docker.io"}, "auth_0": {"none"}, "page_0": {"public"},
 		"name_1": {""}, "hosts_1": {"cr.test"}, "upstream_1": {"cr.example.com"}, "auth_1": {"none"}, "page_1": {"off"},
 		"hosts_2": {""}}
 	if r := e.post(s, "/admin/config/entrances/save", ent); r.StatusCode != 303 {
-		t.Fatalf("保存入口：%d %s", r.StatusCode, r.body)
+		t.Fatalf("save entrances: %d %s", r.StatusCode, r.body)
 	}
 	if en := e.app.Runtime().Router.Entrance("cr.test"); en == nil || en.Upstream != "cr.example.com" || en.Page != "off" {
-		t.Fatalf("新入口应生效：%+v", en)
+		t.Fatalf("the new entrance should take effect: %+v", en)
 	}
-	// 被入口引用的上游不能删
+	// An upstream referenced by an entrance cannot be deleted
 	if r := e.post(s, "/admin/config/reset", url.Values{"key": {"upstreams/cr.example.com"}}); r.StatusCode != 422 {
-		t.Fatalf("被引用的上游不能删：%d", r.StatusCode)
+		t.Fatalf("a referenced upstream cannot be deleted: %d", r.StatusCode)
 	}
-	// 删入口（勾选删除）
+	// Delete an entrance (tick delete)
 	ent.Set("delete_1", "1")
 	if r := e.post(s, "/admin/config/entrances/save", ent); r.StatusCode != 303 || e.app.Runtime().Router.Entrance("cr.test").Upstream != "" {
-		t.Fatalf("删除入口：%d", r.StatusCode)
+		t.Fatalf("delete entrance: %d", r.StatusCode)
 	}
 	if _, ok := e.app.Store.Data().ConfigOverrides["entrances"]; ok {
-		t.Fatal("和配置文件一样的入口列表不存")
+		t.Fatal("an entrance list identical to the configuration file is not stored")
 	}
 	if r := e.post(s, "/admin/config/reset", url.Values{"key": {"upstreams/cr.example.com"}}); r.StatusCode != 303 || e.app.Runtime().Config.Upstreams["cr.example.com"] != nil {
-		t.Fatalf("删除后台新建的上游：%d", r.StatusCode)
+		t.Fatalf("delete the upstream created in the console: %d", r.StatusCode)
 	}
 
-	// 导出
+	// Export
 	r = e.get("/admin/config/export", s.cookie)
 	if r.StatusCode != 200 || !strings.Contains(r.body, "max_inflight: 77") || !strings.Contains(r.Header.Get("Content-Disposition"), "config-overrides.yaml") {
-		t.Fatalf("导出：%d %s", r.StatusCode, r.body)
+		t.Fatalf("export: %d %s", r.StatusCode, r.body)
 	}
 	if r := e.get("/admin/config/export?format=merged", s.cookie); r.StatusCode != 200 || !strings.Contains(r.body, "manifest_rate: 3") {
-		t.Fatalf("合并导出：%d %s", r.StatusCode, r.body)
+		t.Fatalf("merged export: %d %s", r.StatusCode, r.body)
 	}
 
-	// 只读角色：看得到，改不了
+	// Read-only role: can see, cannot change
 	v := e.login("victor", victorPW)
 	r = e.get("/admin/config", v.cookie)
 	if strings.Contains(r.body, `action="/admin/config/save"`) || !strings.Contains(r.body, "max_inflight") {
-		t.Fatal("只读角色只能看")
+		t.Fatal("the read-only role can only view")
 	}
 	if r := e.post(v, "/admin/config/save", url.Values{"key": {"limits"}, "max_inflight": {"1"}}); r.StatusCode != 403 {
-		t.Fatalf("只读角色不能改：%d", r.StatusCode)
+		t.Fatalf("the read-only role cannot change: %d", r.StatusCode)
 	}
-	// 超过 10 分钟要重新输入口令
+	// After 10 minutes re-authentication is required
 	e.advance(11 * time.Minute)
 	if r := e.post(s, "/admin/config/save", form); r.StatusCode != 303 || !strings.HasPrefix(r.Header.Get("Location"), "/admin/reauth") {
-		t.Fatalf("改配置要最近输入过口令：%d %s", r.StatusCode, r.Header.Get("Location"))
+		t.Fatalf("configuration changes require a recently entered password: %d %s", r.StatusCode, r.Header.Get("Location"))
 	}
 }

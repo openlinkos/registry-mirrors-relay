@@ -1,8 +1,11 @@
-// Package status 汇总用法页上公开展示的服务状态（/status.json）：各上游最近一次探测、熔断，近 24 小时每小时的
-// 可用率，以及本服务近 24 小时每小时的请求成功率。
+// Package status assembles the service status shown publicly on the usage page (/status.json): each
+// upstream's latest probe, circuit breaker and hourly availability over the last 24 hours, and this
+// service's hourly request success rate over the last 24 hours.
 //
-// 这些内容谁都能看到，所以只放公开也无妨的东西：失败原因只给分类（超时、DNS、连接、TLS、HTTP 状态码），
-// 不给错误原文（可能带地址）；不给上游额度、请求量和客户端信息。数据只在内存里，重启后从头统计。
+// Anyone can see this, so it holds only what is harmless to publish: failure reasons are given only as
+// categories (timeout, DNS, connection, TLS, HTTP status code), never the raw error text (which may
+// contain addresses); no upstream quota, request volume or client information. The data is kept only
+// in memory and counting starts afresh after a restart.
 package status
 
 import (
@@ -13,26 +16,26 @@ import (
 	"time"
 )
 
-// Hours 是展示的小时数。
+// Hours is the number of hours shown.
 const Hours = 24
 
-// History 记下每个上游每小时的探测结果。
+// History records each upstream's probe results per hour.
 type History struct {
 	mu   sync.Mutex
 	runs map[string]*[Hours]bucket
 }
 
 type bucket struct {
-	start   int64 // 整点的 unix 秒
+	start   int64 // unix seconds of the start of the hour
 	ok      int
 	total   int
-	latency time.Duration // 成功探测的耗时之和
+	latency time.Duration // sum of the durations of successful probes
 }
 
-// NewHistory 创建 History。
+// NewHistory creates a History.
 func NewHistory() *History { return &History{runs: map[string]*[Hours]bucket{}} }
 
-// Record 记一次探测。
+// Record records one probe.
 func (h *History) Record(name string, ok bool, latency time.Duration, at time.Time) {
 	start := at.Truncate(time.Hour).Unix()
 	h.mu.Lock()
@@ -53,14 +56,16 @@ func (h *History) Record(name string, ok bool, latency time.Duration, at time.Ti
 	}
 }
 
-// Hour 是一小时的统计。Total 为 0 表示这一小时没有数据（还没启动，或者没有探测）。
+// Hour holds the statistics for one hour. Total 0 means there is no data for that hour (the service
+// had not started yet, or there were no probes).
 type Hour struct {
-	Start int64 `json:"start"` // 整点的 unix 秒
+	Start int64 `json:"start"` // unix seconds of the start of the hour
 	OK    int   `json:"ok"`
 	Total int   `json:"total"`
 }
 
-// Hours 返回 name 近 24 小时的统计，旧的在前，最后一项是当前小时。
+// Hours returns the statistics for name over the last 24 hours, oldest first; the last item is the
+// current hour.
 func (h *History) Hours(name string, now time.Time) []Hour {
 	cur := now.Truncate(time.Hour).Unix()
 	out := make([]Hour, Hours)
@@ -80,71 +85,72 @@ func (h *History) Hours(name string, now time.Time) []Hour {
 	return out
 }
 
-// Probe 是一个上游最近一次探测的结果，由调用方从 upstream.Health 转过来。
+// Probe is the result of an upstream's latest probe, converted by the caller from upstream.Health.
 type Probe struct {
 	OK      bool
-	Status  int // 上游返回的 HTTP 状态码，没有响应时为 0
+	Status  int // HTTP status code returned by the upstream, 0 when there was no response
 	Latency time.Duration
-	Error   string // 错误原文，只用来分类
+	Error   string // raw error text, used only for classification
 	Checked time.Time
 }
 
-// Input 是生成报告需要的数据。
+// Input holds the data needed to build the report.
 type Input struct {
 	Version  string
 	Started  time.Time
 	Now      time.Time
-	Interval time.Duration    // 探测间隔，0 表示不探测
-	Names    []string         // 上游，按名字排序
-	Probes   map[string]Probe // 最近一次探测，还没探测过的不在里面
-	Open     map[string]bool  // 熔断中的上游
-	Requests []RequestsHour   // 本服务近 24 小时每小时的请求数和 5xx 数，旧的在前
-	History  *History         // 可以为 nil
+	Interval time.Duration    // probe interval, 0 means no probing
+	Names    []string         // upstreams, sorted by name
+	Probes   map[string]Probe // latest probe; upstreams not yet probed are absent
+	Open     map[string]bool  // upstreams whose circuit breaker is open
+	Requests []RequestsHour   // this service's hourly request and 5xx counts for 24 hours, oldest first
+	History  *History         // may be nil
 }
 
-// RequestsHour 是本服务一小时的请求数和其中的 5xx 数。
+// RequestsHour holds this service's request count for one hour and how many of them were 5xx.
 type RequestsHour struct {
 	Start     int64
 	Requests  uint64
 	Status5xx uint64
 }
 
-// Report 是 /status.json 的内容。
+// Report is the content of /status.json.
 type Report struct {
 	Status    string     `json:"status"` // ok | degraded | down | unknown
 	Version   string     `json:"version"`
 	Started   time.Time  `json:"started"`
 	Generated time.Time  `json:"generated"`
-	Interval  int        `json:"probe_interval"` // 秒，0 表示不探测上游
+	Interval  int        `json:"probe_interval"` // seconds, 0 means upstreams are not probed
 	Service   Service    `json:"service"`
 	Upstreams []Upstream `json:"upstreams"`
 }
 
-// Service 是本服务近 24 小时每小时的请求成功率（非 5xx 的比例）。
+// Service holds this service's hourly request success rate (share of non-5xx) over the last 24 hours.
 type Service struct {
 	Hours []Ratio `json:"hours"`
 }
 
-// Ratio 是一小时的比例。请求太少时 Value 为 nil，免得一两个失败就显得很糟。
+// Ratio is the rate for one hour. Value is nil when there are too few requests, so that one or two
+// failures do not make things look bad.
 type Ratio struct {
 	Start int64    `json:"start"`
 	Value *float64 `json:"value"`
 }
 
-// MinRequests 是一小时里至少要有的请求数，少于它时不算成功率。
+// MinRequests is the minimum number of requests in an hour; below it no success rate is computed.
 const MinRequests = 20
 
-// Upstream 是一个上游的状态。
+// Upstream is the status of one upstream.
 type Upstream struct {
 	Name      string     `json:"name"`
-	Status    string     `json:"status"`           // ok | down | open（熔断中）| unknown
-	Reason    string     `json:"reason,omitempty"` // timeout | dns | connect | tls | http_<状态码> | error
+	Status    string     `json:"status"`           // ok | down | open (circuit breaker open) | unknown
+	Reason    string     `json:"reason,omitempty"` // timeout | dns | connect | tls | http_<status code> | error
 	LatencyMS int64      `json:"latency_ms,omitempty"`
 	Checked   *time.Time `json:"checked,omitempty"`
 	Hours     []Hour     `json:"hours"`
 }
 
-// Build 生成报告。
+// Build builds the report.
 func Build(in Input) Report {
 	r := Report{
 		Version: in.Version, Started: in.Started.UTC().Truncate(time.Second), Generated: in.Now.UTC().Truncate(time.Second),
@@ -201,7 +207,7 @@ func Build(in Input) Report {
 	return r
 }
 
-// Level 把可用率分成三档，和用法页一致：ok（≥99%）、mid（≥90%）、bad。
+// Level puts availability into three bands, matching the usage page: ok (≥99%), mid (≥90%), bad.
 func Level(v float64) string {
 	switch {
 	case v >= 0.99:
@@ -212,7 +218,8 @@ func Level(v float64) string {
 	return "bad"
 }
 
-// Reason 把探测失败归成几类。错误原文可能带地址，不公开。
+// Reason sorts probe failures into a few categories. The raw error text may contain addresses and is
+// not published.
 func Reason(status int, msg string) string {
 	if status != 0 {
 		return "http_" + strconv.Itoa(status)

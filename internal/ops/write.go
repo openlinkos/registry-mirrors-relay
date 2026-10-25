@@ -21,7 +21,8 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/upstream"
 )
 
-// BcryptCost 是新口令的 bcrypt 强度（客户端账号和后台管理员都用它）。
+// BcryptCost is the bcrypt cost for new passwords (used for both client accounts and console
+// administrators).
 const BcryptCost = 12
 
 var (
@@ -29,10 +30,10 @@ var (
 	hostnameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
 )
 
-// ValidName 判断账号、管理员、令牌的名字是否合法。
+// ValidName reports whether a client account, administrator or token name is valid.
 func ValidName(s string) bool { return nameRe.MatchString(s) }
 
-// CheckPassword 检查口令长度：12 到 72 个字节（bcrypt 只看前 72 个字节）。
+// CheckPassword checks the password length: 12 to 72 bytes (bcrypt only looks at the first 72 bytes).
 func CheckPassword(p string) error {
 	if n := len(p); n < 12 || n > 72 {
 		return bad("password.length")
@@ -40,7 +41,7 @@ func CheckPassword(p string) error {
 	return nil
 }
 
-// HashPassword 用 bcrypt 生成口令哈希。
+// HashPassword generates a password hash with bcrypt.
 func HashPassword(p string) (string, error) {
 	if err := CheckPassword(p); err != nil {
 		return "", err
@@ -49,20 +50,21 @@ func HashPassword(p string) (string, error) {
 	return string(h), err
 }
 
-// ---- 客户端账号
+// ---- Client accounts
 
-// UserInput 是新建或修改客户端账号的输入。为 nil 的字段表示不改。
+// UserInput is the input for creating or changing a client account. A nil field means no change.
 type UserInput struct {
 	Name         string   `json:"name"`
 	Password     *string  `json:"password,omitempty"`
-	Hash         *string  `json:"hash,omitempty"` // 现成的 bcrypt 哈希
+	Hash         *string  `json:"hash,omitempty"` // a ready-made bcrypt hash
 	Disabled     *bool    `json:"disabled,omitempty"`
 	ManifestRate *float64 `json:"manifest_rate,omitempty"`
 	BlobStreams  *int     `json:"blob_streams,omitempty"`
 	Note         *string  `json:"note,omitempty"`
 }
 
-// hash 从口令或现成的 bcrypt 哈希得到要存的哈希，都没给时返回空串。
+// hash returns the hash to store, from the password or a ready-made bcrypt hash; it returns an empty
+// string when neither is given.
 func (in UserInput) hash() (string, error) {
 	switch {
 	case in.Password != nil && in.Hash != nil:
@@ -103,7 +105,7 @@ func (in UserInput) apply(u *store.ClientUser) error {
 	return nil
 }
 
-// CreateUser 新建客户端账号。
+// CreateUser creates a client account.
 func (o *Ops) CreateUser(who Actor, in UserInput) error {
 	if !nameRe.MatchString(in.Name) {
 		return bad("user.name")
@@ -133,7 +135,7 @@ func (o *Ops) CreateUser(who Actor, in UserInput) error {
 	})
 }
 
-// UpdateUser 修改客户端账号（in.Name 不用）。
+// UpdateUser changes a client account (in.Name is not used).
 func (o *Ops) UpdateUser(who Actor, name string, in UserInput) error {
 	h, err := in.hash()
 	if err != nil {
@@ -165,7 +167,7 @@ func (o *Ops) UpdateUser(who Actor, name string, in UserInput) error {
 	})
 }
 
-// DeleteUser 删除客户端账号。
+// DeleteUser deletes a client account.
 func (o *Ops) DeleteUser(who Actor, name string) error {
 	return o.change(who, "user.delete", name, "", func(d *store.Data) error {
 		for i, u := range d.Users {
@@ -178,9 +180,9 @@ func (o *Ops) DeleteUser(who Actor, name string) error {
 	})
 }
 
-// ---- IP 规则与封禁
+// ---- IP rules and bans
 
-// NormCIDR 把 IP 或 CIDR 规范成 CIDR，拒绝 /0。
+// NormCIDR normalises an IP address or CIDR range to a CIDR and refuses /0.
 func NormCIDR(s string) (string, error) {
 	ps, err := config.ParsePrefixes([]string{strings.TrimSpace(s)})
 	if err != nil || len(ps) != 1 {
@@ -199,7 +201,7 @@ func checkKind(kind string) error {
 	return nil
 }
 
-// AddIPRule 加一条 IP 规则，返回规范后的 CIDR。
+// AddIPRule adds an IP rule and returns the normalised CIDR.
 func (o *Ops) AddIPRule(who Actor, cidr, kind, note string) (string, error) {
 	cidr, err := NormCIDR(cidr)
 	if err != nil {
@@ -222,7 +224,7 @@ func (o *Ops) AddIPRule(who Actor, cidr, kind, note string) (string, error) {
 	})
 }
 
-// DeleteIPRule 删除一条 IP 规则。
+// DeleteIPRule deletes an IP rule.
 func (o *Ops) DeleteIPRule(who Actor, cidr, kind string) error {
 	cidr, err := NormCIDR(cidr)
 	if err != nil {
@@ -239,7 +241,7 @@ func (o *Ops) DeleteIPRule(who Actor, cidr, kind string) error {
 	})
 }
 
-// ParseBanDuration 解析 30m、2h、7d 这样的期限，最长 365 天。
+// ParseBanDuration parses a duration such as 30m, 2h or 7d, up to 365 days.
 func ParseBanDuration(s string) (time.Duration, error) {
 	s = strings.TrimSpace(s)
 	d, err := time.ParseDuration(s)
@@ -254,7 +256,7 @@ func ParseBanDuration(s string) (time.Duration, error) {
 	return d, nil
 }
 
-// AddBan 临时封禁一个地址或地址段。同一段已有封禁时替换它。
+// AddBan temporarily bans an address or address range. An existing ban on the same range is replaced.
 func (o *Ops) AddBan(who Actor, cidr, duration, reason string) (string, time.Time, error) {
 	cidr, err := NormCIDR(cidr)
 	if err != nil {
@@ -272,7 +274,7 @@ func (o *Ops) AddBan(who Actor, cidr, duration, reason string) (string, time.Tim
 	return cidr, until, o.change(who, "ban.add", cidr, duration+" "+reason, func(data *store.Data) error {
 		kept := data.Bans[:0]
 		for _, bn := range data.Bans {
-			if bn.CIDR != cidr && now.Before(bn.Until) { // 顺便清掉过期的
+			if bn.CIDR != cidr && now.Before(bn.Until) { // clear out expired ones while at it
 				kept = append(kept, bn)
 			}
 		}
@@ -281,7 +283,7 @@ func (o *Ops) AddBan(who Actor, cidr, duration, reason string) (string, time.Tim
 	})
 }
 
-// DeleteBan 解除封禁。
+// DeleteBan lifts a ban.
 func (o *Ops) DeleteBan(who Actor, cidr string) error {
 	cidr, err := NormCIDR(cidr)
 	if err != nil {
@@ -298,9 +300,9 @@ func (o *Ops) DeleteBan(who Actor, cidr string) error {
 	})
 }
 
-// ---- 镜像规则
+// ---- Image rules
 
-// ImageRuleInput 是新建镜像规则的输入。
+// ImageRuleInput is the input for creating an image rule.
 type ImageRuleInput struct {
 	Pattern string `json:"pattern"`
 	Kind    string `json:"kind"`
@@ -309,7 +311,7 @@ type ImageRuleInput struct {
 	Note    string `json:"note"`
 }
 
-// AddImageRule 加一条镜像规则，返回规范后的写法。
+// AddImageRule adds an image rule and returns the normalised pattern.
 func (o *Ops) AddImageRule(who Actor, in ImageRuleInput) (string, error) {
 	in.Pattern = strings.TrimSpace(in.Pattern)
 	if _, err := access.CompileImagePattern(in.Pattern); err != nil {
@@ -348,7 +350,7 @@ func (o *Ops) AddImageRule(who Actor, in ImageRuleInput) (string, error) {
 	})
 }
 
-// DeleteImageRule 删除一条镜像规则。
+// DeleteImageRule deletes an image rule.
 func (o *Ops) DeleteImageRule(who Actor, pattern, kind string) error {
 	return o.change(who, "rule.image.delete", pattern, kind, func(d *store.Data) error {
 		for i, ir := range d.ImageRules {
@@ -361,9 +363,9 @@ func (o *Ops) DeleteImageRule(who Actor, pattern, kind string) error {
 	})
 }
 
-// ---- 上游
+// ---- Upstreams
 
-// AddRedirectHost 把一个精确主机名加进上游的重定向白名单。
+// AddRedirectHost adds an exact host name to an upstream's redirect allowlist.
 func (o *Ops) AddRedirectHost(who Actor, name, host string) (string, error) {
 	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
 	if _, ok := o.app.Runtime().Config.Upstreams[name]; !ok {
@@ -386,7 +388,7 @@ func (o *Ops) AddRedirectHost(who Actor, name, host string) (string, error) {
 	})
 }
 
-// DeleteRedirectHost 把后台加的主机从白名单里去掉。
+// DeleteRedirectHost removes a host added in the console from the allowlist.
 func (o *Ops) DeleteRedirectHost(who Actor, name, host string) error {
 	host = strings.ToLower(host)
 	return o.change(who, "upstream.redirect_host.delete", name, host, func(d *store.Data) error {
@@ -404,7 +406,7 @@ func (o *Ops) DeleteRedirectHost(who Actor, name, host string) error {
 	})
 }
 
-// CheckUpstream 立即探测一个上游的 /v2/。
+// CheckUpstream probes an upstream's /v2/ immediately.
 func (o *Ops) CheckUpstream(ctx context.Context, who Actor, name string) (upstream.Health, error) {
 	h, ok := o.app.CheckUpstream(ctx, name)
 	if !ok {
@@ -418,9 +420,9 @@ func (o *Ops) CheckUpstream(ctx context.Context, who Actor, name string) (upstre
 	return h, nil
 }
 
-// ---- 令牌
+// ---- Tokens
 
-// CreateToken 新建管理 API 令牌，返回令牌本身（只在这时给一次）。
+// CreateToken creates a management API token and returns the token itself (given only this once).
 func (o *Ops) CreateToken(who Actor, name, role string) (string, error) {
 	if !nameRe.MatchString(name) {
 		return "", bad("user.name")
@@ -451,7 +453,7 @@ func (o *Ops) CreateToken(who Actor, name, role string) (string, error) {
 	})
 }
 
-// DeleteToken 吊销管理 API 令牌。
+// DeleteToken revokes a management API token.
 func (o *Ops) DeleteToken(who Actor, name string) error {
 	return o.change(who, "token.delete", name, "", func(d *store.Data) error {
 		for i, t := range d.APITokens {
@@ -464,9 +466,9 @@ func (o *Ops) DeleteToken(who Actor, name string) error {
 	})
 }
 
-// ---- 后台管理员
+// ---- Console administrators
 
-// AdminInput 是修改后台管理员的输入。为 nil 的字段表示不改。
+// AdminInput is the input for changing a console administrator. A nil field means no change.
 type AdminInput struct {
 	Password *string `json:"password,omitempty"`
 	Role     *string `json:"role,omitempty"`
@@ -483,7 +485,8 @@ func activeAdmins(d *store.Data) int {
 	return n
 }
 
-// CreateAdmin 新建后台管理员。口令是创建的人设的，所以新管理员第一次登录后必须先改口令。
+// CreateAdmin creates a console administrator. The password is set by whoever creates the account, so
+// the new administrator must change it after the first login.
 func (o *Ops) CreateAdmin(who Actor, name, password, role string) error {
 	if !nameRe.MatchString(name) {
 		return bad("user.name")
@@ -509,8 +512,10 @@ func (o *Ops) CreateAdmin(who Actor, name, password, role string) error {
 	})
 }
 
-// UpdateAdmin 修改后台管理员。不能让系统里一个能用的 admin 角色都不剩，也不能停用自己或降低自己的角色。
-// 重设别人的口令后，那个管理员下次登录必须先改口令；改自己的口令则解除这个要求。
+// UpdateAdmin changes a console administrator. It must not leave the system without an enabled
+// administrator with the admin role, and administrators cannot disable themselves or lower their own
+// role. After someone else's password is reset, that administrator must change it at the next login;
+// changing your own password clears this requirement.
 func (o *Ops) UpdateAdmin(who Actor, name string, in AdminInput) error {
 	self := who.Kind == "admin" && who.Name == name
 	h := ""
@@ -546,7 +551,8 @@ func (o *Ops) UpdateAdmin(who Actor, name string, in AdminInput) error {
 				continue
 			}
 			if h != "" {
-				// 必须改口令时不能原样再设一遍（那样配置里或别人知道的口令仍然有效）
+				// when the password must be changed, it cannot be set to the same one again (the password from
+				// the configuration, or one someone else knows, would stay valid)
 				if self && bcrypt.CompareHashAndPassword([]byte(a.Hash), []byte(*in.Password)) == nil {
 					return bad("password.same")
 				}
@@ -571,7 +577,8 @@ func (o *Ops) UpdateAdmin(who Actor, name string, in AdminInput) error {
 	return err
 }
 
-// DeleteAdmin 删除后台管理员。不能删除自己，也不能删掉最后一个能用的 admin 角色。
+// DeleteAdmin deletes a console administrator. Administrators cannot delete themselves, and the last
+// enabled administrator with the admin role cannot be deleted.
 func (o *Ops) DeleteAdmin(who Actor, name string) error {
 	if who.Kind == "admin" && who.Name == name {
 		return forbidden("admin.delete_self")
@@ -594,16 +601,16 @@ func (o *Ops) DeleteAdmin(who Actor, name string) error {
 	return err
 }
 
-// ---- 站点信息
+// ---- Site information
 
-// SiteInput 是在后台设置的站点信息。
+// SiteInput is the site information set in the console.
 type SiteInput struct {
 	Name     string            `json:"name"`
 	Operator string            `json:"operator"`
 	Links    map[string]string `json:"links"`
 }
 
-// SetSite 设置站点信息，整体代替配置文件里的 site。
+// SetSite sets the site information, replacing the site section of the configuration file as a whole.
 func (o *Ops) SetSite(who Actor, in SiteInput) error {
 	in.Name, in.Operator = strings.TrimSpace(in.Name), strings.TrimSpace(in.Operator)
 	if in.Name == "" || len(in.Name) > 80 || len(in.Operator) > 120 {
@@ -634,7 +641,7 @@ func (o *Ops) SetSite(who Actor, in SiteInput) error {
 	})
 }
 
-// ResetSite 去掉后台设置的站点信息，改回用配置文件的。
+// ResetSite removes the site information set in the console and goes back to the configuration file's.
 func (o *Ops) ResetSite(who Actor) error {
 	return o.change(who, "site.reset", "", "", func(d *store.Data) error {
 		d.Site = nil
@@ -642,9 +649,9 @@ func (o *Ops) ResetSite(who Actor) error {
 	})
 }
 
-// ---- 配置
+// ---- Configuration
 
-// Reload 重新加载配置文件。
+// Reload reloads the configuration file.
 func (o *Ops) Reload(who Actor) (*app.ReloadStatus, error) {
 	err := o.app.ReloadConfig()
 	detail := "ok"

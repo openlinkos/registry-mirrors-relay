@@ -23,15 +23,15 @@ func digestOf(b []byte) string {
 	return "sha256:" + hex.EncodeToString(s[:])
 }
 
-// fakeUp 模拟上游：tags 里是 tag → 正文；calls 记录 "方法 路径" 的次数。
+// fakeUp simulates an upstream: tags maps tag → body; calls counts "method path".
 type fakeUp struct {
 	mu      sync.Mutex
 	tags    map[string][]byte
 	calls   map[string]int
-	fail    error // 不为 nil 时所有请求返回这个错误
-	status  int   // 不为 0 时所有请求返回这个状态
-	noDig   bool  // HEAD 不给 Docker-Content-Digest
-	corrupt bool  // GET 返回的内容和 digest 不符
+	fail    error // when not nil, every request returns this error
+	status  int   // when not 0, every request returns this status
+	noDig   bool  // HEAD gives no Docker-Content-Digest
+	corrupt bool  // GET returns content that does not match the digest
 	delay   time.Duration
 }
 
@@ -101,31 +101,31 @@ func TestSecondPullCostsNoGet(t *testing.T) {
 	req := Request{Upstream: "docker.io", Repo: "library/x", Ref: "v1", Accept: accept}
 	o := c.Resolve(context.Background(), up, req)
 	if o.Manifest == nil || string(o.Manifest.Body) != string(body) || o.Cache != "miss" {
-		t.Fatalf("第一次：%+v", o)
+		t.Fatalf("first: %+v", o)
 	}
 	if up.count("GET") != 1 || up.count("HEAD") != 1 {
-		t.Fatalf("第一次应 HEAD 1 次、按 digest GET 1 次：%v", up.calls)
+		t.Fatalf("the first pull should HEAD once and GET by digest once: %v", up.calls)
 	}
-	// tag 还新鲜：完全不访问上游
+	// The tag is still fresh: no upstream access at all
 	o = c.Resolve(context.Background(), up, req)
 	if o.Cache != "hit" || up.count("HEAD") != 1 || up.count("GET") != 1 {
-		t.Fatalf("tag 新鲜时应命中：%+v %v", o, up.calls)
+		t.Fatalf("a fresh tag should hit: %+v %v", o, up.calls)
 	}
-	// tag 过期：只 HEAD 确认，digest 没变就不 GET
+	// The tag has expired: only HEAD to confirm, no GET if the digest is unchanged
 	*now = now.Add(31 * time.Second)
 	o = c.Resolve(context.Background(), up, req)
 	if o.Cache != "revalidated" || up.count("HEAD") != 2 || up.count("GET") != 1 {
-		t.Fatalf("过期后只应 HEAD：%+v %v", o, up.calls)
+		t.Fatalf("after expiry there should only be a HEAD: %+v %v", o, up.calls)
 	}
-	// 按 digest 拉：命中
+	// Pull by digest: hit
 	o = c.Resolve(context.Background(), up, Request{Upstream: "docker.io", Repo: "library/x", Ref: digestOf(body)})
 	if o.Cache != "hit" || up.count("GET") != 1 {
-		t.Fatalf("按 digest 应命中：%+v", o)
+		t.Fatalf("by digest should hit: %+v", o)
 	}
-	// 不同仓库不共用缓存
+	// Different repositories do not share the cache
 	o = c.Resolve(context.Background(), up, Request{Upstream: "docker.io", Repo: "library/y", Ref: digestOf(body)})
 	if o.Cache != "miss" {
-		t.Fatalf("缓存键应包含仓库：%+v", o)
+		t.Fatalf("the cache key should include the repository: %+v", o)
 	}
 }
 
@@ -133,14 +133,14 @@ func TestHeadNeverGets(t *testing.T) {
 	c, up, body, _ := newCache(t)
 	o := c.Resolve(context.Background(), up, Request{Upstream: "u", Repo: "r", Ref: "v1", Head: true, Accept: accept})
 	if o.Head == nil || o.Head.Digest != digestOf(body) || o.Head.Size != int64(len(body)) {
-		t.Fatalf("HEAD 应只用元数据回答：%+v", o)
+		t.Fatalf("a HEAD should be answered from metadata only: %+v", o)
 	}
 	o = c.Resolve(context.Background(), up, Request{Upstream: "u", Repo: "r", Ref: digestOf(body), Head: true})
 	if !o.Bypass {
-		t.Fatalf("按 digest 的 HEAD 没命中时应转发 HEAD，而不是 GET：%+v", o)
+		t.Fatalf("a HEAD by digest that misses should be forwarded as a HEAD, not a GET: %+v", o)
 	}
 	if up.count("GET") != 0 {
-		t.Fatalf("客户端只发 HEAD 时不能向上游 GET：%v", up.calls)
+		t.Fatalf("must not GET from the upstream when the client only sends HEAD: %v", up.calls)
 	}
 }
 
@@ -149,10 +149,10 @@ func TestAcceptIsPartOfTagKey(t *testing.T) {
 	c.Resolve(context.Background(), up, Request{Upstream: "u", Repo: "r", Ref: "v1", Accept: accept})
 	c.Resolve(context.Background(), up, Request{Upstream: "u", Repo: "r", Ref: "v1", Accept: []string{"application/vnd.docker.distribution.manifest.v2+json"}})
 	if up.count("HEAD") != 2 {
-		t.Fatalf("Accept 不同应分别确认：%v", up.calls)
+		t.Fatalf("different Accept values should be confirmed separately: %v", up.calls)
 	}
 	if CanonicalAccept([]string{"B;q=0.5, a", "a"}) != "a,b" {
-		t.Fatal("CanonicalAccept 应去参数、去重、排序、小写")
+		t.Fatal("CanonicalAccept should strip parameters, deduplicate, sort and lower-case")
 	}
 }
 
@@ -164,17 +164,17 @@ func TestStaleIfError(t *testing.T) {
 	up.fail = errors.New("connection refused")
 	o := c.Resolve(context.Background(), up, req)
 	if o.Cache != "stale" || o.Manifest == nil || string(o.Manifest.Body) != string(body) {
-		t.Fatalf("上游连不上时应返回旧内容：%+v", o)
+		t.Fatalf("should return stale content when the upstream is unreachable: %+v", o)
 	}
 	up.fail, up.status = nil, http.StatusTooManyRequests
 	if o = c.Resolve(context.Background(), up, req); o.Cache != "stale" {
-		t.Fatalf("429 时应返回旧内容：%+v", o)
+		t.Fatalf("should return stale content on 429: %+v", o)
 	}
-	// 超过 stale_if_error（默认 6 小时）就不再用旧的
+	// Beyond stale_if_error (6 hours by default) stale content is no longer used
 	*now = now.Add(7 * time.Hour)
 	o = c.Resolve(context.Background(), up, req)
 	if o.Status != http.StatusTooManyRequests || o.RetryAfter != "7" {
-		t.Fatalf("太旧时应把上游的错误交给客户端：%+v", o)
+		t.Fatalf("when too old, the upstream error should be passed to the client: %+v", o)
 	}
 }
 
@@ -183,16 +183,16 @@ func TestNegativeCache(t *testing.T) {
 	req := Request{Upstream: "u", Repo: "r", Ref: "missing", Accept: accept}
 	for i := 0; i < 5; i++ {
 		if o := c.Resolve(context.Background(), up, req); !o.NotFound {
-			t.Fatalf("应返回不存在：%+v", o)
+			t.Fatalf("should return not found: %+v", o)
 		}
 	}
 	if up.count("HEAD") != 1 {
-		t.Fatalf("15 秒内重复请求不存在的镜像，只应问上游一次：%v", up.calls)
+		t.Fatalf("repeated requests for a missing image within 15 seconds should ask the upstream only once: %v", up.calls)
 	}
 	*now = now.Add(16 * time.Second)
 	c.Resolve(context.Background(), up, req)
 	if up.count("HEAD") != 2 {
-		t.Fatal("过期后应重新确认")
+		t.Fatal("should confirm again after expiry")
 	}
 }
 
@@ -201,7 +201,7 @@ func TestDigestMismatchNotCached(t *testing.T) {
 	up.corrupt = true
 	o := c.Resolve(context.Background(), up, Request{Upstream: "u", Repo: "r", Ref: digestOf(body)})
 	if !IsMismatch(o.Err) || c.Stats().Entries != 0 {
-		t.Fatalf("内容和 digest 不符时应报错且不缓存：%+v", o)
+		t.Fatalf("content that does not match the digest should fail and not be cached: %+v", o)
 	}
 }
 
@@ -209,7 +209,7 @@ func TestHeadWithoutDigestBypasses(t *testing.T) {
 	c, up, _, _ := newCache(t)
 	up.noDig = true
 	if o := c.Resolve(context.Background(), up, Request{Upstream: "u", Repo: "r", Ref: "v1", Accept: accept}); !o.Bypass {
-		t.Fatalf("上游 HEAD 不给 digest 时应转发：%+v", o)
+		t.Fatalf("should forward when the upstream HEAD gives no digest: %+v", o)
 	}
 }
 
@@ -230,7 +230,7 @@ func TestConcurrentFetchCoalesced(t *testing.T) {
 	}
 	wg.Wait()
 	if bad.Load() != 0 || up.count("GET") != 1 {
-		t.Fatalf("并发的同一 manifest 应只 GET 一次：失败 %d，%v", bad.Load(), up.calls)
+		t.Fatalf("concurrent requests for the same manifest should GET only once: failed %d, %v", bad.Load(), up.calls)
 	}
 }
 
@@ -244,9 +244,9 @@ func TestByteLimit(t *testing.T) {
 		c.Resolve(context.Background(), up, Request{Upstream: "u", Repo: "r", Ref: digestOf(b)})
 	}
 	if st := c.Stats(); st.Bytes > 4096 || st.Entries > 3 {
-		t.Fatalf("应按字节数淘汰：%+v", st)
+		t.Fatalf("should evict by byte count: %+v", st)
 	}
 	if New(config.Cache{}, 1, time.Second) != nil {
-		t.Fatal("max_bytes 为 0 时应关闭缓存")
+		t.Fatal("max_bytes 0 should disable the cache")
 	}
 }

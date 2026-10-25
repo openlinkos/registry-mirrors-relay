@@ -7,7 +7,8 @@ import (
 	"strings"
 )
 
-// 界面语言：明确选过的（Cookie）优先，其次是浏览器的 Accept-Language，都没有时用中文。
+// Interface language: an explicit choice (cookie) comes first, then the browser's Accept-Language;
+// when neither gives one, Chinese is used.
 func negotiateLang(cookieValue, acceptLanguage string) string {
 	if cookieValue == "zh" || cookieValue == "en" {
 		return cookieValue
@@ -53,7 +54,8 @@ func htmlLang(lang string) string {
 	return "zh-CN"
 }
 
-// tr 翻译界面文案。参数成对：名字、值，替换文案里的 {名字}。缺的键直接显示键名（测试会发现）。
+// tr translates interface text. Arguments come in pairs, name and value, and replace {name} in the text.
+// A missing key is shown as the key itself (the tests catch this).
 func tr(lang, key string, args ...any) string {
 	m := messagesZH
 	if lang == "en" {

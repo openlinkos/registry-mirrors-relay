@@ -34,20 +34,20 @@ func TestParseChallenges(t *testing.T) {
 	for _, c := range cases {
 		got := ParseChallenges(c.in)
 		if len(got) != c.n {
-			t.Errorf("%v：期望 %d 个质询，实际 %+v", c.in, c.n, got)
+			t.Errorf("%v: want %d challenges, got %+v", c.in, c.n, got)
 			continue
 		}
 		if got[0].Scheme != c.scheme {
-			t.Errorf("%v：scheme %q", c.in, got[0].Scheme)
+			t.Errorf("%v: scheme %q", c.in, got[0].Scheme)
 		}
 		for k, v := range c.params {
 			if got[0].Params[k] != v {
-				t.Errorf("%v：%s = %q，期望 %q", c.in, k, got[0].Params[k], v)
+				t.Errorf("%v: %s = %q, want %q", c.in, k, got[0].Params[k], v)
 			}
 		}
 	}
 	if q := ParseChallenges([]string{`Basic realm="a \"quoted\" b"`}); q[0].Params["realm"] != `a "quoted" b` {
-		t.Fatalf("转义：%q", q[0].Params["realm"])
+		t.Fatalf("escaping: %q", q[0].Params["realm"])
 	}
 	_ = ParseChallenges([]string{`=,,"`, `Bearer realm="unterminated`, ``})
 }
@@ -84,27 +84,27 @@ func TestCacheAndSingleflight(t *testing.T) {
 			defer wg.Done()
 			tok, err := c.Get(context.Background(), req)
 			if err != nil || tok != "tok-repository:a:pull" {
-				t.Errorf("Get：%q %v", tok, err)
+				t.Errorf("Get: %q %v", tok, err)
 			}
 		}()
 	}
 	wg.Wait()
 	if calls.Load() != 1 {
-		t.Fatalf("并发的同一请求应只取一次，实际 %d 次", calls.Load())
+		t.Fatalf("concurrent identical requests should fetch once, got %d fetches", calls.Load())
 	}
-	// 过期后重新取
+	// fetched again after expiry
 	base := time.Now()
 	c.now = func() time.Time { return base.Add(290 * time.Second) }
 	if _, err := c.Get(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 2 {
-		t.Fatalf("过期（300s 减去 30s 余量）后应重新取，实际 %d 次", calls.Load())
+		t.Fatalf("should fetch again after expiry (300s minus a 30s margin), got %d fetches", calls.Load())
 	}
 	c.Invalidate(req)
 	_, _ = c.Get(context.Background(), req)
 	if calls.Load() != 3 {
-		t.Fatal("Invalidate 后应重新取")
+		t.Fatal("should fetch again after Invalidate")
 	}
 }
 
@@ -122,7 +122,7 @@ func TestLeaderCancelDoesNotFailFollowers(t *testing.T) {
 	cancel()
 	for i := 0; i < 2; i++ {
 		if err := <-errc; err != nil {
-			t.Fatalf("第一个请求取消不应让取令牌失败：%v", err)
+			t.Fatalf("cancelling the first request should not make the token fetch fail: %v", err)
 		}
 	}
 }
@@ -141,7 +141,7 @@ func TestCredentialFallback(t *testing.T) {
 	c.OnCredentialRejected = func(_, user string) { rejected = user }
 	tok, err := c.Get(context.Background(), Request{Realm: srv.URL, Scopes: []string{"s"}, Cred: &Credential{"bot", "bad"}})
 	if err != nil || tok != "tok-s" || rejected != "bot" {
-		t.Fatalf("账号被拒绝后应退回匿名：%q %v %q", tok, err, rejected)
+		t.Fatalf("should fall back to anonymous after the account is rejected: %q %v %q", tok, err, rejected)
 	}
 }
 
@@ -153,19 +153,19 @@ func TestFetchErrors(t *testing.T) {
 	_, err := c.Get(context.Background(), Request{Realm: srv.URL})
 	var se *StatusError
 	if !errors.As(err, &se) || se.Status != 503 {
-		t.Fatalf("应返回 StatusError 503：%v", err)
+		t.Fatalf("want StatusError 503: %v", err)
 	}
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{"nope":1}`)) }))
 	defer bad.Close()
 	if _, err := NewCache(bad.Client(), time.Second, "t", 4).Get(context.Background(), Request{Realm: bad.URL}); err == nil {
-		t.Fatal("没有 token 字段应报错")
+		t.Fatal("a response without a token field should be an error")
 	}
 }
 
 func TestTTL(t *testing.T) {
 	for in, want := range map[int]time.Duration{0: 50 * time.Second, 300: 270 * time.Second, 3600: 3240 * time.Second, 5: time.Second} {
 		if got := ttl(in); got != want {
-			t.Errorf("ttl(%d) = %v，期望 %v", in, got, want)
+			t.Errorf("ttl(%d) = %v, want %v", in, got, want)
 		}
 	}
 }

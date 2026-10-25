@@ -6,8 +6,9 @@ import (
 	"time"
 )
 
-// ReadOnly 是 driver: none 的实现：运营数据为空（全部来自配置文件），不能修改；
-// 审计和每小时统计只在内存里保留最近一段，重启后清空。
+// ReadOnly is the driver: none implementation: the operational data is empty (it all comes from the
+// configuration file) and cannot be changed; the audit log and hourly statistics only keep a recent stretch
+// in memory and are cleared on restart.
 type ReadOnly struct {
 	mu    sync.Mutex
 	audit []AuditEntry
@@ -15,7 +16,7 @@ type ReadOnly struct {
 	now   func() time.Time
 }
 
-// NewReadOnly 创建只读存储。
+// NewReadOnly creates a read-only store.
 func NewReadOnly() *ReadOnly { return &ReadOnly{hours: map[int64][]byte{}, now: time.Now} }
 
 func (s *ReadOnly) Data() Data { return Data{} }

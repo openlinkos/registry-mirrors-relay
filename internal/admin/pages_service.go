@@ -7,7 +7,7 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
 )
 
-// ---- 上游
+// ---- Upstreams
 
 func (h *Handler) upstreamsPage(c *ctx) error {
 	return h.render(c, "upstreams", &view{Title: tr(c.lang, "nav.upstreams"), Nav: "upstreams", Data: h.ops.Upstreams()})
@@ -41,7 +41,7 @@ func (h *Handler) redirectHostDelete(c *ctx) error {
 	return c.done("/admin/upstreams", "host.deleted", host)
 }
 
-// ---- 入口与用法
+// ---- Entrances and usage
 
 type entranceView struct {
 	Name, Hosts, Upstream, Auth, Page string
@@ -53,13 +53,13 @@ type snippetView struct {
 
 type usageData struct {
 	Entrances  []entranceView
-	Hosts      []string // 单域名入口的域名，可以选来生成配置
+	Hosts      []string // single-domain entrance domains, selectable for generating the configuration
 	Host       string
 	Scheme     string
 	Snippets   []snippetView
-	Fixed      []entranceView // 固定上游的入口（每个上游一个子域名）
+	Fixed      []entranceView // entrances with a fixed upstream (one subdomain per upstream)
 	Basic      bool
-	ShowStatus bool // 用法页上显示服务状态（site.show_status）
+	ShowStatus bool // show the service status on the usage page (site.show_status)
 }
 
 var snippetHostRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$`)
@@ -100,8 +100,9 @@ func (h *Handler) usagePage(c *ctx) error {
 	return h.render(c, "usage", &view{Title: tr(c.lang, "nav.usage"), Nav: "usage", Data: d})
 }
 
-// snippets 生成各种客户端指向单域名入口的配置。containerd 会在请求里带 ?ns=<上游>，
-// Podman 的镜像地址写成 <域名>/<上游>（路径前缀），Docker 的 registry-mirrors 只对 Docker Hub 生效（根路径）。
+// snippets generates the configuration that points each kind of client at a single-domain entrance.
+// containerd adds ?ns=<upstream> to its requests, Podman's mirror location is written as <domain>/<upstream>
+// (a path prefix), and Docker's registry-mirrors only applies to Docker Hub (the root path).
 func snippets(lang string, names []string, cfg *config.Config, scheme, host string) []snippetView {
 	base := scheme + "://" + host
 	var out []snippetView

@@ -11,15 +11,17 @@ import (
 	"strings"
 )
 
-// 设计系统（@openlinkos/ui，由 scripts/vendor-ui.sh 放进 assets/vendor）和后台自己的静态文件。
+// The design system (@openlinkos/ui, placed in assets/vendor by scripts/vendor-ui.sh) and the console's
+// own static files.
 //
 //go:embed assets
 var assetFS embed.FS
 
-// asset 是一个静态文件，以带内容哈希的名字提供：/admin/assets/<file>，可以长期缓存。
+// asset is a static file, served under a name that carries its content hash: /admin/assets/<file>, so it
+// can be cached for a long time.
 type asset struct {
-	name  string // 逻辑名，如 admin.css
-	file  string // 带哈希的名字，如 admin.1a2b3c4d5e.css
+	name  string // logical name, e.g. admin.css
+	file  string // hashed name, e.g. admin.1a2b3c4d5e.css
 	ctype string
 	body  []byte
 }
@@ -31,11 +33,12 @@ type assets struct {
 	viewBox string
 }
 
-// fontURL 匹配设计系统样式表里的 url(fonts/<名字>.woff2)。
+// fontURL matches url(fonts/<name>.woff2) in the design system's stylesheet.
 var fontURL = regexp.MustCompile(`url\((["']?)fonts/([A-Za-z0-9_-]+)\.woff2(["']?)\)`)
 
-// safeIcon 是图标 symbol 的内容：只允许基本图形和几何、填充属性。图标会以标记的形式内联进页面，
-// 所以加载时就拒绝其他任何东西（脚本、事件属性、链接、样式）。
+// safeIcon is the content of an icon symbol: only basic shapes with geometry and fill attributes are
+// allowed. Icons are inlined into pages as markup, so anything else (scripts, event attributes, links,
+// styles) is rejected at load time.
 var safeIcon = regexp.MustCompile(`^(?:\s*<(?:path|circle|rect|line|polyline|polygon|ellipse)(?:\s+(?:d|cx|cy|r|rx|ry|x|y|x1|x2|y1|y2|width|height|points|fill|stroke|stroke-width|stroke-linecap|stroke-linejoin)="[^"<>&]*")*\s*/>)*\s*$`)
 
 const cssType = "text/css; charset=utf-8"
@@ -71,18 +74,18 @@ func loadAssets() (*assets, error) {
 		Icons   map[string]string `json:"icons"`
 	}
 	if err := json.Unmarshal(raw, &icons); err != nil {
-		return nil, fmt.Errorf("icons.json：%w", err)
+		return nil, fmt.Errorf("icons.json: %w", err)
 	}
 	a.viewBox = icons.ViewBox
 	for name, body := range icons.Icons {
 		if !iconNameRe.MatchString(name) || !safeIcon.MatchString(body) {
-			return nil, fmt.Errorf("@openlinkos/ui 的图标 %q 不是纯图形", name)
+			return nil, fmt.Errorf("@openlinkos/ui icon %q is not plain shapes", name)
 		}
 		a.icons[name] = body
 	}
 	for _, name := range iconNames {
 		if _, ok := a.icons[name]; !ok {
-			return nil, fmt.Errorf("@openlinkos/ui 里没有图标 %q", name)
+			return nil, fmt.Errorf("@openlinkos/ui has no icon %q", name)
 		}
 	}
 	return a, nil
@@ -97,7 +100,8 @@ func (a *assets) add(name, ctype string, body []byte) *asset {
 	return f
 }
 
-// withFonts 让样式表引用的字体也以带哈希的名字提供（/admin/assets/fonts/…），并改写样式表里的地址。
+// withFonts serves the fonts the stylesheet references under hashed names as well
+// (/admin/assets/fonts/…) and rewrites their URLs in the stylesheet.
 func (a *assets) withFonts(css []byte) ([]byte, error) {
 	var err error
 	out := fontURL.ReplaceAllFunc(css, func(m []byte) []byte {
@@ -117,7 +121,7 @@ func (a *assets) withFonts(css []byte) ([]byte, error) {
 	return out, err
 }
 
-// url 返回静态文件的地址。
+// url returns the URL of a static file.
 func (a *assets) url(name string) string {
 	if f, ok := a.byName[name]; ok {
 		return "/admin/assets/" + f.file

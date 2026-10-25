@@ -33,17 +33,17 @@ func TestProbes(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("还没开始监听时 /readyz 应返回 503，实际 %d", rec.Code)
+		t.Fatalf("/readyz should return 503 before listening starts, got %d", rec.Code)
 	}
 	rec = httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("/healthz 应返回 200 且不缓存：%d %v", rec.Code, rec.Header())
+		t.Fatalf("/healthz should return 200 and not be cached: %d %v", rec.Code, rec.Header())
 	}
 	rec = httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v2/", nil))
 	if rec.Code != http.StatusNotFound {
-		t.Fatalf("其他路径交给 handler：%d", rec.Code)
+		t.Fatalf("other paths go to the handler: %d", rec.Code)
 	}
 }
 
@@ -58,16 +58,16 @@ func TestRunAndGracefulShutdown(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- s.Run(ctx) }()
 	if !s.waitReady(2 * time.Second) {
-		t.Fatal("Run 没有就绪")
+		t.Fatal("Run did not become ready")
 	}
 	base := "http://" + s.Bound()[0]
 	resp, err := http.Get(base + "/healthz")
 	if err != nil || resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /healthz：%v %v", resp, err)
+		t.Fatalf("GET /healthz: %v %v", resp, err)
 	}
 	_ = resp.Body.Close()
 
-	// 一个进行中的请求：退出时要等它完成
+	// An in-flight request: shutdown has to wait for it to finish
 	got := make(chan string, 1)
 	go func() {
 		resp, err := http.Get(base + "/v2/slow")
@@ -85,18 +85,19 @@ func TestRunAndGracefulShutdown(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("开始退出后 /readyz 应返回 503，实际 %d", rec.Code)
+		t.Fatalf("/readyz should return 503 once shutdown starts, got %d", rec.Code)
 	}
 	close(release)
 	if body := <-got; body != "done" {
-		t.Fatalf("进行中的请求应完成：%q", body)
+		t.Fatalf("the in-flight request should finish: %q", body)
 	}
 	if err := <-done; err != nil {
-		t.Fatalf("Run 应正常返回：%v", err)
+		t.Fatalf("Run should return normally: %v", err)
 	}
 }
 
-// startTLS 用给定的配置启动 Server，返回 HTTPS 入口的地址和停止函数。
+// startTLS starts a Server with the given configuration and returns the HTTPS entrance's address and a stop
+// function.
 func startTLS(t *testing.T, yaml string) (*Server, func()) {
 	t.Helper()
 	res, err := config.Parse([]byte(yaml))
@@ -110,7 +111,7 @@ func startTLS(t *testing.T, yaml string) (*Server, func()) {
 	done := make(chan struct{})
 	go func() { _ = s.Run(ctx); close(done) }()
 	if !s.waitReady(5 * time.Second) {
-		t.Fatal("没有开始监听")
+		t.Fatal("did not start listening")
 	}
 	return s, func() { cancel(); <-done }
 }
@@ -138,24 +139,24 @@ func TestTLSFilesAndReload(t *testing.T) {
 	}
 	resp, body := get()
 	if body != "proto=HTTP/2.0" {
-		t.Fatalf("HTTPS 入口应支持 HTTP/2：%s", body)
+		t.Fatalf("the HTTPS entrance should support HTTP/2: %s", body)
 	}
 	first := resp.TLS.PeerCertificates[0].SerialNumber
-	// 证书续期：换掉文件，新的连接拿到新证书
+	// Certificate renewal: replace the files, new connections get the new certificate
 	time.Sleep(10 * time.Millisecond)
 	ca.LeafFiles(t, dir, "127.0.0.1", "mirror.test")
 	client.CloseIdleConnections()
 	resp, _ = get()
 	if resp.TLS.PeerCertificates[0].SerialNumber.Cmp(first) == 0 {
-		t.Fatal("证书文件变了应重新加载")
+		t.Fatal("changed certificate files should be reloaded")
 	}
-	// 坏文件：继续用原来的证书
+	// Broken file: keep using the previous certificate
 	if err := os.WriteFile(certFile, []byte("broken"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	client.CloseIdleConnections()
 	if resp, _ := get(); resp.StatusCode != 200 {
-		t.Fatal("证书文件坏了应继续用旧证书")
+		t.Fatal("a broken certificate file should keep the old certificate in use")
 	}
 }
 
@@ -164,8 +165,8 @@ func TestTLSFilesMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := New(res.Config, slog.New(slog.DiscardHandler), http.NotFoundHandler()).Run(context.Background()); err == nil || !strings.Contains(err.Error(), "证书") {
-		t.Fatalf("证书文件不存在时应启动失败：%v", err)
+	if err := New(res.Config, slog.New(slog.DiscardHandler), http.NotFoundHandler()).Run(context.Background()); err == nil || !strings.Contains(err.Error(), "certificate") {
+		t.Fatalf("startup should fail when the certificate files do not exist: %v", err)
 	}
 }
 
@@ -179,31 +180,33 @@ func TestACMEWiring(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !slices.Contains(conf.NextProtos, "acme-tls/1") || conf.MinVersion != tls.VersionTLS12 {
-		t.Fatalf("要支持 TLS-ALPN-01：%v", conf.NextProtos)
+		t.Fatalf("TLS-ALPN-01 must be supported: %v", conf.NextProtos)
 	}
 	if fi, err := os.Stat(filepath.Join(dir, "acme")); err != nil || !fi.IsDir() {
-		t.Fatal("要建好证书缓存目录")
+		t.Fatal("the certificate cache directory must be created")
 	}
-	// 明文入口：HTTP-01 的验证路径由 autocert 处理，其他请求照常交给 handler
+	// Plain-text entrance: the HTTP-01 validation path is handled by autocert, other requests go to the
+	// handler as usual
 	h := wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "relay") }))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://mirror.example.com/v2/", nil))
 	if rec.Body.String() != "relay" {
-		t.Fatalf("普通请求照常处理：%d %s", rec.Code, rec.Body.String())
+		t.Fatalf("ordinary requests should be handled as usual: %d %s", rec.Code, rec.Body.String())
 	}
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://mirror.example.com/.well-known/acme-challenge/unknown-token", nil))
 	if rec.Body.String() == "relay" {
-		t.Fatal("验证路径应由 autocert 处理")
+		t.Fatal("the validation path should be handled by autocert")
 	}
-	// 不在名单里的域名不申请证书
+	// Domains not on the list get no certificate
 	if _, err := conf.GetCertificate(&tls.ClientHelloInfo{ServerName: "new.example.com"}); err == nil || !strings.Contains(err.Error(), "not configured") {
-		t.Fatalf("不在 tls.acme.hosts 里的域名不能申请证书：%v", err)
+		t.Fatalf("domains not in tls.acme.hosts must not get a certificate: %v", err)
 	}
-	// 生效的配置里加了域名（例如在后台加了入口），不用重启就放行
+	// A domain added to the effective configuration (for example an entrance added in the console) is allowed
+	// without a restart
 	hosts.Store(&[]string{"mirror.example.com", "new.example.com"})
 	if _, err := conf.GetCertificate(&tls.ClientHelloInfo{ServerName: "new.example.com"}); err == nil || strings.Contains(err.Error(), "not configured") {
-		t.Fatalf("新加的域名应放行（之后连不上 ACME 服务而失败）：%v", err)
+		t.Fatalf("the new domain should be allowed (and then fail because the ACME service is unreachable): %v", err)
 	}
 }
 

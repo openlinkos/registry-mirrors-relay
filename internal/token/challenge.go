@@ -1,21 +1,23 @@
-// Package token 在服务端向上游的令牌服务取令牌，并缓存到过期前。客户端看不到上游的认证质询。
+// Package token obtains tokens from the upstream's token service on the server side and caches them
+// until they are about to expire. Clients never see the upstream's authentication challenges.
 package token
 
 import "strings"
 
-// Challenge 是 WWW-Authenticate 里的一个质询。
+// Challenge is one challenge in WWW-Authenticate.
 type Challenge struct {
-	Scheme string // 小写：bearer、basic
+	Scheme string // lowercase: bearer, basic
 	Params map[string]string
 }
 
-// Realm、Service、Scope 是 Bearer 质询的常用参数。
+// Realm, Service and Scope are the common parameters of a Bearer challenge.
 func (c Challenge) Realm() string   { return c.Params["realm"] }
 func (c Challenge) Service() string { return c.Params["service"] }
 func (c Challenge) Scope() string   { return c.Params["scope"] }
 
-// ParseChallenges 解析一个或多个 WWW-Authenticate 头。参数值可以带引号（支持 \ 转义），也可以不带
-// （gcr.io 的 service=gcr.io 就不带）。一个头里可以有多个质询，用逗号分开。
+// ParseChallenges parses one or more WWW-Authenticate headers. Parameter values may be quoted (with \
+// escapes) or unquoted (gcr.io's service=gcr.io is unquoted). One header may hold several challenges,
+// separated by commas.
 func ParseChallenges(values []string) []Challenge {
 	var out []Challenge
 	for _, v := range values {
@@ -47,10 +49,10 @@ func parseOne(s string) []Challenge {
 		}
 		name := token()
 		if name == "" {
-			i++ // 不认识的字符，跳过
+			i++ // unrecognised character, skip it
 			continue
 		}
-		// 后面紧跟 = 的是参数，否则是新质询的 scheme
+		// A name followed by = is a parameter; otherwise it is the scheme of a new challenge
 		j := i
 		for j < len(s) && (s[j] == ' ' || s[j] == '\t') {
 			j++
@@ -71,7 +73,7 @@ func parseOne(s string) []Challenge {
 					sb.WriteByte(s[i])
 					i++
 				}
-				i++ // 结尾的引号
+				i++ // closing quote
 				val = sb.String()
 			} else {
 				val = token()

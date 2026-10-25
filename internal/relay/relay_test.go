@@ -46,8 +46,8 @@ func (c *collector) last() accesslog.Entry {
 
 type env struct {
 	srv  *httptest.Server
-	reg  *testutil.Registry // registry.test：令牌在 auth.test，blob 在 cdn.test
-	hub  *testutil.Registry // hubreg.test：模拟 Docker Hub（library 前缀）
+	reg  *testutil.Registry // registry.test: tokens on auth.test, blobs on cdn.test
+	hub  *testutil.Registry // hubreg.test: simulates Docker Hub (library prefix)
 	img  *testutil.Image
 	alp  *testutil.Image
 	logs *collector
@@ -93,7 +93,7 @@ log:
 
 func newEnv(t *testing.T, extra string) *env { return newEnvStore(t, extra, store.NewReadOnly()) }
 
-// newEnvStore 用给定的运营数据存储建测试环境。
+// newEnvStore builds a test environment with the given operational data store.
 func newEnvStore(t *testing.T, extra string, st store.Store) *env {
 	t.Helper()
 	n := testutil.NewNet(t)
@@ -133,7 +133,7 @@ func (e *env) do(t *testing.T, method, host, path string, hdr http.Header) (*htt
 	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := noFollow.Do(req)
 	if err != nil {
-		t.Fatalf("%s %s：%v", method, path, err)
+		t.Fatalf("%s %s: %v", method, path, err)
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
@@ -157,33 +157,33 @@ func TestPullFixedEntrance(t *testing.T) {
 		t.Fatal(err)
 	}
 	if dg != e.img.IndexDigest() || n < 4*256<<10 {
-		t.Fatalf("digest %s，字节 %d", dg, n)
+		t.Fatalf("digest %s, bytes %d", dg, n)
 	}
 	if e.reg.AuthCount("cdn.test") != 0 {
-		t.Fatal("令牌不能发给 CDN")
+		t.Fatal("tokens must not be sent to the CDN")
 	}
 	last := e.logs.last()
 	if last.Upstream != "registry.test" || len(last.Hops) != 1 || last.Hops[0] != "cdn.test" || last.Status != 200 || last.Size == 0 {
-		t.Fatalf("访问日志：%+v", last)
+		t.Fatalf("access log: %+v", last)
 	}
 }
 
 func TestPullAllInOne(t *testing.T) {
 	e := newEnv(t, "")
-	// 根路径：默认上游，只有一段的名字补 library/
+	// Root path: default upstream, single-segment names get library/
 	p := &testutil.Puller{Base: e.srv.URL, Host: "mirror.local"}
 	if dg, _, err := p.Pull("alpine", "3.22"); err != nil || dg != e.alp.IndexDigest() {
-		t.Fatalf("根路径：%s %v", dg, err)
+		t.Fatalf("root path: %s %v", dg, err)
 	}
-	// 路径前缀
+	// Path prefix
 	if dg, _, err := p.Pull("registry.test/team/app", "v1"); err != nil || dg != e.img.IndexDigest() {
-		t.Fatalf("路径前缀：%s %v", dg, err)
+		t.Fatalf("path prefix: %s %v", dg, err)
 	}
-	// containerd 的 ns
+	// containerd's ns
 	p.Header = http.Header{}
 	resp, _ := e.do(t, http.MethodHead, "mirror.local", "/v2/team/app/manifests/v1?ns=registry.test", http.Header{"Accept": {testutil.MediaIndex}})
 	if resp.StatusCode != 200 || resp.Header.Get("Docker-Content-Digest") != e.img.IndexDigest() {
-		t.Fatalf("ns：%d %v", resp.StatusCode, resp.Header)
+		t.Fatalf("ns: %d %v", resp.StatusCode, resp.Header)
 	}
 }
 
@@ -193,28 +193,29 @@ func TestResponseHeaders(t *testing.T) {
 	h := resp.Header
 	for _, k := range []string{"Set-Cookie", "Docker-Ratelimit-Source", "Ratelimit-Remaining", "Alt-Svc"} {
 		if h.Get(k) != "" {
-			t.Errorf("不应转给客户端：%s", k)
+			t.Errorf("must not be passed to the client: %s", k)
 		}
 	}
 	if h.Get("X-Content-Type-Options") != "nosniff" || !strings.Contains(h.Get("Content-Security-Policy"), "sandbox") {
-		t.Errorf("缺少安全头：%v", h)
+		t.Errorf("missing security headers: %v", h)
 	}
 	if h.Get("Cache-Control") != "no-store" {
-		t.Errorf("按 tag 的 manifest 不能被缓存：%q", h.Get("Cache-Control"))
+		t.Errorf("a manifest requested by tag must not be cached: %q", h.Get("Cache-Control"))
 	}
 	if h.Get("Content-Type") != testutil.MediaIndex || h.Get("Docker-Content-Digest") != e.img.IndexDigest() {
-		t.Errorf("manifest 头：%v", h)
+		t.Errorf("manifest headers: %v", h)
 	}
 	l := e.layer()
 	resp, _ = e.do(t, http.MethodGet, "reg.local", "/v2/team/app/blobs/"+l, nil)
 	if resp.Header.Get("Content-Type") != "application/octet-stream" || resp.Header.Get("Docker-Content-Digest") != l {
-		t.Errorf("blob 头：%v", resp.Header)
+		t.Errorf("blob headers: %v", resp.Header)
 	}
-	// 上游的 Ratelimit 头可以按配置转发（只有直接转发的响应才有，这里关掉 manifest 缓存）
+	// The upstream's Ratelimit headers can be passed on by configuration (only directly forwarded responses
+	// carry them, so the manifest cache is turned off here)
 	e2 := newEnv(t, "proxy:\n  expose_upstream_ratelimit: true\ncache:\n  max_bytes: 0\n")
 	resp, _ = e2.do(t, http.MethodHead, "reg.local", "/v2/team/app/manifests/v1", nil)
 	if resp.Header.Get("Ratelimit-Remaining") == "" || resp.Header.Get("Docker-Ratelimit-Source") != "" {
-		t.Errorf("expose_upstream_ratelimit：%v", resp.Header)
+		t.Errorf("expose_upstream_ratelimit: %v", resp.Header)
 	}
 }
 
@@ -223,12 +224,12 @@ func TestRangeAndBlobHead(t *testing.T) {
 	l := e.layer()
 	resp, body := e.do(t, http.MethodGet, "reg.local", "/v2/team/app/blobs/"+l, http.Header{"Range": {"bytes=100-199"}})
 	if resp.StatusCode != http.StatusPartialContent || len(body) != 100 || string(body) != string(e.img.Blobs[l][100:200]) {
-		t.Fatalf("Range：%d %d", resp.StatusCode, len(body))
+		t.Fatalf("Range: %d %d", resp.StatusCode, len(body))
 	}
-	// HEAD 跟随到 CDN 时改成 Range 0-0 探测（CDN 的签名只对 GET 有效）
+	// A HEAD that follows to the CDN becomes a Range 0-0 probe (the CDN's signature is only valid for GET)
 	resp, body = e.do(t, http.MethodHead, "reg.local", "/v2/team/app/blobs/"+l, nil)
 	if resp.StatusCode != 200 || resp.Header.Get("Content-Length") != strconv.Itoa(256<<10) || len(body) != 0 || resp.Header.Get("Content-Range") != "" {
-		t.Fatalf("blob HEAD：%d %v", resp.StatusCode, resp.Header)
+		t.Fatalf("blob HEAD: %d %v", resp.StatusCode, resp.Header)
 	}
 }
 
@@ -236,25 +237,25 @@ func TestErrors(t *testing.T) {
 	e := newEnv(t, "")
 	resp, body := e.do(t, http.MethodGet, "reg.local", "/v2/team/missing/manifests/v1", nil)
 	if resp.StatusCode != 404 || !strings.Contains(string(body), "MANIFEST_UNKNOWN") {
-		t.Fatalf("不存在的仓库：%d %s", resp.StatusCode, body)
+		t.Fatalf("missing repository: %d %s", resp.StatusCode, body)
 	}
 	e.reg.Fail["registry.test /v2/team/app/manifests/busy"] = testutil.FailWith{Status: 429,
 		Header: http.Header{"Content-Type": {"application/json"}, "Retry-After": {"30"}}, Body: `{"errors":[{"code":"TOOMANYREQUESTS","message":"slow down"}]}`}
 	resp, body = e.do(t, http.MethodGet, "reg.local", "/v2/team/app/manifests/busy", nil)
 	if resp.StatusCode != 429 || resp.Header.Get("Retry-After") != "30" || !strings.Contains(string(body), "TOOMANYREQUESTS") {
-		t.Fatalf("429 和 Retry-After 应转给客户端：%d %v %s", resp.StatusCode, resp.Header, body)
+		t.Fatalf("429 and Retry-After should be passed to the client: %d %v %s", resp.StatusCode, resp.Header, body)
 	}
 	e.reg.Fail["registry.test /v2/team/app/manifests/html"] = testutil.FailWith{Status: 503,
 		Header: http.Header{"Content-Type": {"text/html"}}, Body: "<html>cloudflare</html>"}
 	resp, body = e.do(t, http.MethodGet, "reg.local", "/v2/team/app/manifests/html", nil)
 	if resp.StatusCode != 503 || strings.Contains(string(body), "<html>") || !strings.Contains(string(body), "UNAVAILABLE") {
-		t.Fatalf("HTML 错误页应换成 OCI JSON：%d %s", resp.StatusCode, body)
+		t.Fatalf("an HTML error page should be replaced with OCI JSON: %d %s", resp.StatusCode, body)
 	}
 	e.reg.Fail["registry.test /v2/team/app/manifests/private"] = testutil.FailWith{Status: 401,
 		Header: http.Header{"Content-Type": {"application/json"}}, Body: `{"errors":[{"code":"UNAUTHORIZED"}]}`}
 	resp, _ = e.do(t, http.MethodGet, "reg.local", "/v2/team/app/manifests/private", nil)
 	if resp.StatusCode != 404 || resp.Header.Get("Www-Authenticate") != "" {
-		t.Fatalf("上游最终的 401 应变成 404 且不带质询：%d %v", resp.StatusCode, resp.Header)
+		t.Fatalf("a final upstream 401 should become a 404 without a challenge: %d %v", resp.StatusCode, resp.Header)
 	}
 }
 
@@ -278,20 +279,20 @@ func TestEntranceRules(t *testing.T) {
 	for _, c := range cases {
 		resp, body := e.do(t, c.method, c.host, c.path, nil)
 		if resp.StatusCode != c.status {
-			t.Errorf("%s %s %s：期望 %d，实际 %d %s", c.method, c.host, c.path, c.status, resp.StatusCode, body)
+			t.Errorf("%s %s %s: want %d, got %d %s", c.method, c.host, c.path, c.status, resp.StatusCode, body)
 		}
 		if c.status == 405 && resp.Header.Get("Allow") != "GET, HEAD" {
-			t.Errorf("405 应带 Allow")
+			t.Errorf("405 should carry Allow")
 		}
 	}
 	resp, body := e.do(t, http.MethodGet, "reg.local", "/v2/", nil)
 	if string(body) != "{}" || resp.Header.Get("Docker-Distribution-Api-Version") != "registry/2.0" || resp.Header.Get("Www-Authenticate") != "" {
-		t.Fatalf("/v2/ 应在本地回答，不发质询：%s %v", body, resp.Header)
+		t.Fatalf("/v2/ should be answered locally without a challenge: %s %v", body, resp.Header)
 	}
 }
 
 func TestUnlistedRedirectPassedToClient(t *testing.T) {
-	// 白名单里去掉 cdn.test
+	// Remove cdn.test from the allowlist
 	e := newEnv(t, "")
 	e.cfg.Upstreams["registry.test"].RedirectHosts = []string{`pkg\.test`}
 	if err := e.app.Rebuild(); err != nil {
@@ -299,10 +300,10 @@ func TestUnlistedRedirectPassedToClient(t *testing.T) {
 	}
 	resp, _ := e.do(t, http.MethodGet, "reg.local", "/v2/team/app/blobs/"+e.layer(), nil)
 	if resp.StatusCode != http.StatusTemporaryRedirect || !strings.HasPrefix(resp.Header.Get("Location"), "https://cdn.test/") {
-		t.Fatalf("白名单外的重定向应交给客户端：%d %v", resp.StatusCode, resp.Header)
+		t.Fatalf("a redirect outside the allowlist should be passed to the client: %d %v", resp.StatusCode, resp.Header)
 	}
 	if e.app.Stats.Unlisted()["registry.test"]["cdn.test"] != 1 {
-		t.Fatalf("应记下白名单外的主机：%v", e.app.Stats.Unlisted())
+		t.Fatalf("the host outside the allowlist should be recorded: %v", e.app.Stats.Unlisted())
 	}
 }
 
@@ -311,11 +312,11 @@ func TestClientIPInLog(t *testing.T) {
 	e.do(t, http.MethodGet, "reg.local", "/v2/", http.Header{"X-Forwarded-For": {"10.0.0.9, 198.51.100.23"}, "User-Agent": {"containerd/2.1"}})
 	last := e.logs.last()
 	if last.ClientIP != "198.51.100.23" || last.RemoteIP != "127.0.0.1" || last.UserAgent != "containerd/2.1" || last.Entrance != "reg.local" {
-		t.Fatalf("访问日志：%+v", last)
+		t.Fatalf("access log: %+v", last)
 	}
 	var m map[string]any
 	if err := json.Unmarshal(accesslog.Marshal(&last), &m); err != nil || m["status"].(float64) != 200 {
-		t.Fatalf("日志 JSON：%v %v", m, err)
+		t.Fatalf("log JSON: %v %v", m, err)
 	}
 }
 
@@ -323,14 +324,15 @@ func TestTagsLinkRewrite(t *testing.T) {
 	e := newEnv(t, "")
 	resp, body := e.do(t, http.MethodGet, "mirror.local", "/v2/registry.test/team/app/tags/list?n=1", nil)
 	if resp.StatusCode != 200 || !strings.Contains(string(body), `"v1"`) {
-		t.Fatalf("tags：%d %s", resp.StatusCode, body)
+		t.Fatalf("tags: %d %s", resp.StatusCode, body)
 	}
 	if got := resp.Header.Get("Link"); got != `</v2/registry.test/team/app/tags/list?last=v1&n=1>; rel="next"` {
-		t.Fatalf("Link：%q", got)
+		t.Fatalf("Link: %q", got)
 	}
 }
 
-// 上游中途没有数据：在 upstream_read_idle 之后放弃，连接被中断，客户端看到的是截断而不是完整的响应
+// The upstream stops sending data midway: give up after upstream_read_idle and abort the connection, so the
+// client sees a truncated response rather than a complete one
 type stallReader struct {
 	ctx  context.Context
 	sent bool
@@ -355,7 +357,7 @@ func TestStreamUpstreamIdle(t *testing.T) {
 	start := time.Now()
 	err := h.stream(rec, &stallReader{ctx: ctx}, cancel)
 	if !errors.Is(err, errUpstreamIdle) || time.Since(start) > 2*time.Second || rec.Body.String() != "partial" {
-		t.Fatalf("应在空闲超时后放弃：%v %v %q", err, time.Since(start), rec.Body.String())
+		t.Fatalf("should give up after the idle timeout: %v %v %q", err, time.Since(start), rec.Body.String())
 	}
 }
 
@@ -370,7 +372,7 @@ func TestManifestCacheEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := e.reg.Count("GET registry.test manifest"); got != gets {
-		t.Fatalf("第二次拉取不应再向上游 GET manifest：之前 %d，之后 %d", gets, got)
+		t.Fatalf("the second pull should not GET the manifest from the upstream again: before %d, after %d", gets, got)
 	}
 	hits := 0
 	e.logs.mu.Lock()
@@ -381,7 +383,7 @@ func TestManifestCacheEndToEnd(t *testing.T) {
 	}
 	e.logs.mu.Unlock()
 	if hits < 3 {
-		t.Fatalf("第二次拉取的 index 和两个平台的 manifest 都应命中缓存：%d", hits)
+		t.Fatalf("the index and both platform manifests of the second pull should hit the cache: %d", hits)
 	}
 }
 
@@ -393,10 +395,10 @@ func TestStaleManifestWhenUpstreamFails(t *testing.T) {
 	}
 	time.Sleep(5 * time.Millisecond)
 	e.reg.Fail["registry.test /v2/team/app/manifests/v1"] = testutil.FailWith{Status: 503}
-	// Accept 和拉取客户端用的一样：tag 缓存的键里带 Accept
+	// Same Accept as the pulling client: the tag cache key includes Accept
 	resp, body := e.do(t, http.MethodGet, "reg.local", "/v2/team/app/manifests/v1", http.Header{"Accept": {testutil.MediaIndex + ", " + testutil.MediaManifest}})
 	if resp.StatusCode != 200 || string(body) != string(e.img.Index) || e.logs.last().Cache != "stale" {
-		t.Fatalf("上游 503 时应返回旧的 manifest：%d %q", resp.StatusCode, e.logs.last().Cache)
+		t.Fatalf("should return the stale manifest when the upstream returns 503: %d %q", resp.StatusCode, e.logs.last().Cache)
 	}
 }
 
@@ -432,61 +434,63 @@ func TestBasicAuthEntrance(t *testing.T) {
 
 	resp, _ := e.do(t, http.MethodGet, "private.local", "/v2/", nil)
 	if resp.StatusCode != 401 || !strings.HasPrefix(resp.Header.Get("Www-Authenticate"), "Basic ") {
-		t.Fatalf("没带口令应返回 Basic 质询：%d %v", resp.StatusCode, resp.Header)
+		t.Fatalf("no password should return a Basic challenge: %d %v", resp.StatusCode, resp.Header)
 	}
 	if resp, _ := e.do(t, http.MethodGet, "private.local", "/v2/", basic("alice", "wrong")); resp.StatusCode != 401 {
-		t.Fatalf("口令错误应返回 401：%d", resp.StatusCode)
+		t.Fatalf("a wrong password should return 401: %d", resp.StatusCode)
 	}
 	if resp, _ := e.do(t, http.MethodGet, "private.local", "/v2/", basic("alice", "correct horse")); resp.StatusCode != 200 {
-		t.Fatalf("口令正确应返回 200：%d", resp.StatusCode)
+		t.Fatalf("the correct password should return 200: %d", resp.StatusCode)
 	}
 	p := &testutil.Puller{Base: e.srv.URL, Host: "private.local", Header: basic("alice", "correct horse")}
 	if _, _, err := p.Pull("team/app", "v1"); err != nil {
-		t.Fatalf("登录后应能拉取：%v", err)
+		t.Fatalf("should be able to pull after signing in: %v", err)
 	}
 	if e.logs.last().UserID != "alice" {
-		t.Fatalf("访问日志应记下用户：%+v", e.logs.last())
+		t.Fatalf("the access log should record the user: %+v", e.logs.last())
 	}
-	// 用法页默认谁都能看，只有拉取要登录；site.json 告诉页面这里要登录
+	// By default anyone can view the usage page and only pulls need sign-in; site.json tells the page that
+	// sign-in is required here
 	if resp, body := e.do(t, http.MethodGet, "private.local", "/", nil); resp.StatusCode != 200 || !strings.Contains(string(body), "<html") {
-		t.Fatalf("page 默认 public，没登录也应显示用法页：%d", resp.StatusCode)
+		t.Fatalf("page defaults to public, so the usage page should show without sign-in: %d", resp.StatusCode)
 	}
 	if resp, body := e.do(t, http.MethodGet, "private.local", "/site.json", nil); resp.StatusCode != 200 || !strings.Contains(string(body), `"login": true`) {
-		t.Fatalf("要登录的入口的 site.json 应带 login: true：%d %s", resp.StatusCode, body)
+		t.Fatalf("site.json of an entrance that requires sign-in should carry login: true: %d %s", resp.StatusCode, body)
 	}
-	// page: login：用法页也要登录
+	// page: login: the usage page needs sign-in too
 	if resp, _ := e.do(t, http.MethodGet, "hidden.local", "/", nil); resp.StatusCode != 401 || !strings.HasPrefix(resp.Header.Get("Www-Authenticate"), "Basic ") {
-		t.Fatalf("page: login 时没登录应返回 Basic 质询：%d", resp.StatusCode)
+		t.Fatalf("with page: login, no sign-in should return a Basic challenge: %d", resp.StatusCode)
 	}
 	if resp, _ := e.do(t, http.MethodGet, "hidden.local", "/status.json", nil); resp.StatusCode != 401 {
-		t.Fatalf("page: login 时 status.json 也要登录：%d", resp.StatusCode)
+		t.Fatalf("with page: login, status.json needs sign-in too: %d", resp.StatusCode)
 	}
 	if resp, body := e.do(t, http.MethodGet, "hidden.local", "/", basic("alice", "correct horse")); resp.StatusCode != 200 || !strings.Contains(string(body), "<html") {
-		t.Fatalf("page: login 时登录后应显示用法页：%d", resp.StatusCode)
+		t.Fatalf("with page: login, the usage page should show after sign-in: %d", resp.StatusCode)
 	}
-	// page: off：没有用法页，拉取照常
+	// page: off: no usage page, pulls work as usual
 	for _, path := range []string{"/", "/site.json", "/status.json"} {
 		if resp, _ := e.do(t, http.MethodGet, "bare.local", path, nil); resp.StatusCode != 404 {
-			t.Fatalf("page: off 时 %s 应返回 404：%d", path, resp.StatusCode)
+			t.Fatalf("with page: off, %s should return 404: %d", path, resp.StatusCode)
 		}
 	}
 	if resp, _ := e.do(t, http.MethodGet, "bare.local", "/v2/", nil); resp.StatusCode != 200 {
-		t.Fatalf("page: off 不影响拉取：%d", resp.StatusCode)
+		t.Fatalf("page: off should not affect pulls: %d", resp.StatusCode)
 	}
-	// 公开入口不受影响
+	// Public entrances are not affected
 	if resp, _ := e.do(t, http.MethodGet, "reg.local", "/v2/", nil); resp.StatusCode != 200 {
-		t.Fatal("公开入口不需要登录")
+		t.Fatal("a public entrance needs no sign-in")
 	}
 	if resp, _ := e.do(t, http.MethodGet, "reg.local", "/", nil); resp.StatusCode != 200 {
-		t.Fatal("公开入口的用法页不需要登录")
+		t.Fatal("the usage page of a public entrance needs no sign-in")
 	}
-	// 停用账号
+	// Disable the account
 	e.update(t, func(d *store.Data) { d.Users[0].Disabled = true })
 	if resp, _ := e.do(t, http.MethodGet, "private.local", "/v2/", basic("alice", "correct horse")); resp.StatusCode != 401 {
-		t.Fatalf("停用的账号应返回 401：%d", resp.StatusCode)
+		t.Fatalf("a disabled account should return 401: %d", resp.StatusCode)
 	}
-	// 失败次数限制（默认每分钟 10 次）。用已有账号输错口令：它的哈希 cost 很低，-race 下也很快，
-	// 不会因为测试太慢、令牌在这期间补回来而测不出限制
+	// Failed attempt limit (10 per minute by default). Use an existing account with a wrong password: its hash
+	// cost is low and fast even under -race, so the test is not so slow that tokens refill meanwhile and hide
+	// the limit
 	e.update(t, func(d *store.Data) { d.Users[0].Disabled = false })
 	var last int
 	for i := 0; i < 12; i++ {
@@ -494,7 +498,7 @@ func TestBasicAuthEntrance(t *testing.T) {
 		last = resp.StatusCode
 	}
 	if last != 429 {
-		t.Fatalf("登录失败太多次应返回 429：%d", last)
+		t.Fatalf("too many failed sign-ins should return 429: %d", last)
 	}
 }
 
@@ -505,15 +509,15 @@ func TestIPBan(t *testing.T) {
 	})
 	for _, path := range []string{"/v2/", "/"} {
 		if resp, _ := e.do(t, http.MethodGet, "reg.local", path, nil); resp.StatusCode != 403 {
-			t.Fatalf("被封禁的 IP 访问 %s 应返回 403：%d", path, resp.StatusCode)
+			t.Fatalf("a banned IP requesting %s should get 403: %d", path, resp.StatusCode)
 		}
 	}
 	if e.logs.last().Error != "banned" {
-		t.Fatalf("日志应记下原因：%+v", e.logs.last())
+		t.Fatalf("the log should record the reason: %+v", e.logs.last())
 	}
 	e.update(t, func(d *store.Data) { d.Bans = nil })
 	if resp, _ := e.do(t, http.MethodGet, "reg.local", "/v2/", nil); resp.StatusCode != 200 {
-		t.Fatal("解除封禁后应恢复")
+		t.Fatal("access should be restored after the ban is lifted")
 	}
 }
 
@@ -524,13 +528,13 @@ func TestImageDenyRule(t *testing.T) {
 `)
 	resp, body := e.do(t, http.MethodGet, "reg.local", "/v2/team/app/manifests/v1", nil)
 	if resp.StatusCode != 451 || !strings.Contains(string(body), "blocked") || !strings.Contains(string(body), "DENIED") {
-		t.Fatalf("黑名单里的镜像应返回 451：%d %s", resp.StatusCode, body)
+		t.Fatalf("a deny-listed image should return 451: %d %s", resp.StatusCode, body)
 	}
 	if e.reg.Count("GET registry.test manifest") != 0 {
-		t.Fatal("被拒绝的请求不应发给上游")
+		t.Fatal("a denied request should not be sent to the upstream")
 	}
 	if resp, _ := e.do(t, http.MethodGet, "mirror.local", "/v2/alpine/manifests/3.22", nil); resp.StatusCode != 200 {
-		t.Fatalf("别的镜像不受影响：%d", resp.StatusCode)
+		t.Fatalf("other images should not be affected: %d", resp.StatusCode)
 	}
 }
 
@@ -544,11 +548,11 @@ func TestManifestRateLimit(t *testing.T) {
 		resp, _ := e.do(t, http.MethodGet, "reg.local", "/v2/team/app/manifests/v1", nil)
 		codes = append(codes, resp.StatusCode)
 		if i == 2 && resp.Header.Get("Retry-After") == "" {
-			t.Fatal("429 应带 Retry-After")
+			t.Fatal("429 should carry Retry-After")
 		}
 	}
 	if codes[0] != 200 || codes[1] != 200 || codes[2] != 429 || !e.logs.last().Limited {
-		t.Fatalf("突发 2 次之后应返回 429：%v", codes)
+		t.Fatalf("should return 429 after a burst of 2: %v", codes)
 	}
 }
 
@@ -556,18 +560,18 @@ func TestBlobStreamLimit(t *testing.T) {
 	e := newEnv(t, `limits:
   blob_streams_per_client: 1
 `)
-	// 先占住这个客户端唯一的名额，模拟一个还在下载的层
+	// Take this client's only slot first, simulating a layer still downloading
 	rel, ok, _ := e.app.Limiter.AcquireBlob("ip:127.0.0.1", netip.MustParseAddr("127.0.0.1"), limitOverrideNone)
 	if !ok {
-		t.Fatal("应能占到名额")
+		t.Fatal("should be able to take a slot")
 	}
 	resp, _ := e.do(t, http.MethodGet, "reg.local", "/v2/team/app/blobs/"+e.layer(), nil)
 	if resp.StatusCode != 429 {
-		t.Fatalf("超过每个客户端的并发流数应返回 429：%d", resp.StatusCode)
+		t.Fatalf("exceeding the per-client concurrent streams should return 429: %d", resp.StatusCode)
 	}
 	rel()
 	if resp, _ := e.do(t, http.MethodGet, "reg.local", "/v2/team/app/blobs/"+e.layer(), nil); resp.StatusCode != 200 {
-		t.Fatalf("释放后应能下载：%d", resp.StatusCode)
+		t.Fatalf("should be able to download after release: %d", resp.StatusCode)
 	}
 }
 

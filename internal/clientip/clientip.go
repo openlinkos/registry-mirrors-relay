@@ -1,8 +1,9 @@
-// Package clientip 从请求里取出客户端的真实 IP。
+// Package clientip extracts the client's real IP from a request.
 //
-// 只信任配置的代理发来的 X-Forwarded-For，并且从右往左取第一个不受信任的地址：
-// 最右边是离我们最近的代理加的，最左边是客户端自己可以随便写的（例如公司内网代理加的内网地址）。
-// 这和 Caddy 的 trusted_proxies_strict 一致。
+// X-Forwarded-For is trusted only when it comes from a configured proxy, and the first untrusted
+// address is taken scanning from right to left: the rightmost entry was added by the proxy nearest to
+// us, while the leftmost can be anything the client chooses to write (for example private addresses
+// added by a corporate network proxy). This matches Caddy's trusted_proxies_strict.
 package clientip
 
 import (
@@ -12,18 +13,19 @@ import (
 	"strings"
 )
 
-// Resolver 是不可变的，配置重载时整体替换。
+// Resolver is immutable and is replaced as a whole when the configuration is reloaded.
 type Resolver struct {
 	trusted    []netip.Prefix
 	useXRealIP bool
 }
 
-// New 创建 Resolver。trusted 为空时不信任任何代理，直接用 TCP 来源地址。
+// New creates a Resolver. When trusted is empty no proxy is trusted and the TCP source address is
+// used directly.
 func New(trusted []netip.Prefix, useXRealIP bool) *Resolver {
 	return &Resolver{trusted: trusted, useXRealIP: useXRealIP}
 }
 
-// Trusted 判断 a 是不是受信任的代理。
+// Trusted reports whether a is a trusted proxy.
 func (r *Resolver) Trusted(a netip.Addr) bool { return r.isTrusted(a) }
 
 func (r *Resolver) isTrusted(a netip.Addr) bool {
@@ -35,7 +37,7 @@ func (r *Resolver) isTrusted(a netip.Addr) bool {
 	return false
 }
 
-// Remote 解析 RemoteAddr（TCP 来源地址）。
+// Remote parses RemoteAddr (the TCP source address).
 func Remote(req *http.Request) netip.Addr {
 	host, _, err := net.SplitHostPort(req.RemoteAddr)
 	if err != nil {
@@ -44,11 +46,12 @@ func Remote(req *http.Request) netip.Addr {
 	return parse(host)
 }
 
-// parse 去掉 IPv6 的 zone，把 IPv4 映射地址还原成 IPv4。解析失败返回零值。
+// parse strips the IPv6 zone and turns IPv4-mapped addresses back into IPv4. It returns the zero value
+// when parsing fails.
 func parse(s string) netip.Addr {
 	a, err := netip.ParseAddr(strings.TrimSpace(s))
 	if err != nil {
-		// X-Forwarded-For 里偶尔会带端口或方括号
+		// X-Forwarded-For occasionally carries a port or square brackets
 		if ap, err2 := netip.ParseAddrPort(strings.TrimSpace(s)); err2 == nil {
 			a = ap.Addr()
 		} else {
@@ -58,15 +61,17 @@ func parse(s string) netip.Addr {
 	return a.WithZone("").Unmap()
 }
 
-// proxyHeaders 是各种代理、CDN、负载均衡会加的请求头（规范化后的写法）。客户端直连时不会带它们。
+// proxyHeaders are the request headers that proxies, CDNs and load balancers add (in canonical form).
+// Clients connecting directly do not send them.
 var proxyHeaders = []string{
 	"Forwarded", "Via", "X-Real-Ip", "Cf-Connecting-Ip", "True-Client-Ip", "Fastly-Client-Ip",
 	"X-Client-Ip", "X-Cluster-Client-Ip", "X-Envoy-External-Address", "X-Original-Forwarded-For",
 }
 
-// Proxied 判断请求是不是经过了代理：带任何 X-Forwarded-* 或上面的头，或者是 HTTP/1.0
-// （nginx 默认的 proxy_pass 用 HTTP/1.0 回源，而且不加 X-Forwarded-For）。
-// 这些头也可能是客户端自己写的，所以只用来「拒绝」，从不用来「放行」。
+// Proxied reports whether the request came through a proxy: it carries any X-Forwarded-* header or
+// one of the headers above, or it is HTTP/1.0 (nginx's default proxy_pass uses HTTP/1.0 for upstream
+// fetches and does not add X-Forwarded-For). The client may also write these headers itself, so they
+// are only ever used to refuse, never to allow.
 func Proxied(req *http.Request) bool {
 	if req.ProtoMajor == 1 && req.ProtoMinor == 0 {
 		return true
@@ -84,8 +89,9 @@ func Proxied(req *http.Request) bool {
 	return false
 }
 
-// Forwarded 返回受信任的代理传来的客户端地址：TCP 对端是受信任的代理，并且地址确实取自
-// X-Real-IP（use_x_real_ip 时）或 X-Forwarded-For。不满足时 ok 为 false。
+// Forwarded returns the client address passed on by a trusted proxy: the TCP peer is a trusted proxy
+// and the address was actually taken from X-Real-IP (with use_x_real_ip) or X-Forwarded-For.
+// Otherwise ok is false.
 func (r *Resolver) Forwarded(req *http.Request) (client netip.Addr, ok bool) {
 	remote := Remote(req)
 	if !remote.IsValid() || !r.isTrusted(remote) {
@@ -102,7 +108,7 @@ func (r *Resolver) Forwarded(req *http.Request) (client netip.Addr, ok bool) {
 	return c, c != remote
 }
 
-// ClientIP 返回客户端 IP 和 TCP 来源地址。
+// ClientIP returns the client IP and the TCP source address.
 func (r *Resolver) ClientIP(req *http.Request) (client, remote netip.Addr) {
 	remote = Remote(req)
 	if !remote.IsValid() || !r.isTrusted(remote) {
@@ -113,7 +119,7 @@ func (r *Resolver) ClientIP(req *http.Request) (client, remote netip.Addr) {
 			return a, remote
 		}
 	}
-	// 多行 X-Forwarded-For 按顺序拼起来，等同于一行逗号分隔
+	// Multiple X-Forwarded-For lines are joined in order, equivalent to one comma-separated line
 	var hops []string
 	for _, v := range req.Header.Values("X-Forwarded-For") {
 		hops = append(hops, strings.Split(v, ",")...)
@@ -122,7 +128,7 @@ func (r *Resolver) ClientIP(req *http.Request) (client, remote netip.Addr) {
 	for i := len(hops) - 1; i >= 0; i-- {
 		a := parse(hops[i])
 		if !a.IsValid() {
-			// 写坏的值：不再往左看，左边的内容不可信
+			// Malformed value: stop looking further left, as anything to the left is untrustworthy
 			return client, remote
 		}
 		client = a
@@ -130,6 +136,6 @@ func (r *Resolver) ClientIP(req *http.Request) (client, remote netip.Addr) {
 			return client, remote
 		}
 	}
-	// 每一跳都是受信任的代理：用最左边的那个
+	// Every hop is a trusted proxy: use the leftmost one
 	return client, remote
 }

@@ -1,4 +1,5 @@
-// Package testutil 给测试用：测试 CA、把主机名映射到本地端口的拨号器，以及假的 registry、令牌服务和 CDN。
+// Package testutil is for tests: a test CA, a dialer that maps host names to local ports, and fake
+// registry, token service and CDN servers.
 package testutil
 
 import (
@@ -22,14 +23,14 @@ import (
 	"time"
 )
 
-// CA 是测试用的证书颁发机构。
+// CA is a certificate authority for tests.
 type CA struct {
 	cert *x509.Certificate
 	key  *ecdsa.PrivateKey
 	Pool *x509.CertPool
 }
 
-// NewCA 生成一个只在本次测试有效的 CA。
+// NewCA generates a CA that is valid only for this test run.
 func NewCA(t testing.TB) *CA {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -55,7 +56,7 @@ func NewCA(t testing.TB) *CA {
 	return &CA{cert: cert, key: key, Pool: pool}
 }
 
-// Leaf 签发一张包含这些域名的服务器证书。
+// Leaf issues a server certificate for these names.
 func (ca *CA) Leaf(t testing.TB, names ...string) tls.Certificate {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -99,7 +100,8 @@ func ipAddrs(names []string) []net.IP {
 	return out
 }
 
-// LeafFiles 签发一张服务器证书，把证书和私钥（PEM）写进 dir，返回两个文件的路径。
+// LeafFiles issues a server certificate, writes the certificate and private key (PEM) into dir, and
+// returns the paths of the two files.
 func (ca *CA) LeafFiles(t testing.TB, dir string, names ...string) (certFile, keyFile string) {
 	t.Helper()
 	c := ca.Leaf(t, names...)
@@ -117,24 +119,25 @@ func (ca *CA) LeafFiles(t testing.TB, dir string, names ...string) (certFile, ke
 	return certFile, keyFile
 }
 
-// PEM 返回 CA 证书（PEM 格式），给需要文件的配置项（如 tls_ca_file）用。
+// PEM returns the CA certificate (in PEM format), for settings that need a file (such as tls_ca_file).
 func (ca *CA) PEM() []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ca.cert.Raw})
 }
 
-// Net 把 "主机名:443" 映射到本地的测试服务器，代替 DNS。
+// Net maps "hostname:443" to local test servers in place of DNS.
 type Net struct {
 	CA    *CA
 	mu    sync.Mutex
 	hosts map[string]string
 }
 
-// NewNet 创建一个带 CA 的测试网络。
+// NewNet creates a test network with a CA.
 func NewNet(t testing.TB) *Net {
 	return &Net{CA: NewCA(t), hosts: map[string]string{}}
 }
 
-// Serve 用 TLS 启动 handler，并把每个域名的 443 端口指向它。测试结束时自动关闭。
+// Serve starts handler over TLS and points port 443 of each name at it. It is closed automatically
+// when the test ends.
 func (n *Net) Serve(t testing.TB, h http.Handler, names ...string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewUnstartedServer(h)
@@ -150,13 +153,14 @@ func (n *Net) Serve(t testing.TB, h http.Handler, names ...string) *httptest.Ser
 	return srv
 }
 
-// DialContext 按映射表拨号；表里没有的地址返回错误，测试里不会真的访问外网。
+// DialContext dials according to the mapping table; addresses not in the table return an error, so
+// tests never actually reach the internet.
 func (n *Net) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	n.mu.Lock()
 	target, ok := n.hosts[addr]
 	n.mu.Unlock()
 	if !ok {
-		return nil, fmt.Errorf("测试网络里没有 %s", addr)
+		return nil, fmt.Errorf("%s is not in the test network", addr)
 	}
 	var d net.Dialer
 	return d.DialContext(ctx, network, target)

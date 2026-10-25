@@ -1,7 +1,9 @@
-// Package store 存运营数据：客户端账号、IP 规则、临时封禁、镜像规则、API 令牌、后台管理员，以及审计日志和每小时的统计。
-// 不存任何镜像数据。两种实现：
-//   - bolt：一个 bbolt 文件，单实例可写；
-//   - none：只读，运营数据全部来自配置文件（k8s 多副本时用）；审计和统计只在内存里保留一小段。
+// Package store keeps the operational data: client accounts, IP rules, temporary bans, image rules, API
+// tokens and console administrators, plus the audit log and hourly statistics. It never stores image data.
+// There are two implementations:
+//   - bolt: a single bbolt file, writable by a single instance;
+//   - none: read-only, all operational data comes from the configuration file (for multiple k8s replicas);
+//     the audit log and statistics are only kept in memory for a short while.
 package store
 
 import (
@@ -10,22 +12,22 @@ import (
 	"time"
 )
 
-// ErrReadOnly 表示运营数据是只读的。
-var ErrReadOnly = errors.New("运营数据是只读的（admin.store.driver: none），请改配置文件")
+// ErrReadOnly means the operational data is read-only.
+var ErrReadOnly = errors.New("operational data is read-only (admin.store.driver: none), edit the configuration file instead")
 
-// ClientUser 是一个客户端账号（拉取时 docker login 用的）。
+// ClientUser is a client account (the one used with docker login for pulls).
 type ClientUser struct {
 	Name         string    `json:"name"`
 	Hash         string    `json:"hash"` // bcrypt
 	Disabled     bool      `json:"disabled,omitempty"`
-	ManifestRate float64   `json:"manifest_rate,omitempty"` // 单独的限流，0 表示用默认值
+	ManifestRate float64   `json:"manifest_rate,omitempty"` // per-account rate limit, 0 means the default
 	BlobStreams  int       `json:"blob_streams,omitempty"`
 	Note         string    `json:"note,omitempty"`
 	Created      time.Time `json:"created"`
 	CreatedBy    string    `json:"created_by,omitempty"`
 }
 
-// IPRule 是一条 IP 白名单或黑名单。
+// IPRule is an IP allowlist or deny list entry.
 type IPRule struct {
 	CIDR      string    `json:"cidr"`
 	Kind      string    `json:"kind"` // allow | deny
@@ -34,7 +36,7 @@ type IPRule struct {
 	CreatedBy string    `json:"created_by,omitempty"`
 }
 
-// Ban 是一次临时封禁。
+// Ban is a temporary ban.
 type Ban struct {
 	CIDR      string    `json:"cidr"`
 	Until     time.Time `json:"until"`
@@ -43,18 +45,18 @@ type Ban struct {
 	CreatedBy string    `json:"created_by,omitempty"`
 }
 
-// ImageRule 是一条镜像白名单或黑名单。
+// ImageRule is an image allowlist or deny list entry.
 type ImageRule struct {
 	Pattern   string    `json:"pattern"`
 	Kind      string    `json:"kind"`             // allow | deny
-	Status    int       `json:"status,omitempty"` // deny：403 或 451
+	Status    int       `json:"status,omitempty"` // deny: 403 or 451
 	Message   string    `json:"message,omitempty"`
 	Note      string    `json:"note,omitempty"`
 	Created   time.Time `json:"created"`
 	CreatedBy string    `json:"created_by,omitempty"`
 }
 
-// APIToken 是管理 API 的令牌。只存 SHA-256，明文只在创建时给一次。
+// APIToken is a management API token. Only its SHA-256 is stored; the plain text is shown once, at creation.
 type APIToken struct {
 	Name      string    `json:"name"`
 	Hash      string    `json:"hash"`
@@ -63,19 +65,21 @@ type APIToken struct {
 	CreatedBy string    `json:"created_by,omitempty"`
 }
 
-// Admin 是后台管理员。
+// Admin is a console administrator.
 type Admin struct {
 	Name     string `json:"name"`
 	Hash     string `json:"hash"` // bcrypt
 	Role     string `json:"role"` // admin | viewer
 	Disabled bool   `json:"disabled,omitempty"`
-	// MustChange：口令是别人设的（配置里的 initial_admin，或者另一个管理员新建、重设的），
-	// 第一次登录后必须先改口令，改之前后台和 API 都不能用
+	// MustChange: the password was set by someone else (initial_admin in the configuration, or created or reset
+	// by another administrator); after the first sign-in the password must be changed first, and until then
+	// neither the console nor the API can be used
 	MustChange bool      `json:"must_change,omitempty"`
 	Created    time.Time `json:"created"`
 }
 
-// Site 是在后台改的站点信息。设置了就整体代替配置文件里的 site（用法页、后台标题都用它）。
+// Site is the site information edited in the console. When set, it replaces the site in the configuration
+// file as a whole (the usage page and console title both use it).
 type Site struct {
 	Name      string            `json:"name"`
 	Operator  string            `json:"operator,omitempty"`
@@ -84,16 +88,18 @@ type Site struct {
 	UpdatedBy string            `json:"updated_by,omitempty"`
 }
 
-// ConfigOverride 是在后台对配置的一处修改（见 config.Override），按 key 存在 Data.ConfigOverrides 里。
+// ConfigOverride is one console override of the configuration (see config.Override), stored by key in
+// Data.ConfigOverrides.
 type ConfigOverride struct {
-	Value string `json:"value"` // 这一段的 YAML，只有和配置文件不同的字段
-	// Base 是保存时配置文件里这些字段的值的指纹（config.OverrideBase）。对不上说明配置文件之后又改过。
+	Value string `json:"value"` // YAML for this section, only the fields that differ from the configuration file
+	// Base is a fingerprint of these fields' values in the configuration file at save time
+	// (config.OverrideBase). A mismatch means the configuration file has changed since.
 	Base      string    `json:"base,omitempty"`
 	Updated   time.Time `json:"updated"`
 	UpdatedBy string    `json:"updated_by,omitempty"`
 }
 
-// Data 是全部运营数据。很小（通常几 KB），整体读写。
+// Data is all the operational data. It is small (usually a few KB) and read and written as a whole.
 type Data struct {
 	Users      []ClientUser `json:"users,omitempty"`
 	IPRules    []IPRule     `json:"ip_rules,omitempty"`
@@ -101,15 +107,16 @@ type Data struct {
 	ImageRules []ImageRule  `json:"image_rules,omitempty"`
 	APITokens  []APIToken   `json:"api_tokens,omitempty"`
 	Admins     []Admin      `json:"admins,omitempty"`
-	// ExtraRedirectHosts 是在后台加进白名单的重定向主机（精确主机名，不是正则），按上游分
+	// ExtraRedirectHosts are redirect hosts added to the allowlist in the console (exact host names, not
+	// regular expressions), per upstream
 	ExtraRedirectHosts map[string][]string `json:"extra_redirect_hosts,omitempty"`
 	Site               *Site               `json:"site,omitempty"`
-	// ConfigOverrides 是在后台对配置的修改，键是 config.Override 的 Key
+	// ConfigOverrides are the console overrides of the configuration, keyed by config.Override's Key
 	ConfigOverrides map[string]ConfigOverride `json:"config_overrides,omitempty"`
 	Updated         time.Time                 `json:"updated"`
 }
 
-// Clone 深拷贝。
+// Clone returns a deep copy.
 func (d Data) Clone() Data {
 	b, _ := json.Marshal(d)
 	var c Data
@@ -117,7 +124,7 @@ func (d Data) Clone() Data {
 	return c
 }
 
-// AuditEntry 是一条审计记录：谁、什么时候、做了什么。
+// AuditEntry is an audit log entry: who did what, and when.
 type AuditEntry struct {
 	Time   time.Time `json:"time"`
 	Actor  string    `json:"actor"`
@@ -127,24 +134,24 @@ type AuditEntry struct {
 	Detail string    `json:"detail,omitempty"`
 }
 
-// Store 是运营数据的存储。
+// Store is the operational data store.
 type Store interface {
-	// Data 返回当前数据的副本。
+	// Data returns a copy of the current data.
 	Data() Data
-	// Update 在副本上执行 fn，成功后整体写入。只读存储返回 ErrReadOnly。
+	// Update runs fn on a copy and writes it as a whole on success. A read-only store returns ErrReadOnly.
 	Update(fn func(*Data) error) error
-	// Audit 记一条审计。只读存储也会记（在内存里）。
+	// Audit records an audit log entry. A read-only store records it too (in memory).
 	Audit(e AuditEntry) error
-	// AuditLog 返回最近的审计，最新的在前。
+	// AuditLog returns the most recent audit log entries, newest first.
 	AuditLog(limit int) []AuditEntry
-	// SaveHour 保存一个小时的统计（JSON），HourStats 读回。
+	// SaveHour saves one hour of statistics (JSON); HourStats reads them back.
 	SaveHour(hour time.Time, b []byte) error
 	HourStats(since time.Time) [][]byte
 	Writable() bool
 	Close() error
 }
 
-// 保留上限
+// Retention limits
 const (
 	maxAudit    = 10000
 	keepHours   = 90 * 24

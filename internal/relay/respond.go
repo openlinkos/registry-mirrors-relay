@@ -11,15 +11,17 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/upstream"
 )
 
-// passHeaders 是成功响应里转给客户端的上游响应头。其他的（Set-Cookie、Alt-Svc、
-// Docker-Ratelimit-Source 这类会泄露源站出口 IP 的头，以及 CDN 的各种头）一律不转。
+// passHeaders are the upstream response headers passed to the client in a successful response. All others
+// (Set-Cookie, Alt-Svc, headers such as Docker-Ratelimit-Source that leak the origin's egress IP, and the
+// various CDN headers) are never passed on.
 var passHeaders = []string{
 	"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges",
 	"Docker-Content-Digest", "Docker-Distribution-Api-Version",
 	"Etag", "Last-Modified", "Link", "Oci-Subject", "Oci-Filters-Applied",
 }
 
-// ratelimitHeaders 是上游的额度头。默认不转：它们描述的是整个服务共用的额度，用户会误以为是自己的。
+// ratelimitHeaders are the upstream's quota headers. They are not passed on by default: they describe the
+// quota shared by the whole service, and users would mistake it for their own.
 var ratelimitHeaders = []string{"Ratelimit-Limit", "Ratelimit-Remaining", "X-Ratelimit-Limit", "X-Ratelimit-Remaining"}
 
 func copyHeaders(dst, src http.Header, ratelimit bool) {
@@ -37,7 +39,8 @@ func copyHeaders(dst, src http.Header, ratelimit bool) {
 	}
 }
 
-// setSecurityHeaders：镜像内容由镜像作者决定，和用法页同源，不能让浏览器把它当网页执行。
+// setSecurityHeaders: image content is chosen by the image author and shares an origin with the usage page,
+// so browsers must not run it as a web page.
 func setSecurityHeaders(h http.Header) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "sandbox; default-src 'none'")
@@ -66,17 +69,17 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code, msg st
 	}
 }
 
-// maxErrorBody 是转给客户端的上游错误正文的上限。
+// maxErrorBody is the size limit for an upstream error body passed to the client.
 const maxErrorBody = 64 << 10
 
-// passError 把上游的 4xx、5xx 交给客户端，见 writeUpstreamError。
+// passError passes an upstream 4xx or 5xx to the client; see writeUpstreamError.
 func (h *Handler) passError(w http.ResponseWriter, r *http.Request, resp *upstream.Response, t route.Target) {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody+1))
 	writeUpstreamError(w, r, resp.StatusCode, resp.Header.Get("Retry-After"), resp.Header.Get("Content-Type"), body, t.Kind)
 }
 
-// writeUpstreamError：状态码不变；正文是 OCI 错误 JSON 就原样转，否则（例如 CDN 的 HTML 错误页）
-// 换成我们生成的 OCI 错误。429、503 带上 Retry-After。
+// writeUpstreamError keeps the status code. An OCI error JSON body is passed on as is; anything else (a
+// CDN's HTML error page, for example) is replaced with an OCI error we generate. 429 and 503 carry Retry-After.
 func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, retryAfter, ctype string, body []byte, kind route.Kind) {
 	if retryAfter != "" && len(retryAfter) <= 64 && (status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable) {
 		w.Header().Set("Retry-After", retryAfter)
@@ -108,10 +111,11 @@ func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, retr
 	case http.StatusServiceUnavailable, http.StatusBadGateway, http.StatusGatewayTimeout:
 		code = "UNAVAILABLE"
 	}
-	writeError(w, r, status, code, "上游返回 "+strconv.Itoa(status))
+	writeError(w, r, status, code, "upstream returned "+strconv.Itoa(status))
 }
 
-// recorder 记下状态码和写出的字节数，给访问日志用。Unwrap 让 http.ResponseController 能拿到原始的 ResponseWriter。
+// recorder records the status code and the number of bytes written, for the access log. Unwrap lets
+// http.ResponseController reach the original ResponseWriter.
 type recorder struct {
 	http.ResponseWriter
 	status int

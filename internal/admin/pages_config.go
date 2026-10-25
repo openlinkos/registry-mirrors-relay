@@ -12,17 +12,18 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/ops"
 )
 
-// ---- 配置：在后台改的配置存在运营数据库里，叠加在配置文件之上（见 config.Override）
+// ---- Configuration: changes made in the console are stored in the operational database and layered
+// over the configuration file (see config.Override)
 
-// cfgField 是表单里的一个字段。
+// cfgField is one field in the form.
 type cfgField struct {
 	Name, Label, Hint string
 	Kind              string   // bool int float duration size list string
-	Value             string   // 生效的值；表单出错重新显示时是填过的
-	File              string   // 配置文件里的值
-	Changed           bool     // 生效的值和配置文件的不同（后台改过）
-	Locked            bool     // 配了账号的上游，只能改配置文件
-	Choices           []string // 只能从这些里选
+	Value             string   // the effective value; the value filled in when a form error is redisplayed
+	File              string   // the value in the configuration file
+	Changed           bool     // the effective value differs from the file's (changed in the console)
+	Locked            bool     // an upstream with credentials can only be changed in the configuration file
+	Choices           []string // the value must be one of these
 }
 
 type cfgSection struct {
@@ -40,17 +41,17 @@ type cfgUpstream struct {
 }
 
 type configData struct {
-	Editable  bool // 能保存：admin 角色、运营数据可写、没有写 admin.config_edit: false
+	Editable  bool // can save: admin role, operational data writable, and no admin.config_edit: false
 	EditOff   bool // admin.config_edit: false
 	Overrides []ops.OverrideView
 	Sections  []cfgSection
 	Entrances []entranceView
 	EntOver   *ops.OverrideView
 	Upstreams []cfgUpstream
-	Effective string // 生效的配置（YAML，密钥隐去）
+	Effective string // the effective configuration (YAML, secrets hidden)
 }
 
-// fieldChoices 是只能从几个值里选的字段。
+// fieldChoices are the fields whose value must be one of a few choices.
 var fieldChoices = map[string][]string{
 	"unlisted_redirect": {"pass", "deny"},
 	"auth":              {"none", "basic"},
@@ -70,7 +71,8 @@ func overrideOf(list []ops.OverrideView, key string) *ops.OverrideView {
 	return nil
 }
 
-// fields 列出 key 这一段能改的字段：eff 是生效的配置，file 是配置文件的。form 不为 nil 时（表单出错重新显示）用填过的值。
+// fields lists the editable fields of section key: eff is the effective configuration, file the
+// configuration file's. When form is not nil (a form error is being redisplayed) the filled-in values are used.
 func fields(lang string, eff, file *config.Config, key string, form url.Values) []cfgField {
 	sec, _, _ := strings.Cut(key, "/")
 	locked, inFile := false, true
@@ -89,7 +91,7 @@ func fields(lang string, eff, file *config.Config, key string, form url.Values) 
 		if f.Hint == "cfg."+sec+"."+name+"Hint" {
 			f.Hint = ""
 		}
-		f.Changed = inFile && f.Value != f.File // 后台新建的上游没有配置文件里的值可比
+		f.Changed = inFile && f.Value != f.File // upstreams created in the console have no file value to compare
 		if form != nil {
 			switch {
 			case f.Kind == "bool":
@@ -136,7 +138,8 @@ func (h *Handler) configPage(c *ctx) error {
 		}
 		d.Upstreams = append(d.Upstreams, cu)
 	}
-	// 后台新建、但修改没有生效的上游（不在生效的配置里）
+	// Upstreams created in the console whose override has not taken effect (not in the effective
+	// configuration)
 	for i := range d.Overrides {
 		o := &d.Overrides[i]
 		if name, ok := strings.CutPrefix(o.Key, "upstreams/"); ok && rt.Config.Upstreams[name] == nil {
@@ -149,7 +152,8 @@ func (h *Handler) configPage(c *ctx) error {
 	return h.render(c, "config", &view{Title: tr(c.lang, "nav.config"), Nav: "config", Data: d})
 }
 
-// saveConfig 保存一处修改。成功后跳回 back；有新的提醒时直接显示 page，把提醒列出来。
+// saveConfig saves one override. On success it redirects back to back; when there are new warnings it
+// shows page directly and lists them.
 func (h *Handler) saveConfig(c *ctx, key, value, back string, page func(*ctx) error) error {
 	warnings, err := h.ops.SetConfig(c.actor(), key, value)
 	if err != nil {
@@ -166,7 +170,8 @@ func badConfig(err error) error {
 	return &ops.Error{Status: http.StatusBadRequest, Key: "config.invalid", Detail: err.Error()}
 }
 
-// formValues 取表单里 key 这一段的字段。开关没勾选时浏览器不发，按 false。
+// formValues takes the fields of section key from the form. Browsers do not send an unticked switch, so
+// it counts as false.
 func formValues(form url.Values, key string, skip func(string) bool) map[string]string {
 	out := map[string]string{}
 	for _, name := range config.OverrideFields(key) {
@@ -201,7 +206,8 @@ func (h *Handler) configReset(c *ctx) error {
 	return c.done("/admin/config", "config.reset", key)
 }
 
-// configExport 下载生效中的后台修改：format=overrides（只有改过的部分）或 merged（合进配置文件）。
+// configExport downloads the console overrides in effect: format=overrides (only the changed parts) or
+// merged (merged into the configuration file).
 func (h *Handler) configExport(c *ctx) error {
 	format := c.r.URL.Query().Get("format")
 	b, err := h.ops.ExportConfig(format)
@@ -221,9 +227,9 @@ func (h *Handler) configExport(c *ctx) error {
 	return nil
 }
 
-// ---- 入口列表
+// ---- Entrance list
 
-// entranceRow 是入口表单里的一行。
+// entranceRow is one row in the entrance form.
 type entranceRow struct {
 	Index                                              int
 	Name, Hosts, Upstream, DefaultUpstream, Auth, Page string
@@ -232,12 +238,13 @@ type entranceRow struct {
 type entrancesData struct {
 	Editable  bool
 	Rows      []entranceRow
-	Upstreams []string // 可以选的上游（没停用的）
+	Upstreams []string // the upstreams that can be chosen (those not disabled)
 	Override  *ops.OverrideView
-	FileHosts []string // 配置文件里的入口，对照用
+	FileHosts []string // the entrances in the configuration file, for comparison
 }
 
-// blankEntranceRows 是表单末尾留的空行，填了就是新入口。
+// blankEntranceRows is the number of empty rows left at the end of the form; filling one in makes a new
+// entrance.
 const blankEntranceRows = 2
 
 const maxEntranceRows = 200
@@ -276,7 +283,7 @@ func (h *Handler) entrancesPage(c *ctx) error {
 		d.Rows[i].Index = i
 	}
 	for _, e := range rt.FileConfig.Entrances {
-		d.FileHosts = append(d.FileHosts, e.Name+"："+strings.Join(e.Hosts, ", "))
+		d.FileHosts = append(d.FileHosts, e.Name+": "+strings.Join(e.Hosts, ", "))
 	}
 	return h.render(c, "entrances", &view{Title: tr(c.lang, "config.entrancesTitle"), Nav: "config",
 		Crumbs: []crumb{{tr(c.lang, "nav.config"), "/admin/config"}}, Data: d})
@@ -306,7 +313,7 @@ func (h *Handler) entrancesSave(c *ctx) error {
 	return h.saveConfig(c, "entrances", o.Value, "/admin/config/entrances", h.entrancesPage)
 }
 
-// ---- 一个上游
+// ---- A single upstream
 
 type upstreamEditData struct {
 	Editable    bool
@@ -327,14 +334,15 @@ func (h *Handler) upstreamEditPage(c *ctx) error {
 	d := upstreamEditData{Editable: h.canEditConfig(c), Name: name, Source: "config"}
 	key := config.UpstreamKey(name)
 	if config.OverrideFields(key) == nil {
-		key = config.UpstreamKey("new.example.com") // 名字还没填或写错了：只为列出字段
+		key = config.UpstreamKey("new.example.com") // name not filled in yet or invalid: only to list the fields
 	}
 	d.Override = overrideOf(h.ops.Overrides(), key)
 	u := rt.Config.Upstreams[name]
 	eff := rt.Config
 	switch {
 	case u == nil && d.Override != nil:
-		// 后台新建的上游，修改没有生效：按存下的内容显示，可以改了重新保存或者删除
+		// An upstream created in the console whose override has not taken effect: show what was stored;
+		// it can be edited and saved again, or deleted
 		d.Source = "console"
 		if res, err := config.ParseWithOverrides(nil, []config.Override{{Key: key, Value: d.Override.Value}}); err == nil {
 			eff = res.Config
@@ -385,7 +393,7 @@ func (h *Handler) upstreamSave(c *ctx) error {
 	}
 	values := formValues(c.form, key, locked)
 	if isNew {
-		// 新建时空着的字段不写，用默认值
+		// When creating, empty fields are not written, so the defaults apply
 		for k, v := range values {
 			if strings.TrimSpace(v) == "" || v == "false" {
 				delete(values, k)

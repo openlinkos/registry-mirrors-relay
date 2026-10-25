@@ -1,13 +1,19 @@
-// Package manifest 是 manifest 的内存缓存。只缓存 manifest（每个通常几 KB），不缓存镜像层，不写盘。
+// Package manifest is an in-memory manifest cache. It caches only manifests (usually a few KB each), never
+// layers, and never writes to disk.
 //
-// 按 tag 拉取时先向上游发 HEAD（Docker Hub 不计次数），拿到 digest 后：内存里有这个 digest 就直接用，
-// 没有才按 digest GET 一次。同一个 tag 被反复拉取，只有第一次消耗上游的拉取次数。
+// A pull by tag first sends a HEAD to the upstream (Docker Hub does not count it). Once the digest is known,
+// a manifest already in memory under that digest is used directly; only otherwise is it fetched once with a
+// GET by digest. When the same tag is pulled repeatedly, only the first pull uses up the upstream's pull quota.
 //
-// 正确性：
-//   - 按 digest 存的内容是不可变的，存之前校验 sha256，和 digest 不符就不存、返回错误；
-//   - 按 tag 存的只是 tag → digest 的映射，键里带客户端的 Accept，过期（默认 30 秒）后重新 HEAD 确认；
-//   - 上游出错（429、5xx、连不上、熔断）时，tag 映射在过期后的一段时间内（默认 6 小时）仍可以用旧的；
-//   - 404 记一小段时间（默认 15 秒），反复请求不存在镜像的客户端不会每次都打到上游。
+// Correctness:
+//   - content stored by digest is immutable; its sha256 is verified before storing, and content that does
+//     not match the digest is not stored and an error is returned;
+//   - what is stored by tag is only the tag → digest mapping, keyed with the client's Accept, and it is
+//     confirmed again with a HEAD after it expires (30 seconds by default);
+//   - when the upstream fails (429, 5xx, unreachable, circuit breaker open), the expired tag mapping can still
+//     be used for a while (6 hours by default);
+//   - a 404 is remembered for a short time (15 seconds by default), so clients that keep requesting a missing
+//     image do not hit the upstream every time.
 package manifest
 
 import (
@@ -29,10 +35,11 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/upstream"
 )
 
-// MaxSize 是单个 manifest 的上限（OCI distribution 规范要求 registry 至少支持 4 MiB）。
+// MaxSize is the size limit of a single manifest (the OCI distribution spec requires registries to support at
+// least 4 MiB).
 const MaxSize = 4 << 20
 
-// Manifest 是一份按 digest 缓存的 manifest。
+// Manifest is a manifest cached by digest.
 type Manifest struct {
 	Body      []byte
 	MediaType string
@@ -40,7 +47,7 @@ type Manifest struct {
 	Stored    time.Time
 }
 
-// TagRef 是 tag 指向的 manifest，HEAD 时可以不取正文直接回答。
+// TagRef is the manifest a tag points to; a HEAD can be answered from it without fetching the body.
 type TagRef struct {
 	Digest    string
 	MediaType string
@@ -48,13 +55,15 @@ type TagRef struct {
 	Stored    time.Time
 }
 
-// Outcome 是一次解析的结果，调用方据此写响应。各字段只有一组有值：
-//   - Manifest：有正文（GET）；HEAD 时也可以用它回答。
-//   - Head：只有元数据，回答 HEAD。
-//   - NotFound：上游说不存在（或要求认证），回答 404。
-//   - Status：上游返回了错误状态（Body 可能为空）。
-//   - Err：网络错误、熔断等。
-//   - Bypass：缓存处理不了（例如上游 HEAD 不给 digest、重定向要交给客户端），调用方按普通请求转发。
+// Outcome is the result of a resolution, from which the caller writes the response. Only one group of fields
+// is set:
+//   - Manifest: has a body (GET); a HEAD can also be answered from it.
+//   - Head: metadata only, answers a HEAD.
+//   - NotFound: the upstream says it does not exist (or requires authentication), answer 404.
+//   - Status: the upstream returned an error status (Body may be empty).
+//   - Err: network error, open circuit breaker and so on.
+//   - Bypass: the cache cannot handle it (for example the upstream HEAD gives no digest, or a redirect has to
+//     be passed to the client), and the caller forwards it as an ordinary request.
 type Outcome struct {
 	Manifest   *Manifest
 	Head       *TagRef
@@ -65,37 +74,37 @@ type Outcome struct {
 	RetryAfter string
 	Err        error
 	Bypass     bool
-	Cache      string   // hit、miss、revalidated、stale、negative，写进访问日志
-	Hops       []string // 服务端跟随的跳转
+	Cache      string   // hit, miss, revalidated, stale or negative, written to the access log
+	Hops       []string // redirects followed on the server side
 }
 
-// Stats 是累计的计数。
+// Stats holds cumulative counters.
 type Stats struct {
 	Hits, Misses, Revalidations, Stale, Negative, Bypass uint64
 	Bytes                                                int64
 	Entries                                              int
 }
 
-// Fetcher 是上游，测试里可以替换。
+// Fetcher is the upstream; tests can replace it.
 type Fetcher interface {
 	Fetch(ctx context.Context, r upstream.Request) (*upstream.Response, error)
 }
 
-// Cache 并发安全。
+// Cache is safe for concurrent use.
 type Cache struct {
 	cfg      config.Cache
 	digests  *lru.Cache[string, *Manifest]
 	tags     *lru.Cache[string, TagRef]
 	negative *lru.Cache[string, time.Time]
 	sf       singleflight.Group
-	sem      chan struct{} // 同时在缓冲的 manifest 正文数
+	sem      chan struct{} // number of manifest bodies being buffered at once
 	timeout  time.Duration
 	now      func() time.Time
 
 	hits, misses, revalidations, stale, negHits, bypass atomic.Uint64
 }
 
-// New 创建缓存。cfg.MaxBytes 为 0 时返回 nil，调用方应直接转发。
+// New creates a cache. When cfg.MaxBytes is 0 it returns nil, and the caller should forward directly.
 func New(cfg config.Cache, maxBuffers int, fetchTimeout time.Duration) *Cache {
 	if cfg.MaxBytes <= 0 {
 		return nil
@@ -114,7 +123,7 @@ func New(cfg config.Cache, maxBuffers int, fetchTimeout time.Duration) *Cache {
 	}
 }
 
-// Stats 返回计数。
+// Stats returns the counters.
 func (c *Cache) Stats() Stats {
 	if c == nil {
 		return Stats{}
@@ -126,7 +135,8 @@ func (c *Cache) Stats() Stats {
 	}
 }
 
-// CanonicalAccept 把客户端的 Accept 整理成稳定的键：去掉参数、转小写、去重排序。
+// CanonicalAccept turns the client's Accept into a stable key: parameters removed, lower case, deduplicated
+// and sorted.
 func CanonicalAccept(values []string) string {
 	seen := map[string]bool{}
 	var out []string
@@ -151,16 +161,16 @@ func isSHA256(d string) bool {
 	return err == nil && strings.ToLower(d) == d
 }
 
-// Request 是一次 manifest 请求。
+// Request is a manifest request.
 type Request struct {
 	Upstream string
 	Repo     string
-	Ref      string // tag 或 digest
+	Ref      string // tag or digest
 	Head     bool
-	Accept   []string // 客户端的 Accept 原值
+	Accept   []string // the client's original Accept values
 }
 
-// Resolve 按缓存规则解析一次 manifest 请求。
+// Resolve resolves a manifest request according to the caching rules.
 func (c *Cache) Resolve(ctx context.Context, up Fetcher, r Request) Outcome {
 	accept := CanonicalAccept(r.Accept)
 	if strings.Contains(r.Ref, ":") {
@@ -198,7 +208,7 @@ func (c *Cache) Resolve(ctx context.Context, up Fetcher, r Request) Outcome {
 	case s == http.StatusOK:
 		dg := resp.Header.Get("Docker-Content-Digest")
 		if !isSHA256(dg) {
-			// 上游的 HEAD 不给 digest（或不是 sha256）：缓存不了，按普通请求转发
+			// The upstream HEAD gives no digest (or not a sha256 one): cannot cache, forward as an ordinary request
 			c.bypass.Add(1)
 			return Outcome{Bypass: true}
 		}
@@ -207,7 +217,7 @@ func (c *Cache) Resolve(ctx context.Context, up Fetcher, r Request) Outcome {
 		c.revalidations.Add(1)
 		return c.fromTag(ctx, up, r, accept, tr, "revalidated", resp.Hops)
 	case s == http.StatusNotFound || s == http.StatusUnauthorized:
-		// Docker Hub 对不存在的仓库返回 401：一样当作不存在
+		// Docker Hub returns 401 for repositories that do not exist: treat it as not found too
 		c.negative.Add(base, c.now(), 0)
 		return Outcome{NotFound: true, Cache: "miss", Hops: resp.Hops}
 	case s == http.StatusTooManyRequests || s >= 500:
@@ -222,7 +232,7 @@ func (c *Cache) Resolve(ctx context.Context, up Fetcher, r Request) Outcome {
 	}
 }
 
-// fromTag：tag 已经对应到 digest，再按 digest 取正文（HEAD 时有元数据就够了）。
+// fromTag: the tag has been mapped to a digest; fetch the body by digest (for a HEAD the metadata is enough).
 func (c *Cache) fromTag(ctx context.Context, up Fetcher, r Request, accept string, tr TagRef, how string, hops []string) Outcome {
 	if m, ok := c.getDigest(r.Upstream, r.Repo, tr.Digest); ok {
 		if how == "hit" {
@@ -232,7 +242,7 @@ func (c *Cache) fromTag(ctx context.Context, up Fetcher, r Request, accept strin
 	}
 	if r.Head {
 		if tr.Size < 0 {
-			// 不知道大小就回答不了 HEAD，也不能为 HEAD 去 GET：按普通请求转发
+			// Without the size a HEAD cannot be answered, and a HEAD must not cause a GET: forward as an ordinary request
 			c.bypass.Add(1)
 			return Outcome{Bypass: true}
 		}
@@ -261,7 +271,8 @@ func (c *Cache) byDigest(ctx context.Context, up Fetcher, r Request, accept stri
 		return Outcome{Manifest: m, Cache: "hit"}
 	}
 	if r.Head {
-		// 客户端只发了 HEAD：不能为它向上游发 GET（GET 才计 Docker Hub 次数），按普通请求转发
+		// The client only sent a HEAD: do not send a GET upstream for it (only GETs count against Docker Hub's
+		// quota), forward as an ordinary request
 		c.bypass.Add(1)
 		return Outcome{Bypass: true}
 	}
@@ -282,9 +293,9 @@ func (c *Cache) getDigest(upName, repo, dg string) (*Manifest, bool) {
 }
 
 var (
-	errTooLarge = errors.New("manifest 超过 4 MiB")
-	errMismatch = errors.New("manifest 的内容和 digest 不符")
-	errPass     = errors.New("上游要求客户端直连")
+	errTooLarge = errors.New("manifest exceeds 4 MiB")
+	errMismatch = errors.New("manifest content does not match digest")
+	errPass     = errors.New("upstream requires a direct connection from the client")
 )
 
 type statusError struct {
@@ -294,15 +305,16 @@ type statusError struct {
 	retryAfter string
 }
 
-func (e *statusError) Error() string { return "上游返回 " + http.StatusText(e.status) }
+func (e *statusError) Error() string { return "upstream returned " + http.StatusText(e.status) }
 
 type fetched struct {
 	m    *Manifest
 	hops []string
 }
 
-// fetch 按 digest GET 一次，校验后存入缓存。并发的同一请求合并成一次，并且和发起它的客户端连接脱钩：
-// 第一个客户端断开，不应让等着同一个 manifest 的其他请求一起失败。
+// fetch performs one GET by digest, verifies it and stores it in the cache. Concurrent identical requests are
+// merged into one that is detached from the client connection that started it: if the first client
+// disconnects, the other requests waiting for the same manifest must not fail with it.
 func (c *Cache) fetch(ctx context.Context, up Fetcher, r Request, dg string) Outcome {
 	key := r.Upstream + "\x00" + r.Repo + "\x00" + dg
 	v, err, _ := c.sf.Do(key, func() (any, error) {
@@ -362,7 +374,7 @@ func (c *Cache) fetch(ctx context.Context, up Fetcher, r Request, dg string) Out
 	return Outcome{Manifest: f.m, Cache: "miss", Hops: f.hops}
 }
 
-// IsTooLarge、IsMismatch 让调用方区分这两种不能转发的情况。
+// IsTooLarge and IsMismatch let the caller tell apart these two cases that cannot be relayed.
 func IsTooLarge(err error) bool { return errors.Is(err, errTooLarge) }
 func IsMismatch(err error) bool { return errors.Is(err, errMismatch) }
 
@@ -379,6 +391,6 @@ func acceptHeader(values []string) http.Header {
 	return h
 }
 
-// DefaultAccept 是客户端没带 Accept 时向上游要 manifest 用的值。
+// DefaultAccept is the Accept used to request a manifest from the upstream when the client sends none.
 const DefaultAccept = "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, " +
 	"application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"

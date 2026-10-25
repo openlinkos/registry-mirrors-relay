@@ -17,23 +17,24 @@ import (
 //go:embed templates
 var templateFS embed.FS
 
-// view 是交给模板的数据：页面自己的数据在 Data，其余是版式要用的。
+// view is the data handed to the templates: the page's own data is in Data, the rest is used by the
+// layout.
 type view struct {
 	c *ctx
 	h *Handler
 
 	Title  string
-	Nav    string // 侧栏里高亮的页面
+	Nav    string // the page highlighted in the sidebar
 	Crumbs []crumb
-	Bare   bool // 登录、重新输入口令：表单在品牌面板旁边，没有侧栏
+	Bare   bool // login, re-authentication: the form sits next to the brand panel, without the sidebar
 	Data   any
 	Notice string
-	Body   template.HTML // 先渲染好的页面正文，由版式放进去
+	Body   template.HTML // the page body, rendered first and inserted by the layout
 }
 
 type crumb struct{ Label, Href string }
 
-// T 翻译界面文案。参数成对给出：名字、值，替换文案里的 {名字}。
+// T translates interface text. Arguments come in pairs, name and value, and replace {name} in the text.
 func (v *view) T(key string, args ...any) string { return tr(v.c.lang, key, args...) }
 
 func (v *view) Lang() string     { return v.c.lang }
@@ -60,19 +61,21 @@ func (v *view) Version() string          { return version.Version }
 func (v *view) Writable() bool           { return v.h.app.Store.Writable() }
 func (v *view) IsAdmin() bool            { return v.c.sess != nil && v.c.sess.Role == "admin" }
 
-// CanWrite：admin 角色，并且运营数据可写。
+// CanWrite: the admin role, and the operational data is writable.
 func (v *view) CanWrite() bool { return v.IsAdmin() && v.Writable() }
 
-// CanEditConfig：能在后台改配置（admin 角色、运营数据可写、没有写 admin.config_edit: false）。
+// CanEditConfig: the configuration can be changed in the console (admin role, operational data
+// writable, and no admin.config_edit: false).
 func (v *view) CanEditConfig() bool { return v.h.canEditConfig(v.c) }
 
-// FormErr 是表单出错时的说明。
+// FormErr is the explanation shown when a form has an error.
 func (v *view) FormErr() string { return v.c.formErr }
 
-// Warns 是保存成功后要提醒的事（例如后台改的配置带来的新提醒）。
+// Warns are the things to point out after a successful save (for example new warnings caused by a
+// console override).
 func (v *view) Warns() []string { return v.c.warnings }
 
-// F 是表单出错重新渲染时用户填过的值。
+// F is the value the user filled in, when a form is re-rendered after an error.
 func (v *view) F(name string) string {
 	if v.c.form == nil {
 		return ""
@@ -80,7 +83,7 @@ func (v *view) F(name string) string {
 	return v.c.form.Get(name)
 }
 
-// Q 是查询参数。
+// Q is a query parameter.
 func (v *view) Q(name string) string { return v.c.r.URL.Query().Get(name) }
 
 type navItem struct {
@@ -93,10 +96,10 @@ type navGroup struct {
 	Items []navItem
 }
 
-// navTable 是侧栏：按任务分组的页面。
+// navTable is the sidebar: pages grouped by task.
 var navTable = []struct {
 	label string
-	items [][3]string // 键、路径、图标
+	items [][3]string // key, path, icon
 }{
 	{"", [][3]string{{"overview", "/admin/", "layout-dashboard"}}},
 	{"nav.groupService", [][3]string{{"upstreams", "/admin/upstreams", "server"}, {"usage", "/admin/usage", "plug"}}},
@@ -120,7 +123,7 @@ func (v *view) NavGroups() []navGroup {
 	return out
 }
 
-// Group 是当前页面所在的侧栏分组，放在面包屑最前面。
+// Group is the sidebar group of the current page, placed first in the breadcrumbs.
 func (v *view) Group() string {
 	for _, g := range navTable {
 		for _, it := range g.items {
@@ -132,7 +135,7 @@ func (v *view) Group() string {
 	return ""
 }
 
-// ---- 模板函数
+// ---- Template functions
 
 var funcs = template.FuncMap{
 	"icon":  icon,
@@ -147,7 +150,7 @@ var funcs = template.FuncMap{
 	"tone":  statusTone,
 	"str":   func(v any) string { return fmt.Sprint(v) },
 	"list":  func(s ...string) []string { return s },
-	// 近 24 小时的条图
+	// Strips covering the last 24 hours
 	"hours":     hoursStrip,
 	"ratios":    ratioStrip,
 	"hoursPct":  hoursPct,
@@ -157,8 +160,9 @@ var funcs = template.FuncMap{
 	},
 }
 
-// parseTemplates 把版式、组件和全部页面放进同一个模板集：每个页面文件里的 {{define "content"}} 改名为
-// "page/<文件名>"。html/template 对每个模板只做一次转义分析，共用的版式和组件也只存一份。
+// parseTemplates puts the layout, the components and every page into one template set: the
+// {{define "content"}} in each page file is renamed to "page/<file name>". html/template analyses the
+// escaping of each template only once, and the shared layout and components are stored only once.
 func parseTemplates() (*template.Template, error) {
 	t, err := template.New("base").Funcs(funcs).ParseFS(templateFS, "templates/base.html")
 	if err != nil {
@@ -203,7 +207,7 @@ func dict(kv ...any) (map[string]any, error) {
 	return m, nil
 }
 
-// fmtBytes 用二进制单位：1.5 GiB。
+// fmtBytes uses binary units: 1.5 GiB.
 func fmtBytes(v any) string {
 	var n float64
 	switch x := v.(type) {
@@ -232,7 +236,7 @@ func fmtBytes(v any) string {
 	return strconv.FormatFloat(n, 'f', prec, 64) + " " + units[i]
 }
 
-// fmtNum 加千位分隔：12,345。小数保留两位。
+// fmtNum adds thousands separators: 12,345. Fractions keep two decimal places.
 func fmtNum(v any) string {
 	var s string
 	switch x := v.(type) {
@@ -266,7 +270,7 @@ func fmtNum(v any) string {
 	return b.String()
 }
 
-// fmtPct 是 part/total 的百分比，total 为 0 时是 —。
+// fmtPct is part/total as a percentage, or — when total is 0.
 func fmtPct(part, total any) string {
 	p, t := toFloat(part), toFloat(total)
 	if t == 0 {
@@ -289,7 +293,7 @@ func toFloat(v any) float64 {
 	return 0
 }
 
-// fmtSecs 显示耗时：秒数或 time.Duration。
+// fmtSecs shows a duration: a number of seconds or a time.Duration.
 func fmtSecs(v any) string {
 	var d time.Duration
 	switch x := v.(type) {
@@ -309,16 +313,17 @@ func fmtSecs(v any) string {
 	return d.Round(time.Second).String()
 }
 
-// timeTag 是一个 <time>：服务端写 UTC，脚本改成浏览器的时区。零值显示为 —。
+// timeTag is a <time>: the server writes UTC and the script converts it to the browser's time zone. The
+// zero value is shown as —.
 func timeTag(t time.Time) template.HTML {
 	if t.IsZero() {
 		return "—"
 	}
 	u := t.UTC()
-	return template.HTML(`<time datetime="` + u.Format(time.RFC3339) + `">` + u.Format("2006-01-02 15:04") + ` UTC</time>`) //nolint:gosec // 只有格式化好的时间
+	return template.HTML(`<time datetime="` + u.Format(time.RFC3339) + `">` + u.Format("2006-01-02 15:04") + ` UTC</time>`) //nolint:gosec // only the formatted time
 }
 
-// statusTone 是 HTTP 状态码对应的徽章颜色。
+// statusTone is the badge colour for an HTTP status code.
 func statusTone(status int) string {
 	switch {
 	case status >= 500:
@@ -331,11 +336,11 @@ func statusTone(status int) string {
 	return "success"
 }
 
-// Dur 是一段时长的写法。
+// Dur is the written form of a duration.
 func (v *view) Dur(d time.Duration) string { return fmtDur(v.c.lang, d) }
 
-// Ago 是现在距 t 多久。
+// Ago is how long ago t was.
 func (v *view) Ago(t time.Time) string { return ago(v.c.lang, v.c.now, t) }
 
-// Now 是这次请求的时间。
+// Now is the time of this request.
 func (v *view) Now() time.Time { return v.c.now }

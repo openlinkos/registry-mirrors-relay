@@ -22,7 +22,7 @@ func hash(t *testing.T, pw string) []byte {
 
 func TestParseHtpasswd(t *testing.T) {
 	h := string(hash(t, "pw"))
-	users, err := ParseHtpasswd(strings.NewReader("# 注释\n\nalice:" + h + "\nbob:" + strings.Replace(h, "$2a$", "$2y$", 1) + "\n"))
+	users, err := ParseHtpasswd(strings.NewReader("# comment\n\nalice:" + h + "\nbob:" + strings.Replace(h, "$2a$", "$2y$", 1) + "\n"))
 	if err != nil || len(users) != 2 || users[0].Name != "alice" || users[0].Source != "config" {
 		t.Fatalf("%v %v", users, err)
 	}
@@ -34,7 +34,7 @@ func TestParseHtpasswd(t *testing.T) {
 		"alice:" + h + "\nalice:" + h,
 	} {
 		if _, err := ParseHtpasswd(strings.NewReader(bad)); err == nil {
-			t.Errorf("应拒绝：%q", bad)
+			t.Errorf("should reject: %q", bad)
 		}
 	}
 }
@@ -44,31 +44,31 @@ func TestVerifyAndCache(t *testing.T) {
 	u := &User{Name: "alice", Hash: hash(t, "correct horse")}
 	ok, err := a.Verify(u, "correct horse")
 	if !ok || err != nil {
-		t.Fatal("正确的口令应通过")
+		t.Fatal("the correct password should pass")
 	}
 	if ok, _ := a.Verify(u, "wrong"); ok {
-		t.Fatal("错误的口令不应通过")
+		t.Fatal("a wrong password should not pass")
 	}
 	if ok, _ := a.Verify(nil, "x"); ok {
-		t.Fatal("不存在的用户不应通过")
+		t.Fatal("a nonexistent user should not pass")
 	}
 	if ok, _ := a.Verify(&User{Name: "alice", Hash: u.Hash, Disabled: true}, "correct horse"); ok {
-		t.Fatal("停用的用户不应通过")
+		t.Fatal("a disabled user should not pass")
 	}
-	// 缓存命中：不再跑 bcrypt。把信号量占满，命中缓存仍能通过
+	// Cache hit: bcrypt does not run again. With the semaphore full, a cache hit still passes
 	for i := 0; i < cap(a.sem); i++ {
 		a.sem <- struct{}{}
 	}
 	if ok, err := a.Verify(u, "correct horse"); !ok || err != nil {
-		t.Fatalf("缓存命中时不需要 bcrypt：%v %v", ok, err)
+		t.Fatalf("a cache hit should not need bcrypt: %v %v", ok, err)
 	}
 	if _, err := a.Verify(u, "other"); !errors.Is(err, ErrBusy) {
-		t.Fatalf("bcrypt 名额用完时应返回 ErrBusy：%v", err)
+		t.Fatalf("should return ErrBusy when no bcrypt slot is free: %v", err)
 	}
-	// 换了哈希，缓存自然失效
+	// A different hash invalidates the cache naturally
 	u2 := &User{Name: "alice", Hash: hash(t, "correct horse")}
 	if _, err := a.Verify(u2, "correct horse"); !errors.Is(err, ErrBusy) {
-		t.Fatal("哈希变了不应命中旧缓存")
+		t.Fatal("a changed hash should not hit the old cache")
 	}
 }
 
@@ -83,11 +83,11 @@ func TestIPRules(t *testing.T) {
 	} {
 		ok, reason := r.Decide(netip.MustParseAddr(ip), now)
 		if reason != want || ok != (want == "") {
-			t.Errorf("%s：期望 %q，实际 %v %q", ip, want, ok, reason)
+			t.Errorf("%s: want %q, got %v %q", ip, want, ok, reason)
 		}
 	}
 	if ok, _ := (*IPRules)(nil).Decide(netip.MustParseAddr("1.1.1.1"), now); !ok {
-		t.Fatal("nil 规则应放行")
+		t.Fatal("nil rules should allow")
 	}
 }
 
@@ -103,34 +103,34 @@ func TestImagePatterns(t *testing.T) {
 	for p, want := range cases {
 		re, err := CompileImagePattern(p)
 		if err != nil {
-			t.Fatalf("%s：%v", p, err)
+			t.Fatalf("%s: %v", p, err)
 		}
 		for name, w := range want {
 			if got := re.MatchString(name); got != w {
-				t.Errorf("%s 匹配 %s：期望 %v，实际 %v（%s）", p, name, w, got, re)
+				t.Errorf("%s matching %s: want %v, got %v (%s)", p, name, w, got, re)
 			}
 		}
 	}
 	for _, bad := range []string{"nginx", "**/x", "docker.io//x"} {
 		if _, err := CompileImagePattern(bad); err == nil {
-			t.Errorf("应拒绝 %q", bad)
+			t.Errorf("should reject %q", bad)
 		}
 	}
 }
 
 func TestImageRules(t *testing.T) {
-	r, err := NewImageRules([]string{"docker.io/library/*", "ghcr.io/**"}, []ImageRule{{Pattern: "ghcr.io/evil/**", Status: 451, Message: "投诉屏蔽"}})
+	r, err := NewImageRules([]string{"docker.io/library/*", "ghcr.io/**"}, []ImageRule{{Pattern: "ghcr.io/evil/**", Status: 451, Message: "blocked after a complaint"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ok, _, _, _ := r.Decide("docker.io/library/nginx"); !ok {
-		t.Fatal("白名单内应放行")
+		t.Fatal("an allowlisted image should be allowed")
 	}
-	if ok, st, msg, rule := r.Decide("ghcr.io/evil/x"); ok || st != 451 || msg != "投诉屏蔽" || rule != "ghcr.io/evil/**" {
-		t.Fatalf("黑名单优先：%v %d %q %q", ok, st, msg, rule)
+	if ok, st, msg, rule := r.Decide("ghcr.io/evil/x"); ok || st != 451 || msg != "blocked after a complaint" || rule != "ghcr.io/evil/**" {
+		t.Fatalf("the deny list takes precedence: %v %d %q %q", ok, st, msg, rule)
 	}
 	if ok, st, _, _ := r.Decide("quay.io/x/y"); ok || st != 403 {
-		t.Fatal("有白名单时，不在白名单里的应拒绝")
+		t.Fatal("with an allowlist, images not on it should be denied")
 	}
 }
 

@@ -13,29 +13,32 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// Result 是加载的结果：生效的配置，以及不影响启动、但应该提醒的地方。
+// Result is the outcome of loading: the effective configuration, and things that do not prevent startup but
+// deserve a warning.
 type Result struct {
 	Config   *Config
 	Warnings []string
 }
 
-// Load 读取配置文件，在默认值和内置上游的基础上合并，校验并解析密钥。
-// 校验失败时一次返回所有错误。
+// Load reads the configuration file, merges it on top of the defaults and the built-in upstreams, validates it
+// and resolves secrets. When validation fails, all errors are returned at once.
 func Load(path string) (*Result, error) {
-	b, err := os.ReadFile(path) //nolint:gosec // 配置文件路径由运维指定
+	b, err := os.ReadFile(path) //nolint:gosec // the configuration file path is chosen by the operator
 	if err != nil {
 		return nil, err
 	}
 	return Parse(b)
 }
 
-// LoadDefaults 不读文件，只用默认值（没有配置文件时用，例如 docker run 直接起来）。
+// LoadDefaults reads no file and uses only the defaults (for when there is no configuration file, such as a
+// plain docker run).
 func LoadDefaults() (*Result, error) { return Parse(nil) }
 
-// Parse 解析配置内容。空内容等于只用默认值。
+// Parse parses configuration content. Empty content means defaults only.
 func Parse(b []byte) (*Result, error) { return ParseWithOverrides(b, nil) }
 
-// ParseWithOverrides 解析配置内容，再叠加后台对配置的修改（见 Override），和 Parse 一样合并默认值、校验、解析密钥。
+// ParseWithOverrides parses configuration content and applies the console overrides on top (see Override); like
+// Parse, it merges the defaults, validates and resolves secrets.
 func ParseWithOverrides(b []byte, ovs []Override) (*Result, error) {
 	cfg := Defaults()
 	userUpstreams := map[string][]byte{}
@@ -61,7 +64,8 @@ func ParseWithOverrides(b []byte, ovs []Override) (*Result, error) {
 		return nil, err
 	}
 	if len(top.Content) > 0 {
-		// upstreams 单独处理：每个上游在内置定义的基础上覆盖字段，不能整个替换
+		// upstreams are handled separately: each upstream overrides fields of the built-in definition and
+		// cannot replace it as a whole
 		for i := 0; i+1 < len(top.Content); i += 2 {
 			if top.Content[i].Value != "upstreams" {
 				continue
@@ -111,26 +115,30 @@ func ParseWithOverrides(b []byte, ovs []Override) (*Result, error) {
 	return res, nil
 }
 
-// applyEnv：容器里不改配置文件也能指定第一个管理员（RELAY_ADMIN_PASSWORD_FILE，用户名默认 admin，
-// 可用 RELAY_ADMIN_USERNAME 改）。只接受口令文件，也就是 Docker、Compose、k8s 的 secret；不提供直接写口令的
-// 环境变量：那样口令会出现在 docker inspect、进程环境和编排文件里。配置里写了 initial_admin 时以配置为准。
+// applyEnv lets a container set the first administrator without changing the configuration file
+// (RELAY_ADMIN_PASSWORD_FILE; the user name defaults to admin and can be changed with RELAY_ADMIN_USERNAME). Only
+// a password file is accepted, that is, a Docker, Compose or k8s secret; there is no environment variable for the
+// password itself, as the password would then show up in docker inspect, the process environment and
+// orchestration files. When the configuration sets initial_admin, the configuration wins.
 //
-// 口令文件只在创建第一个管理员时用一次，用完应该删掉；所以文件不存在时只提醒、不报错，免得删了文件以后
-// 因为环境变量还在而起不来。
+// The password file is used only once, to create the first administrator, and should be deleted afterwards; so a
+// missing file only gives a warning, not an error, so that the service still starts after the file is deleted
+// while the environment variable remains.
 func applyEnv(c *Config) (warning string) {
 	f := os.Getenv("RELAY_ADMIN_PASSWORD_FILE")
 	if f == "" || c.Admin.InitialAdmin.Username != "" {
 		return ""
 	}
-	if _, err := os.Stat(f); err != nil { //nolint:gosec // 路径由运维在环境变量里指定
+	if _, err := os.Stat(f); err != nil { //nolint:gosec // the path is set by the operator in an environment variable
 		return "RELAY_ADMIN_PASSWORD_FILE 指向的 " + f + " 读不到，忽略（第一个管理员建好后可以把这个环境变量也删掉）"
 	}
 	c.Admin.InitialAdmin = InitialAdmin{Username: cmp.Or(os.Getenv("RELAY_ADMIN_USERNAME"), "admin"), Password: Secret{File: f}, FromEnv: true}
 	return ""
 }
 
-// checkRemoved 处理 v0.2.0 去掉的键：写了值就报错并说明改法；空值（本来就表示不开）只提醒，并从节点树里删掉，
-// 免得严格解码时报成「未知字段」。
+// checkRemoved handles the keys removed in v0.2.0: a value is an error that explains what to write instead; an
+// empty value (which meant off anyway) only gives a warning and is deleted from the node tree, so that strict
+// decoding does not report it as an unknown field.
 func checkRemoved(top *yaml.Node) (warnings []string, err error) {
 	var errs []error
 	for i := 0; i+1 < len(top.Content); i += 2 {
@@ -177,7 +185,7 @@ func checkRemoved(top *yaml.Node) (warnings []string, err error) {
 	return warnings, nil
 }
 
-// strictDecode 不认识的字段直接报错，避免拼错的配置项被悄悄忽略。
+// strictDecode fails on unknown fields, so that misspelt settings are not silently ignored.
 func strictDecode(b []byte, out any) error {
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	dec.KnownFields(true)
@@ -207,7 +215,7 @@ func mergeUpstreams(user map[string][]byte) (map[string]*Upstream, error) {
 	return ups, nil
 }
 
-// normalize 统一大小写，并补上依赖其他字段的默认值。
+// normalize normalises case and fills in the defaults that depend on other fields.
 func normalize(c *Config) {
 	normalizeEntrances(c.Entrances)
 	for _, u := range c.Upstreams {
@@ -242,7 +250,7 @@ func normalize(c *Config) {
 	}
 }
 
-// normalizeEntrances 统一入口的大小写，补上默认值。
+// normalizeEntrances normalises the case of the entrances and fills in defaults.
 func normalizeEntrances(es []Entrance) {
 	for i := range es {
 		e := &es[i]
@@ -271,7 +279,7 @@ func normalizeEntrances(es []Entrance) {
 	}
 }
 
-// entranceHosts 是各入口里写明的域名（不含 *），去重后按字母排序。
+// entranceHosts returns the domains named in the entrances (excluding *), deduplicated and sorted alphabetically.
 func entranceHosts(c *Config) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -334,7 +342,7 @@ func joinErrors(errs []error) error {
 	return errors.New(sb.String())
 }
 
-// Print 输出生效的配置（YAML），密钥只显示来源。
+// Print outputs the effective configuration (YAML), showing only the source of each secret.
 func (c *Config) Print() ([]byte, error) {
 	type printable struct {
 		Config    `yaml:",inline"`

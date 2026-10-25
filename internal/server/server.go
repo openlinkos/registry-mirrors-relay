@@ -1,4 +1,5 @@
-// Package server 负责监听、TLS 和优雅退出。请求怎么处理由 Handler 决定。
+// Package server takes care of listening, TLS and graceful shutdown. How requests are handled is up to the
+// Handler.
 package server
 
 import (
@@ -16,28 +17,29 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
 )
 
-// Listener 是拉取入口以外的监听（管理后台、指标）。
+// Listener is a listener other than the pull entrance (admin console, metrics).
 type Listener struct {
 	Name    string
 	Addr    string
 	Handler http.Handler
 }
 
-// Server 管理拉取入口和其他监听。
+// Server manages the pull entrance and the other listeners.
 type Server struct {
 	cfg     *config.Config
 	log     *slog.Logger
 	handler http.Handler
 	extras  []Listener
 	ready   atomic.Bool
-	// acmeHosts 返回现在要放行的 ACME 域名，为 nil 时用 cfg 里的
+	// acmeHosts returns the ACME domains to allow right now; when nil, the ones in cfg are used
 	acmeHosts func() []string
 
 	mu    sync.Mutex
-	bound []string // 实际监听的地址，监听 :0 时能拿到端口
+	bound []string // actual listen addresses, which give the port when listening on :0
 }
 
-// New 创建 Server。handler 处理拉取入口上 /healthz、/readyz 以外的所有请求；extras 是其他监听，地址为空的忽略。
+// New creates a Server. handler handles all requests on the pull entrance other than /healthz and /readyz;
+// extras are the other listeners, and those with an empty address are ignored.
 func New(cfg *config.Config, log *slog.Logger, handler http.Handler, extras ...Listener) *Server {
 	s := &Server{cfg: cfg, log: log, handler: handler}
 	for _, l := range extras {
@@ -48,12 +50,14 @@ func New(cfg *config.Config, log *slog.Logger, handler http.Handler, extras ...L
 	return s
 }
 
-// ACMEHosts 让 ACME 按 f 返回的域名放行（生效的配置里的 tls.acme.hosts），入口改了不用重启。Run 之前调用。
+// ACMEHosts makes ACME allow the domains f returns (tls.acme.hosts in the effective configuration), so
+// changing entrances needs no restart. Call it before Run.
 func (s *Server) ACMEHosts(f func() []string) { s.acmeHosts = f }
 
-// ServeHTTP 先处理探活，其余交给 handler。
-//   - /healthz：进程在就返回 200，给 liveness 和外部监控用。
-//   - /readyz：开始退出后返回 503，让 k8s 先把流量摘掉。它不检查上游：上游故障时 pod 不应全部变成未就绪。
+// ServeHTTP handles the probes first and passes everything else to handler.
+//   - /healthz: returns 200 as long as the process is up, for liveness and external monitoring.
+//   - /readyz: returns 503 once shutdown starts, so k8s removes the traffic first. It does not check
+//     upstreams: an upstream outage should not make every pod unready.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/healthz":
@@ -81,7 +85,7 @@ func writeProbe(w http.ResponseWriter, code int) {
 	}
 }
 
-// Addrs 是需要监听的拉取入口地址：listen.http 和 listen.https。
+// Addrs are the pull entrance addresses to listen on: listen.http and listen.https.
 func (s *Server) Addrs() []string {
 	var out []string
 	for _, a := range []string{s.cfg.Listen.HTTP, s.cfg.Listen.HTTPS} {
@@ -92,8 +96,8 @@ func (s *Server) Addrs() []string {
 	return out
 }
 
-// Run 打开所有监听，直到 ctx 结束，然后优雅退出：
-// 先让 /readyz 返回 503，停止接受新连接，已有的请求最多等 timeouts.shutdown_grace。
+// Run opens all listeners until ctx is done, then shuts down gracefully: /readyz returns 503 first, new
+// connections stop being accepted, and in-flight requests get at most timeouts.shutdown_grace.
 func (s *Server) Run(ctx context.Context) error {
 	t := s.cfg.Timeouts
 	tlsConf, acmeWrap, err := tlsSetup(s.cfg, s.log, s.acmeHosts)
@@ -111,12 +115,12 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 	var plans []plan
 	for _, addr := range s.Addrs() {
-		p := plan{name: "拉取入口", addr: addr, h: s}
+		p := plan{name: "pull entrance", addr: addr, h: s}
 		switch {
 		case addr == s.cfg.Listen.HTTPS && tlsConf != nil:
-			p.name, p.tls = "拉取入口（HTTPS）", true
+			p.name, p.tls = "pull entrance (HTTPS)", true
 		case addr == s.cfg.Listen.HTTP && acmeWrap != nil:
-			p.h = acmeWrap(s) // ACME 的 HTTP-01 验证，其余请求照常处理
+			p.h = acmeWrap(s) // ACME HTTP-01 validation; other requests are handled as usual
 		}
 		plans = append(plans, p)
 	}
@@ -130,7 +134,7 @@ func (s *Server) Run(ctx context.Context) error {
 			for _, l := range listeners {
 				_ = l.Close()
 			}
-			return fmt.Errorf("监听 %s：%w", addr, err)
+			return fmt.Errorf("listen on %s: %w", addr, err)
 		}
 		listeners = append(listeners, ln)
 		s.mu.Lock()
@@ -148,7 +152,8 @@ func (s *Server) Run(ctx context.Context) error {
 			ReadHeaderTimeout: t.ReadHeader.D(),
 			IdleTimeout:       t.Idle.D(),
 			MaxHeaderBytes:    32 << 10,
-			// 不设 WriteTimeout：大层可以下载很久，写空闲超时由转发逻辑按每次写设置
+			// No WriteTimeout: large layers can take a long time to download; the relay logic sets a write idle
+			// timeout on every write
 			ErrorLog: slog.NewLogLogger(s.log.Handler(), slog.LevelWarn),
 		})
 	}
@@ -159,15 +164,15 @@ func (s *Server) Run(ctx context.Context) error {
 		wg.Add(1)
 		go func(srv *http.Server, ln net.Listener, name string, withTLS bool) {
 			defer wg.Done()
-			s.log.Info(name+"开始监听", "addr", ln.Addr().String())
+			s.log.Info(name+" listening", "addr", ln.Addr().String())
 			var err error
 			if withTLS {
-				err = srv.ServeTLS(ln, "", "") // 证书来自 TLSConfig；会自动启用 HTTP/2
+				err = srv.ServeTLS(ln, "", "") // certificates come from TLSConfig; HTTP/2 is enabled automatically
 			} else {
 				err = srv.Serve(ln)
 			}
 			if err != nil && !errors.Is(err, http.ErrServerClosed) {
-				errc <- fmt.Errorf("%s：%w", ln.Addr(), err)
+				errc <- fmt.Errorf("%s: %w", ln.Addr(), err)
 			}
 		}(srv, listeners[i], names[i], tlsOn[i])
 	}
@@ -180,12 +185,12 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	s.ready.Store(false)
-	s.log.Info("开始退出，等待进行中的请求", "grace", t.ShutdownGrace.String())
+	s.log.Info("shutting down, waiting for in-flight requests", "grace", t.ShutdownGrace.String())
 	sctx, cancel := context.WithTimeout(context.Background(), t.ShutdownGrace.D())
 	defer cancel()
 	for _, srv := range servers {
 		if err := srv.Shutdown(sctx); err != nil {
-			s.log.Warn("退出时仍有请求未完成，强制关闭", "err", err)
+			s.log.Warn("requests still unfinished at shutdown, forcing close", "err", err)
 			_ = srv.Close()
 		}
 	}
@@ -193,14 +198,14 @@ func (s *Server) Run(ctx context.Context) error {
 	return runErr
 }
 
-// Bound 返回实际监听的地址。
+// Bound returns the actual listen addresses.
 func (s *Server) Bound() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.bound...)
 }
 
-// waitReady 只给测试用：等到 Run 已经开始接受请求。
+// waitReady is for tests only: it waits until Run has started accepting requests.
 func (s *Server) waitReady(d time.Duration) bool {
 	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) {

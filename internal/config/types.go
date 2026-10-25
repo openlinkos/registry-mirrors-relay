@@ -1,19 +1,21 @@
-// Package config 定义 registry-mirrors-relay 的配置：YAML 解析、内置上游、默认值和校验。
+// Package config defines the configuration of registry-mirrors-relay: YAML parsing, built-in upstreams, defaults
+// and validation.
 //
-// 配置分两类：这里的静态配置以文件为准（适合 GitOps）；客户端账号、规则等运营数据可以写在这里，
-// 也可以在管理后台里编辑，存进运营数据库，两边合并生效。
+// Configuration comes in two kinds. The static configuration here is governed by the file (suited to GitOps).
+// Operational data such as client accounts and rules can be written here too, or edited in the admin console and
+// stored in the operational database; the two are merged.
 package config
 
-// Config 是完整的静态配置。字段的默认值见 Defaults。
+// Config is the complete static configuration. See Defaults for the default values of its fields.
 type Config struct {
-	// DataDir 存放运营数据库和 ACME 证书，不存放任何镜像数据。
+	// DataDir holds the operational database and ACME certificates, never any image data.
 	DataDir   string               `yaml:"data_dir"`
 	Listen    Listen               `yaml:"listen"`
 	TLS       TLS                  `yaml:"tls"`
 	ClientIP  ClientIP             `yaml:"client_ip"`
 	Site      Site                 `yaml:"site"`
 	Entrances []Entrance           `yaml:"entrances"`
-	Upstreams map[string]*Upstream `yaml:"-"` // 由 Load 在内置上游的基础上合并，见 mergeUpstreams
+	Upstreams map[string]*Upstream `yaml:"-"` // merged by Load on top of the built-in upstreams, see mergeUpstreams
 	Access    Access               `yaml:"access"`
 	Limits    Limits               `yaml:"limits"`
 	Cache     Cache                `yaml:"cache"`
@@ -24,16 +26,17 @@ type Config struct {
 	Metrics   Metrics              `yaml:"metrics"`
 }
 
-// Listen 是各个监听地址，留空表示不开。
+// Listen holds the listen addresses; an empty address means that listener is off.
 type Listen struct {
-	HTTP  string `yaml:"http"`  // 拉取入口（明文），放在 CDN 或反向代理之后时用
-	HTTPS string `yaml:"https"` // 拉取入口（TLS），tls.mode 不为 off 时用
-	// Admin 是单独的管理端口：管理后台、管理 API 和指标都在这里，拉取端口上就不再提供。
-	// 留空（默认）时它们和拉取入口共用端口，只回应本机或内网直连的请求，见 admin.allow。
+	HTTP  string `yaml:"http"`  // pull entrance (plain HTTP), for use behind a CDN or reverse proxy
+	HTTPS string `yaml:"https"` // pull entrance (TLS), used when tls.mode is not off
+	// Admin is a separate management port: the admin console, the admin API and metrics are served here and no
+	// longer on the pull port. When empty (the default) they share the port with the pull entrance and answer only
+	// direct connections from the local machine or the private network, see admin.allow.
 	Admin string `yaml:"admin"`
 }
 
-// TLS 决定 HTTPS 入口的证书来源。
+// TLS decides where the certificates for the HTTPS entrance come from.
 type TLS struct {
 	Mode     string `yaml:"mode"` // off | files | acme
 	CertFile string `yaml:"cert_file"`
@@ -41,215 +44,241 @@ type TLS struct {
 	ACME     ACME   `yaml:"acme"`
 }
 
-// ACME 用 HTTP-01 或 TLS-ALPN-01 自动申请证书，不支持 DNS-01。
+// ACME obtains certificates automatically with HTTP-01 or TLS-ALPN-01; DNS-01 is not supported.
 type ACME struct {
 	Email        string   `yaml:"email"`
-	CacheDir     string   `yaml:"cache_dir"`     // 默认 <data_dir>/acme
-	Hosts        []string `yaml:"hosts"`         // 默认取所有入口里写明的域名
-	DirectoryURL string   `yaml:"directory_url"` // 默认 Let's Encrypt 正式环境
+	CacheDir     string   `yaml:"cache_dir"`     // default <data_dir>/acme
+	Hosts        []string `yaml:"hosts"`         // default: every domain named in the entrances
+	DirectoryURL string   `yaml:"directory_url"` // default: Let's Encrypt production
 }
 
-// ClientIP 决定怎样得到客户端的真实 IP。
+// ClientIP decides how the real client IP is determined.
 type ClientIP struct {
-	// TrustedProxies 只信任这些来源发来的 X-Forwarded-For，从右往左取第一个不受信任的地址。
-	// 可以写 CIDR、单个 IP，或者关键字 private_ranges、loopback。默认为空：不信任任何来源，直接用 TCP 来源地址。
+	// TrustedProxies are the only sources whose X-Forwarded-For is trusted; the first untrusted address from the
+	// right is taken. Entries may be CIDRs, single IPs, or the keywords private_ranges and loopback. Empty by
+	// default: no source is trusted and the TCP source address is used.
 	TrustedProxies []string `yaml:"trusted_proxies"`
-	UseXRealIP     bool     `yaml:"use_x_real_ip"` // 来自受信任代理时，优先用 X-Real-IP
+	UseXRealIP     bool     `yaml:"use_x_real_ip"` // prefer X-Real-IP when the request comes from a trusted proxy
 }
 
-// Site 是用法页和管理后台上显示的站点信息。
+// Site is the site information shown on the usage page and in the admin console.
 type Site struct {
 	Name     string            `yaml:"name"`
 	Operator string            `yaml:"operator"`
-	Links    map[string]string `yaml:"links"` // home、status、terms、privacy、abuse、source
-	// ShowStatus：用法页上显示服务状态（各上游的连通性、近 24 小时的可用率），数据来自 /status.json。
-	// 只有公开也无妨的内容：不含错误原文、地址、额度和请求量。
+	Links    map[string]string `yaml:"links"` // home, status, terms, privacy, abuse, source
+	// ShowStatus shows the service status on the usage page (each upstream's reachability and availability over
+	// the last 24 hours), with the data from /status.json. It holds only what is safe to publish: no raw errors,
+	// addresses, quotas or request counts.
 	ShowStatus bool `yaml:"show_status"`
 }
 
-// Entrance 是一个拉取入口，按 Host 匹配。
-//   - 写了 Upstream：这个入口固定转发到该上游（每个上游一个子域名）。
-//   - 没写 Upstream：单域名入口，按路径前缀（/v2/ghcr.io/...）、containerd 的 ns 参数选上游，
-//     都没有时用 DefaultUpstream（Docker 的 registry-mirrors 发来的就是这种请求）。
+// Entrance is a pull entrance, matched by Host.
+//   - With Upstream: the entrance always forwards to that upstream (one subdomain per upstream).
+//   - Without Upstream: a single-domain entrance that picks the upstream by path prefix (/v2/ghcr.io/...) or by
+//     containerd's ns parameter, and uses DefaultUpstream when there is neither (that is what Docker's
+//     registry-mirrors sends).
 type Entrance struct {
 	Name            string   `yaml:"name"`
-	Hosts           []string `yaml:"hosts"` // 匹配的 Host（不含端口），"*" 匹配任意 Host
+	Hosts           []string `yaml:"hosts"` // the Host values to match (without port); "*" matches any Host
 	Upstream        string   `yaml:"upstream"`
 	DefaultUpstream string   `yaml:"default_upstream"`
 	Auth            string   `yaml:"auth"` // none | basic
-	// Page：浏览器打开这个入口时的用法页。public（默认）谁都能看，auth: basic 时也只有拉取要登录；
-	// login 也要登录（只能和 auth: basic 一起用）；off 不提供用法页。
+	// Page is the usage page shown when a browser opens this entrance. public (the default): anyone can see it,
+	// and with auth: basic only pulls need a sign-in; login: the page needs a sign-in too (only together with
+	// auth: basic); off: no usage page.
 	Page string `yaml:"page"`
 }
 
-// Upstream 是一个上游 registry。名字（map 的键）是镜像地址里的写法，如 docker.io、ghcr.io。
+// Upstream is an upstream registry. Its name (the map key) is how it is written in image references, such as
+// docker.io or ghcr.io.
 type Upstream struct {
-	Registry      string   `yaml:"registry"`       // 实际访问的主机，如 registry-1.docker.io
-	Aliases       []string `yaml:"aliases"`        // 路径前缀和 ns 里也认这些名字
-	LibraryPrefix bool     `yaml:"library_prefix"` // 只有一段的名字补 library/（Docker Hub）
-	// RedirectHosts 是允许服务端跟随的重定向目标主机（正则，自动加 ^(?: )$ 锚点，不区分大小写）。
+	Registry      string   `yaml:"registry"`       // the host actually contacted, such as registry-1.docker.io
+	Aliases       []string `yaml:"aliases"`        // names also recognised in path prefixes and ns
+	LibraryPrefix bool     `yaml:"library_prefix"` // add library/ to single-segment names (Docker Hub)
+	// RedirectHosts are the redirect target hosts the server may follow (regular expressions, automatically
+	// anchored with ^(?: )$, case-insensitive).
 	RedirectHosts []string `yaml:"redirect_hosts"`
-	// ExtraRedirectHosts 追加到 RedirectHosts 后面。覆盖内置上游时，写这个就不用把内置的白名单再抄一遍。
+	// ExtraRedirectHosts is appended to RedirectHosts. When overriding a built-in upstream, writing this saves
+	// copying the built-in allowlist again.
 	ExtraRedirectHosts []string `yaml:"extra_redirect_hosts"`
-	// TokenRealmHosts 是允许访问的令牌服务主机（正则）。上游给出的 realm 不在其中时，不去取令牌。
+	// TokenRealmHosts are the token service hosts that may be contacted (regular expressions). When the realm
+	// given by the upstream is not among them, no token is fetched.
 	TokenRealmHosts  []string     `yaml:"token_realm_hosts"`
-	UnlistedRedirect string       `yaml:"unlisted_redirect"` // 白名单外的重定向：pass（原样交给客户端）| deny（返回 502）
+	UnlistedRedirect string       `yaml:"unlisted_redirect"` // redirects off the allowlist: pass (to the client as is) | deny (return 502)
 	Credentials      *Credentials `yaml:"credentials"`
 	Disabled         bool         `yaml:"disabled"`
-	// TLSCAFile 额外信任这个 CA（PEM），代理用私有 CA 的 registry 时用。系统自带的 CA 仍然信任。
+	// TLSCAFile is an extra CA (PEM) to trust, for proxying a registry that uses a private CA. The system CAs
+	// remain trusted.
 	TLSCAFile string `yaml:"tls_ca_file"`
-	// AllowPrivateNetwork 允许这个上游连接内网地址（默认拒绝）。只在代理内网 registry 或压测时打开。
+	// AllowPrivateNetwork lets this upstream connect to private network addresses (refused by default). Turn it
+	// on only to proxy an internal registry or for load testing.
 	AllowPrivateNetwork bool `yaml:"allow_private_network"`
 }
 
-// Credentials 是取令牌时使用的上游账号，用来提高 Docker Hub 等上游的额度。
-// 配了账号，这个账号能读的私有仓库也会被所有客户端拉到，所以必须写 public_only: true 确认。
+// Credentials is the upstream account used when fetching tokens, to raise the quota on upstreams such as Docker
+// Hub. With an account configured, every client can also pull the private repositories the account can read, so
+// public_only: true must be written to confirm it.
 type Credentials struct {
 	Username   string `yaml:"username"`
 	Password   Secret `yaml:"password"`
-	RealmHost  string `yaml:"realm_host"`  // 只把账号发给这个令牌服务主机
-	PublicOnly bool   `yaml:"public_only"` // 确认这个账号只能读公开仓库
+	RealmHost  string `yaml:"realm_host"`  // send the account only to this token service host
+	PublicOnly bool   `yaml:"public_only"` // confirms that the account can read only public repositories
 }
 
-// Access 是访问控制。这里写的内容和管理后台里编辑的合并生效。
+// Access is access control. What is written here is merged with what is edited in the admin console.
 type Access struct {
-	UsersFile string     `yaml:"users_file"` // htpasswd 文件，只接受 bcrypt
-	IPAllow   []string   `yaml:"ip_allow"`   // 非空时只允许这些地址
+	UsersFile string     `yaml:"users_file"` // htpasswd file, bcrypt only
+	IPAllow   []string   `yaml:"ip_allow"`   // when non-empty, only these addresses are allowed
 	IPDeny    []string   `yaml:"ip_deny"`
 	Images    ImageRules `yaml:"images"`
 }
 
-// ImageRules 是镜像名单。名字写全，带上游：docker.io/library/nginx、ghcr.io/owner/**。
-// * 匹配一段中的任意字符，** 匹配任意多段。
+// ImageRules are the image lists. Names are written in full, with the upstream: docker.io/library/nginx,
+// ghcr.io/owner/**. * matches any characters within one segment, ** matches any number of segments.
 type ImageRules struct {
-	Allow []string    `yaml:"allow"` // 非空时只允许匹配的镜像
+	Allow []string    `yaml:"allow"` // when non-empty, only matching images are allowed
 	Deny  []ImageRule `yaml:"deny"`
 }
 
-// ImageRule 是一条禁止规则。
+// ImageRule is a deny rule.
 type ImageRule struct {
 	Pattern string `yaml:"pattern"`
-	Status  int    `yaml:"status"` // 403 或 451，默认 403
+	Status  int    `yaml:"status"` // 403 or 451, default 403
 	Message string `yaml:"message"`
 }
 
-// Limits 是限流和并发上限。客户端按登录用户名计，没登录时按 IP 计（IPv6 按 /64）。
+// Limits are the rate limits and concurrency caps. Clients are counted by sign-in user name, or by IP when not
+// signed in (IPv6 by /64).
 type Limits struct {
-	ManifestRate         float64  `yaml:"manifest_rate"`  // 每个客户端每秒的 manifest 请求数，0 表示不限
-	ManifestBurst        int      `yaml:"manifest_burst"` // 允许的突发数
-	HeadWeight           float64  `yaml:"head_weight"`    // 一次 HEAD 按几次算
+	ManifestRate         float64  `yaml:"manifest_rate"`  // manifest requests per second per client, 0 means no limit
+	ManifestBurst        int      `yaml:"manifest_burst"` // allowed burst
+	HeadWeight           float64  `yaml:"head_weight"`    // how many requests one HEAD counts as
 	BlobStreamsPerClient int      `yaml:"blob_streams_per_client"`
 	MaxInflight          int      `yaml:"max_inflight"`
 	MaxBlobStreams       int      `yaml:"max_blob_streams"`
 	MaxManifestBuffers   int      `yaml:"max_manifest_buffers"`
-	TrackedClients       int      `yaml:"tracked_clients"` // 限流表最多记住多少个客户端（LRU）
+	TrackedClients       int      `yaml:"tracked_clients"` // how many clients the rate limit table remembers at most (LRU)
 	AuthFailuresPerMin   int      `yaml:"auth_failures_per_min"`
 	ExemptCIDRs          []string `yaml:"exempt_cidrs"`
 }
 
-// Cache 是 manifest 的内存缓存，只放 manifest，不放镜像层。
+// Cache is the in-memory manifest cache; it holds only manifests, never layers.
 type Cache struct {
-	MaxBytes     Size     `yaml:"max_bytes"` // 0 表示关闭
+	MaxBytes     Size     `yaml:"max_bytes"` // 0 turns the cache off
 	DigestTTL    Duration `yaml:"digest_ttl"`
 	TagTTL       Duration `yaml:"tag_ttl"`
-	StaleIfError Duration `yaml:"stale_if_error"` // 上游出错时还能用旧内容多久
-	NegativeTTL  Duration `yaml:"negative_ttl"`   // 404 记多久
+	StaleIfError Duration `yaml:"stale_if_error"` // how long stale content may still be served when the upstream fails
+	NegativeTTL  Duration `yaml:"negative_ttl"`   // how long a 404 is remembered
 }
 
-// Timeouts 是各项超时。没有总的写超时：大层可以下载很久，只要一直有进展。
+// Timeouts are the various timeouts. There is no overall write timeout: a large layer may take a long time to
+// download, as long as it keeps making progress.
 type Timeouts struct {
 	ReadHeader       Duration `yaml:"read_header"`
 	Idle             Duration `yaml:"idle"`
-	WriteIdle        Duration `yaml:"write_idle"` // 向客户端写数据时，多久没有进展就断开
+	WriteIdle        Duration `yaml:"write_idle"` // disconnect when writing to the client stalls for this long
 	Dial             Duration `yaml:"dial"`
 	TLSHandshake     Duration `yaml:"tls_handshake"`
 	ResponseHeader   Duration `yaml:"response_header"`
-	UpstreamReadIdle Duration `yaml:"upstream_read_idle"` // 读上游数据时，多久没有进展就放弃
+	UpstreamReadIdle Duration `yaml:"upstream_read_idle"` // give up when reading from the upstream stalls for this long
 	Token            Duration `yaml:"token"`
 	ShutdownGrace    Duration `yaml:"shutdown_grace"`
 }
 
-// Proxy 是转发行为的细节。
+// Proxy holds the details of forwarding behaviour.
 type Proxy struct {
-	UserAgent               string `yaml:"user_agent"` // 发往上游的 User-Agent，默认 registry-mirrors-relay/<版本>
+	UserAgent               string `yaml:"user_agent"` // User-Agent sent to upstreams, default registry-mirrors-relay/<version>
 	MaxIdleConnsPerHost     int    `yaml:"max_idle_conns_per_host"`
 	MaxRedirects            int    `yaml:"max_redirects"`
-	BufferSize              Size   `yaml:"buffer_size"`               // 每个流的转发缓冲，默认 16KiB
-	ExposeUpstreamRatelimit bool   `yaml:"expose_upstream_ratelimit"` // 把上游的 Ratelimit-* 头转给客户端
-	CDNCacheDigests         bool   `yaml:"cdn_cache_digests"`         // 按 digest 的响应允许 CDN 长期缓存
-	// BlobHTTP2 让镜像层也走 HTTP/2。默认走 HTTP/1.1：HTTP/2 会替每个流先收下最多几 MB 还没被读走的数据，
-	// 客户端慢时内存随并发线性增长；HTTP/1.1 由 TCP 做背压，进程里每个流只占一块转发缓冲。manifest、令牌仍走 HTTP/2。
+	BufferSize              Size   `yaml:"buffer_size"`               // forwarding buffer per stream, default 16KiB
+	ExposeUpstreamRatelimit bool   `yaml:"expose_upstream_ratelimit"` // pass the upstream's Ratelimit-* headers on to clients
+	CDNCacheDigests         bool   `yaml:"cdn_cache_digests"`         // let CDNs cache by-digest responses for a long time
+	// BlobHTTP2 sends layers over HTTP/2 as well. The default is HTTP/1.1: HTTP/2 accepts up to several MB of
+	// not-yet-read data per stream in advance, so with slow clients memory grows linearly with concurrency; with
+	// HTTP/1.1, TCP provides back-pressure and each stream takes only one forwarding buffer in the process.
+	// Manifests and tokens still use HTTP/2.
 	BlobHTTP2 bool `yaml:"blob_http2"`
-	// 熔断：连续 BreakerFailures 次连不上或超时，就在 BreakerCooldown 内直接失败，之后放一个请求试探。
-	// 试探仍失败时冷却时间加倍，最长 1 分钟。BreakerFailures 为 0 表示不熔断。
+	// Circuit breaker: after BreakerFailures consecutive connection failures or timeouts, requests fail at once
+	// for BreakerCooldown, after which one request is let through as a probe. If the probe fails too, the
+	// cooldown doubles, up to 1 minute. BreakerFailures 0 means no circuit breaker.
 	BreakerFailures int      `yaml:"breaker_failures"`
 	BreakerCooldown Duration `yaml:"breaker_cooldown"`
-	// HealthInterval 是探测各上游 /v2/ 的间隔（不算拉取次数），结果只给管理后台和指标看，不影响 readyz。0 表示不探测。
+	// HealthInterval is the interval at which each upstream's /v2/ is probed (not counted as pulls); the results
+	// are only shown in the admin console and metrics and do not affect readyz. 0 turns probing off.
 	HealthInterval Duration `yaml:"health_interval"`
 }
 
-// Admin 是管理后台。
+// Admin is the admin console.
 type Admin struct {
-	// PublicURL 是后台的正式地址（可选），用于 Cookie、来源检查和 proxied_allow。
+	// PublicURL is the console's canonical address (optional), used for cookies, origin checks and
+	// proxied_allow.
 	PublicURL string `yaml:"public_url"`
-	// Public：管理后台和管理 API 对所有地址开放（默认），经 CDN、反向代理也能打开，靠登录保护：
-	// 口令 bcrypt、登录限速、CSRF 检查、敏感操作要再次输入口令。写 false 时只回应 Allow、ProxiedAllow 里的地址。
-	// 指标和 pprof 没有登录，不受它影响，一直按 Allow、ProxiedAllow。
+	// Public opens the admin console and the admin API to every address (the default), including through a CDN
+	// or reverse proxy, protected by sign-in: bcrypt passwords, sign-in rate limits, CSRF checks and
+	// re-authentication for sensitive actions. With false, only addresses in Allow and ProxiedAllow get an
+	// answer. Metrics and pprof have no sign-in, are not affected by it, and always follow Allow and ProxiedAllow.
 	Public bool `yaml:"public"`
-	// Allow：直连（请求里没有任何代理头）时放行的对端地址。用于指标、pprof，以及 public: false 时的后台和 API。
-	// 默认 loopback 和 private_ranges：kubectl port-forward、SSH 隧道、集群里的 Prometheus 都能用，
-	// 经 CDN、反向代理来的请求一律当作不存在（404）。写成空列表表示关掉。
+	// Allow lists the peer addresses let in on a direct connection (no proxy headers in the request). It applies
+	// to metrics, pprof, and the console and API when public: false. Defaults to loopback and private_ranges, so
+	// kubectl port-forward, SSH tunnels and in-cluster Prometheus all work, while requests through a CDN or
+	// reverse proxy are treated as non-existent (404). An empty list turns it off.
 	Allow []string `yaml:"allow"`
-	// ProxiedAllow：经反向代理访问时放行的客户端地址（取自受信任代理的 X-Forwarded-For），用途同 Allow。
-	// 默认为空；要用时还得写 public_url 和 client_ip.trusted_proxies。
+	// ProxiedAllow lists the client addresses let in through a reverse proxy (taken from a trusted proxy's
+	// X-Forwarded-For), for the same uses as Allow. Empty by default; using it also requires public_url and
+	// client_ip.trusted_proxies.
 	ProxiedAllow []string `yaml:"proxied_allow"`
-	// ConfigEdit：允许在后台改配置（入口、上游、限流、缓存等，存在运营数据库里，叠加在配置文件之上）。
-	// 默认打开；写 false 时后台的修改一律不生效，只能重置，配置全部以配置文件为准（适合严格的 GitOps）。
+	// ConfigEdit allows changing the configuration in the console (entrances, upstreams, rate limits, cache and
+	// more, stored in the operational database on top of the configuration file). On by default; with false,
+	// console overrides never take effect and can only be reset, and the configuration file alone decides the
+	// configuration (suited to strict GitOps).
 	ConfigEdit   bool         `yaml:"config_edit"`
 	Store        Store        `yaml:"store"`
 	InitialAdmin InitialAdmin `yaml:"initial_admin"`
-	// APITokens 是写在配置里的管理 API 令牌（适合自动化和 k8s Secret）。也可以在后台创建，存进运营数据库。
+	// APITokens are admin API tokens written in the configuration (suited to automation and k8s Secrets). They
+	// can also be created in the console and stored in the operational database.
 	APITokens []APIToken `yaml:"api_tokens"`
 }
 
-// APIToken 是一个管理 API 令牌。请求时放在 Authorization: Bearer 里。
+// APIToken is an admin API token, sent in Authorization: Bearer with requests.
 type APIToken struct {
 	Name  string `yaml:"name"`
-	Token Secret `yaml:"token"` // 至少 32 个字符
-	Role  string `yaml:"role"`  // admin（可读写）| viewer（只读）
+	Token Secret `yaml:"token"` // at least 32 characters
+	Role  string `yaml:"role"`  // admin (read-write) | viewer (read-only)
 }
 
-// Store 是运营数据的存放方式。
+// Store is how operational data is stored.
 type Store struct {
-	Driver string `yaml:"driver"` // bolt（单实例可写）| none（只读，全部来自配置文件；k8s 多副本时用）
-	Path   string `yaml:"path"`   // 默认 <data_dir>/state.db
+	Driver string `yaml:"driver"` // bolt (single instance, writable) | none (read-only, all from the config file; for multi-replica k8s)
+	Path   string `yaml:"path"`   // default <data_dir>/state.db
 }
 
-// InitialAdmin 在运营数据库里还没有管理员时，用来创建第一个管理员。这个管理员第一次登录后必须改口令，
-// 所以配置里的口令只能用一次；之后应把 initial_admin 和对应的密钥删掉。运营数据只读（store: none）时，
-// 它就是后台唯一的管理员，口令只能在配置里改。
+// InitialAdmin creates the first administrator while the operational database has none. This administrator must
+// change the password after the first sign-in, so the password in the configuration works only once; afterwards
+// initial_admin and its secret should be deleted. With read-only operational data (store: none), it is the
+// console's only administrator, and its password can only be changed in the configuration.
 type InitialAdmin struct {
 	Username string `yaml:"username"`
 	Password Secret `yaml:"password"`
-	FromEnv  bool   `yaml:"-"` // 来自 RELAY_ADMIN_PASSWORD_FILE，不是配置文件
+	FromEnv  bool   `yaml:"-"` // from RELAY_ADMIN_PASSWORD_FILE, not the configuration file
 }
 
-// Log 是日志设置。
+// Log holds the logging settings.
 type Log struct {
 	Level  string    `yaml:"level"` // debug | info | warn | error
 	Access AccessLog `yaml:"access"`
 }
 
-// AccessLog 是访问日志，字段和 Caddy 的 JSON 访问日志一致。
+// AccessLog is the access log, with the same fields as Caddy's JSON access log.
 type AccessLog struct {
 	Output  string `yaml:"output"` // stdout | file | off
 	Path    string `yaml:"path"`
-	MaxSize Size   `yaml:"max_size"` // 文件按大小轮转
-	Keep    int    `yaml:"keep"`     // 保留几个旧文件
+	MaxSize Size   `yaml:"max_size"` // files rotate by size
+	Keep    int    `yaml:"keep"`     // how many old files to keep
 }
 
-// Metrics 是 Prometheus 指标和调试接口，和管理后台在同一个入口（同样受 admin.allow 限制）。
+// Metrics covers Prometheus metrics and the debug endpoints, served on the same entrance as the admin console
+// (and likewise restricted by admin.allow).
 type Metrics struct {
-	Enabled bool `yaml:"enabled"` // 提供 /metrics，默认关
-	Pprof   bool `yaml:"pprof"`   // 再提供 /debug/pprof/，要先开 enabled
+	Enabled bool `yaml:"enabled"` // serve /metrics; off by default
+	Pprof   bool `yaml:"pprof"`   // also serve /debug/pprof/; needs enabled
 }

@@ -11,7 +11,8 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/upstream"
 )
 
-// serveManifest 经缓存回答 manifest 请求。缓存处理不了时返回 false，由调用方按普通请求转发。
+// serveManifest answers a manifest request through the cache. It returns false when the cache cannot handle
+// the request, and the caller forwards it as an ordinary request.
 func (h *Handler) serveManifest(w http.ResponseWriter, r *http.Request, e *accesslog.Entry, rt *app.Runtime, up *upstream.Upstream, t route.Target) bool {
 	out := rt.Manifests.Resolve(r.Context(), up, manifest.Request{
 		Upstream: t.Upstream, Repo: t.Repo, Ref: t.Ref,
@@ -25,11 +26,11 @@ func (h *Handler) serveManifest(w http.ResponseWriter, r *http.Request, e *acces
 	e.Cache = out.Cache
 	switch {
 	case out.NotFound:
-		writeError(w, r, http.StatusNotFound, "MANIFEST_UNKNOWN", "镜像不存在或需要登录")
+		writeError(w, r, http.StatusNotFound, "MANIFEST_UNKNOWN", "image not found or authentication required")
 	case out.Err != nil:
 		if manifest.IsTooLarge(out.Err) || manifest.IsMismatch(out.Err) {
 			e.Error = out.Err.Error()
-			h.Log.Warn("上游的 manifest 不能转发", "upstream", t.Upstream, "repo", t.Repo, "ref", t.Ref, "err", out.Err)
+			h.Log.Warn("upstream manifest cannot be relayed", "upstream", t.Upstream, "repo", t.Repo, "ref", t.Ref, "err", out.Err)
 			writeError(w, r, http.StatusBadGateway, "MANIFEST_INVALID", out.Err.Error())
 			return true
 		}
@@ -61,7 +62,7 @@ func manifestHeaders(hd http.Header, t route.Target, mediaType, digest string, s
 	setSecurityHeaders(hd)
 	switch {
 	case t.Ref != digest:
-		hd.Set("Cache-Control", "no-store") // 按 tag 请求：tag 会变
+		hd.Set("Cache-Control", "no-store") // requested by tag: tags can change
 	case cdnCacheDigests:
 		hd.Set("Cache-Control", "public, max-age=31536000, immutable")
 	}

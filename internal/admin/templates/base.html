@@ -103,7 +103,7 @@
   </div>
 </main>{{end}}
 
-{{/* 页头：标题、说明、元信息 */}}
+{{/* Page header: title, description, metadata */}}
 {{define "header"}}<div class="ol-page-header">
   <div class="ol-page-heading">
     <h1 class="ol-page-title">{{.Title}}</h1>
@@ -112,7 +112,7 @@
   </div>
 </div>{{end}}
 
-{{/* 成功提示（PRG 跳转回来时）和表单错误 */}}
+{{/* Success notice (on return from a PRG redirect) and form errors */}}
 {{define "notices"}}{{if or .Notice .FormErr .Warns}}<div class="ol-notices">
   {{with .Notice}}{{template "alert" (dict "Tone" "success" "Text" .)}}{{end}}
   {{with .FormErr}}{{template "alert" (dict "Tone" "danger" "Text" .)}}{{end}}
@@ -143,13 +143,13 @@
 
 {{define "csrf"}}<input type="hidden" name="_csrf" value="{{.CSRF}}">{{end}}
 
-{{/* 后台对配置的修改的状态 */}}
+{{/* State of a console override */}}
 {{define "ovState"}}{{if eq .S "active"}}{{template "badge" (dict "Text" (.V.T "config.state.active") "Tone" "accent" "Square" true)}}{{else if eq .S "drift"}}{{template "badge" (dict "Text" (.V.T "config.state.drift") "Tone" "warning" "Square" true)}}{{else if eq .S "suspended"}}{{template "badge" (dict "Text" (.V.T "config.state.suspended") "Tone" "danger" "Square" true)}}{{else}}{{template "badge" (dict "Text" (.V.T "config.state.ignored") "Square" true)}}{{end}}{{end}}
 
-{{/* 去掉后台对配置的一处修改，改回配置文件的值 */}}
+{{/* Remove one console override and go back to the configuration file's value */}}
 {{define "resetButton"}}<form method="post" action="/admin/config/reset" class="admin-inline" data-confirm="{{.V.T "config.resetConfirm" "key" .Key}}">{{template "csrf" .V}}<input type="hidden" name="key" value="{{.Key}}"><button type="submit" class="ol-btn ol-btn-ghost ol-btn-xs">{{icon "rotate-ccw" "sm"}}{{if .Label}}{{.Label}}{{else}}{{.V.T "config.reset"}}{{end}}</button></form>{{end}}
 
-{{/* 配置表单里的一个字段（cfgField）：F 是字段，ID 是输入框的 id */}}
+{{/* One field in a configuration form (cfgField): F is the field, ID is the input's id */}}
 {{define "cfgField"}}{{$f := .F}}<div class="ol-field">
   {{if eq $f.Kind "bool"}}<label class="ol-check"><input type="checkbox" role="switch" class="ol-switch" id="{{.ID}}" name="{{$f.Name}}" value="true"{{if eq $f.Value "true"}} checked{{end}}{{if $f.Locked}} disabled{{end}}> {{$f.Label}}</label>
   {{else}}<label class="ol-label" for="{{.ID}}">{{$f.Label}}</label>
@@ -159,7 +159,7 @@
   {{if or $f.Hint $f.Changed $f.Locked}}<p class="ol-hint">{{$f.Hint}}{{if $f.Locked}} {{.V.T "config.locked"}}{{end}}{{if $f.Changed}} {{.V.T "config.fileValue" "v" (or $f.File "—")}}{{end}}</p>{{end}}
 </div>{{end}}
 
-{{/* 表格行里的删除按钮：一个只有隐藏字段的小表单 */}}
+{{/* Delete button in a table row: a small form with only hidden fields */}}
 {{define "deleteButton"}}<form method="post" action="{{.Action}}" class="admin-inline" data-confirm="{{.Confirm}}">
   <input type="hidden" name="_csrf" value="{{.V.CSRF}}">
   {{range $k, $v := .Fields}}<input type="hidden" name="{{$k}}" value="{{$v}}">{{end}}

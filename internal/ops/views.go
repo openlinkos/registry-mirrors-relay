@@ -12,20 +12,20 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/upstream"
 )
 
-// UserView 是一个客户端账号。
+// UserView is a client account.
 type UserView struct {
 	Name         string    `json:"name"`
-	Source       string    `json:"source"` // config（users_file）| store
+	Source       string    `json:"source"` // config (users_file) | store
 	Disabled     bool      `json:"disabled"`
 	ManifestRate float64   `json:"manifest_rate,omitempty"`
 	BlobStreams  int       `json:"blob_streams,omitempty"`
 	Note         string    `json:"note,omitempty"`
 	Created      time.Time `json:"created,omitzero"`
 	CreatedBy    string    `json:"created_by,omitempty"`
-	LastSeen     time.Time `json:"last_seen,omitzero"` // 自启动以来最后一次请求
+	LastSeen     time.Time `json:"last_seen,omitzero"` // the last request since start-up
 }
 
-// Users 列出客户端账号，按名字排序。
+// Users lists the client accounts, sorted by name.
 func (o *Ops) Users() []UserView {
 	rt := o.app.Runtime()
 	stored := map[string]store.ClientUser{}
@@ -46,7 +46,7 @@ func (o *Ops) Users() []UserView {
 	return out
 }
 
-// User 返回一个客户端账号。
+// User returns one client account.
 func (o *Ops) User(name string) (UserView, bool) {
 	for _, u := range o.Users() {
 		if u.Name == name {
@@ -56,7 +56,7 @@ func (o *Ops) User(name string) (UserView, bool) {
 	return UserView{}, false
 }
 
-// IPRuleView 是一条 IP 规则。
+// IPRuleView is one IP rule.
 type IPRuleView struct {
 	CIDR      string    `json:"cidr"`
 	Kind      string    `json:"kind"`
@@ -66,7 +66,7 @@ type IPRuleView struct {
 	CreatedBy string    `json:"created_by,omitempty"`
 }
 
-// ImageRuleView 是一条镜像规则。
+// ImageRuleView is one image rule.
 type ImageRuleView struct {
 	Pattern   string    `json:"pattern"`
 	Kind      string    `json:"kind"`
@@ -74,19 +74,20 @@ type ImageRuleView struct {
 	Message   string    `json:"message,omitempty"`
 	Source    string    `json:"source"`
 	Note      string    `json:"note,omitempty"`
-	Hits      uint64    `json:"hits"` // 自启动以来拒绝的次数（只有禁止规则有）
+	Hits      uint64    `json:"hits"` // times denied since start-up (deny rules only)
 	Created   time.Time `json:"created,omitzero"`
 	CreatedBy string    `json:"created_by,omitempty"`
 }
 
-// Rules 是全部访问规则。
+// Rules holds all the access rules.
 type Rules struct {
 	IP     []IPRuleView    `json:"ip"`
 	Bans   []store.Ban     `json:"bans"`
 	Images []ImageRuleView `json:"images"`
 }
 
-// Rules 列出 IP 规则、生效中的封禁和镜像规则。配置文件里的在前。
+// Rules lists the IP rules, the active bans and the image rules. Those from the configuration file
+// come first.
 func (o *Ops) Rules() Rules {
 	rt := o.app.Runtime()
 	hits := o.app.Stats.RuleHits()
@@ -124,20 +125,21 @@ func (o *Ops) Rules() Rules {
 	return r
 }
 
-// ImageDecision 是"这个镜像能不能拉"的结果。
+// ImageDecision is the answer to "may this image be pulled".
 type ImageDecision struct {
-	Image   string `json:"image"` // 补全后的名字：上游/仓库
+	Image   string `json:"image"` // the completed name: upstream/repository
 	Allowed bool   `json:"allowed"`
 	Status  int    `json:"status"`
 	Message string `json:"message"`
 	Rule    string `json:"rule"`
 }
 
-// TestImage 按 docker pull 的写法补全镜像名（没写上游时是 Docker Hub，补 library/），再按镜像规则判断。
+// TestImage completes the image name the way docker pull does (Docker Hub when no upstream is given,
+// adding library/), then checks it against the image rules.
 func (o *Ops) TestImage(image string) ImageDecision {
 	name := strings.ToLower(strings.TrimSpace(image))
 	if i := strings.LastIndexAny(name, ":@"); i > strings.LastIndex(name, "/") {
-		name = name[:i] // 去掉 tag 或 digest
+		name = name[:i] // drop the tag or digest
 	}
 	rt := o.app.Runtime()
 	first, rest, ok := strings.Cut(name, "/")
@@ -153,22 +155,22 @@ func (o *Ops) TestImage(image string) ImageDecision {
 	return ImageDecision{Image: full, Allowed: allowed, Status: status, Message: msg, Rule: rule}
 }
 
-// UpstreamView 是一个上游的设置和状态。
+// UpstreamView is the settings and state of one upstream.
 type UpstreamView struct {
 	Name          string           `json:"name"`
 	Registry      string           `json:"registry"`
 	BreakerOpen   bool             `json:"breaker_open"`
-	RedirectHosts []string         `json:"redirect_hosts"`       // 生效的完整白名单（正则）
-	AddedHosts    []string         `json:"added_redirect_hosts"` // 在后台加的精确主机名
+	RedirectHosts []string         `json:"redirect_hosts"`       // the full effective allowlist (regexes)
+	AddedHosts    []string         `json:"added_redirect_hosts"` // exact host names added in the console
 	UnlistedHosts map[string]int   `json:"unlisted_redirect_hosts"`
 	Unlisted      string           `json:"unlisted_redirect"` // pass | deny
 	Credentials   bool             `json:"credentials"`
 	Health        *upstream.Health `json:"health,omitempty"`
 	Quota         *upstream.Quota  `json:"quota,omitempty"`
-	Hours         []status.Hour    `json:"hours"` // 近 24 小时每小时的探测结果，旧的在前
+	Hours         []status.Hour    `json:"hours"` // hourly probe results for the last 24 hours, oldest first
 }
 
-// Upstreams 列出启用的上游，按名字排序。
+// Upstreams lists the enabled upstreams, sorted by name.
 func (o *Ops) Upstreams() []UpstreamView {
 	rt := o.app.Runtime()
 	unlisted := o.app.Stats.Unlisted()
@@ -178,7 +180,7 @@ func (o *Ops) Upstreams() []UpstreamView {
 		c := rt.Config.Upstreams[n]
 		hosts := append(append([]string{}, c.RedirectHosts...), c.ExtraRedirectHosts...)
 		for _, h := range rt.Data.ExtraRedirectHosts[n] {
-			hosts = append(hosts, regexp.QuoteMeta(h)) // 后台加的主机按字面匹配
+			hosts = append(hosts, regexp.QuoteMeta(h)) // hosts added in the console match literally
 		}
 		v := UpstreamView{
 			Name: n, Registry: c.Registry, BreakerOpen: rt.Pool.Get(n).BreakerOpen(), RedirectHosts: hosts,
@@ -194,7 +196,7 @@ func (o *Ops) Upstreams() []UpstreamView {
 	return out
 }
 
-// TokenView 是一个管理 API 令牌（不含令牌本身）。
+// TokenView is a management API token (without the token itself).
 type TokenView struct {
 	Name      string    `json:"name"`
 	Role      string    `json:"role"`
@@ -203,7 +205,7 @@ type TokenView struct {
 	CreatedBy string    `json:"created_by,omitempty"`
 }
 
-// Tokens 列出管理 API 令牌，配置文件里的在前。
+// Tokens lists the management API tokens, those from the configuration file first.
 func (o *Ops) Tokens() []TokenView {
 	rt := o.app.Runtime()
 	out := []TokenView{}
@@ -216,17 +218,17 @@ func (o *Ops) Tokens() []TokenView {
 	return out
 }
 
-// AdminView 是一个后台管理员（不含口令哈希）。
+// AdminView is a console administrator (without the password hash).
 type AdminView struct {
 	Name       string    `json:"name"`
 	Role       string    `json:"role"`
 	Disabled   bool      `json:"disabled"`
-	MustChange bool      `json:"must_change"` // 第一次登录后必须先改口令
-	Source     string    `json:"source"`      // store | config（运营数据只读时，来自 admin.initial_admin）
+	MustChange bool      `json:"must_change"` // must change the password after the first login
+	Source     string    `json:"source"`      // store | config (from admin.initial_admin when the operational data is read-only)
 	Created    time.Time `json:"created,omitzero"`
 }
 
-// Admins 列出后台管理员。
+// Admins lists the console administrators.
 func (o *Ops) Admins() []AdminView {
 	out := []AdminView{}
 	data := o.app.Store.Data()
@@ -240,7 +242,7 @@ func (o *Ops) Admins() []AdminView {
 	return out
 }
 
-// SiteView 是生效的站点信息，以及它来自哪里。
+// SiteView is the effective site information and where it comes from.
 type SiteView struct {
 	Name      string            `json:"name"`
 	Operator  string            `json:"operator,omitempty"`
@@ -248,11 +250,12 @@ type SiteView struct {
 	Source    string            `json:"source"` // config | store
 	Updated   time.Time         `json:"updated,omitzero"`
 	UpdatedBy string            `json:"updated_by,omitempty"`
-	// ShowStatus：用法页是否显示服务状态，只来自配置文件（site.show_status）
+	// ShowStatus: whether the usage page shows the service status; comes only from the configuration
+	// file (site.show_status)
 	ShowStatus bool `json:"show_status"`
 }
 
-// Site 返回生效的站点信息。
+// Site returns the effective site information.
 func (o *Ops) Site() SiteView {
 	rt := o.app.Runtime()
 	v := SiteView{Name: rt.Site.Name, Operator: rt.Site.Operator, Links: rt.Site.Links, Source: "config", ShowStatus: rt.Site.ShowStatus}
@@ -262,5 +265,5 @@ func (o *Ops) Site() SiteView {
 	return v
 }
 
-// SiteLinkKeys 是站点信息里可以写的链接，按用法页页脚的顺序。
+// SiteLinkKeys are the links the site information may contain, in the order of the usage page footer.
 var SiteLinkKeys = []string{"status", "terms", "privacy", "abuse", "source", "home"}

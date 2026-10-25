@@ -1,7 +1,8 @@
-// Package metrics 输出 Prometheus 文本格式的指标。指标不多，手写比引入 client_golang（十来个依赖）简单。
+// Package metrics exposes metrics in the Prometheus text format. There are few metrics, so writing
+// them by hand is simpler than pulling in client_golang (a dozen or so dependencies).
 //
-// 请求类的计数从访问日志的每一条记录得来（Metrics 实现了 relay 的 AccessLogger）；
-// 缓存、限流、熔断这类状态在抓取时由回调读取。
+// Request counters come from each access log record (Metrics implements relay's AccessLogger); state
+// such as the cache, rate limits and circuit breakers is read by callbacks at scrape time.
 package metrics
 
 import (
@@ -21,13 +22,13 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/accesslog"
 )
 
-// Sample 是一个带标签的值。Labels 用 Labels() 生成。
+// Sample is a labelled value. Labels is produced with Labels().
 type Sample struct {
 	Labels string
 	Value  float64
 }
 
-// Labels 按给定顺序生成 {k="v",...}，值会转义。
+// Labels produces {k="v",...} in the given order, with the values escaped.
 func Labels(kv ...string) string {
 	if len(kv) == 0 {
 		return ""
@@ -53,17 +54,18 @@ type gauge struct {
 	fn              func() []Sample
 }
 
-// 请求耗时的分桶（秒）。镜像层下载可以很久，所以上界放宽到 10 分钟。
+// Request duration buckets (seconds). Layer downloads can take a long time, so the upper bound is
+// extended to 10 minutes.
 var buckets = []float64{0.005, 0.025, 0.1, 0.5, 1, 5, 30, 120, 600}
 
 type hist struct {
-	counts [10]atomic.Uint64 // len(buckets)+1，最后一格是 +Inf
-	sum    atomic.Uint64     // 微秒
+	counts [10]atomic.Uint64 // len(buckets)+1, the last slot is +Inf
+	sum    atomic.Uint64     // microseconds
 }
 
-// Metrics 并发安全。
+// Metrics is safe for concurrent use.
 type Metrics struct {
-	requests sync.Map // 标签 → *atomic.Uint64
+	requests sync.Map // labels → *atomic.Uint64
 	bytes    sync.Map
 	durs     sync.Map // kind → *hist
 	mu       sync.Mutex
@@ -72,7 +74,7 @@ type Metrics struct {
 	version  string
 }
 
-// New 创建 Metrics。
+// New creates a Metrics.
 func New(version string) *Metrics { return &Metrics{start: time.Now(), version: version} }
 
 func counter(m *sync.Map, key string) *atomic.Uint64 {
@@ -90,7 +92,7 @@ func statusClass(s int) string {
 	return strconv.Itoa(s/100) + "xx"
 }
 
-// Log 记一次请求。
+// Log records one request.
 func (m *Metrics) Log(e *accesslog.Entry) {
 	kind := e.Kind
 	if kind == "" {
@@ -115,7 +117,7 @@ func (m *Metrics) Log(e *accesslog.Entry) {
 	h.sum.Add(uint64(e.Duration.Microseconds()))
 }
 
-// Register 加一个抓取时计算的指标。typ 是 gauge 或 counter。
+// Register adds a metric computed at scrape time. typ is gauge or counter.
 func (m *Metrics) Register(name, help, typ string, fn func() []Sample) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -144,16 +146,16 @@ func fmtFloat(v float64) string {
 	return strconv.FormatFloat(v, 'g', -1, 64)
 }
 
-// ServeHTTP 输出全部指标。
+// ServeHTTP writes out all metrics.
 func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	bw := bufio.NewWriter(w)
 	defer func() { _ = bw.Flush() }()
 
-	writeMap(bw, "relay_requests_total", "处理的请求数", "counter", &m.requests)
-	writeMap(bw, "relay_response_bytes_total", "写给客户端的字节数", "counter", &m.bytes)
+	writeMap(bw, "relay_requests_total", "Requests handled", "counter", &m.requests)
+	writeMap(bw, "relay_response_bytes_total", "Bytes written to clients", "counter", &m.bytes)
 
-	fmt.Fprintf(bw, "# HELP relay_request_duration_seconds 请求耗时（镜像层下载含传输时间）\n# TYPE relay_request_duration_seconds histogram\n")
+	fmt.Fprintf(bw, "# HELP relay_request_duration_seconds Request duration (layer downloads include transfer time)\n# TYPE relay_request_duration_seconds histogram\n")
 	var kinds []string
 	m.durs.Range(func(k, _ any) bool { kinds = append(kinds, k.(string)); return true })
 	sort.Strings(kinds)
@@ -181,7 +183,7 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
-	fmt.Fprintf(bw, "# HELP relay_build_info 版本\n# TYPE relay_build_info gauge\nrelay_build_info%s 1\n", Labels("version", m.version, "go", runtime.Version()))
+	fmt.Fprintf(bw, "# HELP relay_build_info Version\n# TYPE relay_build_info gauge\nrelay_build_info%s 1\n", Labels("version", m.version, "go", runtime.Version()))
 	fmt.Fprintf(bw, "# TYPE relay_start_time_seconds gauge\nrelay_start_time_seconds %d\n", m.start.Unix())
 	fmt.Fprintf(bw, "# TYPE go_goroutines gauge\ngo_goroutines %d\n", runtime.NumGoroutine())
 	fmt.Fprintf(bw, "# TYPE go_memstats_heap_inuse_bytes gauge\ngo_memstats_heap_inuse_bytes %d\n", ms.HeapInuse)
@@ -192,7 +194,7 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-// residentBytes 读 /proc/self/statm（只有 Linux 有）。
+// residentBytes reads /proc/self/statm (Linux only).
 func residentBytes() int64 {
 	b, err := os.ReadFile("/proc/self/statm")
 	if err != nil {

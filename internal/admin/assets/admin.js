@@ -1,9 +1,10 @@
-// 管理后台的渐进增强。没有这个脚本时每个页面都能用。
-// 它只写文本（textContent），从不写标记：页面开了 Trusted Types 且没有任何策略，写 HTML 会直接抛错。
+// Progressive enhancement for the admin console. Every page works without this script.
+// It only writes text (textContent), never markup: pages enforce Trusted Types with no policy at all, so
+// writing HTML throws straight away.
 
 const pad = (n) => String(n).padStart(2, '0');
 
-// 按浏览器的时区显示时间。
+// Show times in the browser's time zone.
 function localTimes(root) {
   for (const el of root.querySelectorAll('time[datetime]')) {
     const d = new Date(el.dateTime);
@@ -13,7 +14,8 @@ function localTimes(root) {
   }
 }
 
-// 复制按钮：配置片段、新令牌、新口令。复制后短暂显示对勾和"已复制"。
+// Copy buttons: configuration snippets, new tokens, new passwords. After copying, a tick and "Copied"
+// are shown briefly.
 function copyButtons() {
   if (!navigator.clipboard) return;
   for (const button of document.querySelectorAll('button[data-copy]')) {
@@ -48,7 +50,7 @@ function copyButtons() {
   }
 }
 
-// 删除这类操作先确认一次。服务端不依赖它。
+// Operations such as deletes ask for confirmation first. The server does not rely on this.
 function confirmForms() {
   for (const form of document.querySelectorAll('form[data-confirm]')) {
     form.addEventListener('submit', (ev) => {
@@ -57,7 +59,7 @@ function confirmForms() {
   }
 }
 
-// 概览页的数字每 15 秒刷新一次（页面在后台时不刷新）。
+// The numbers on the overview page refresh every 15 seconds (not while the page is in the background).
 function liveValues() {
   const els = document.querySelectorAll('[data-live]');
   if (els.length === 0) return;

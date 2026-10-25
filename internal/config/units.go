@@ -9,15 +9,15 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// Duration 是写成 "30s"、"6h" 的时长。
+// Duration is a duration written as "30s" or "6h".
 type Duration time.Duration
 
-// D 返回 time.Duration。
+// D returns the time.Duration.
 func (d Duration) D() time.Duration { return time.Duration(d) }
 
 func (d Duration) String() string { return time.Duration(d).String() }
 
-// UnmarshalYAML 接受 Go 的时长写法，另外支持以 d 结尾的天数（如 "7d"）。
+// UnmarshalYAML accepts Go duration syntax, plus a number of days ending in d (such as "7d").
 func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 	var s string
 	if err := n.Decode(&s); err != nil {
@@ -31,7 +31,7 @@ func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
-// MarshalYAML 输出成字符串，便于 check -print 打印。
+// MarshalYAML outputs a string, so that check -print can print it.
 func (d Duration) MarshalYAML() (any, error) { return d.String(), nil }
 
 func parseDuration(s string) (time.Duration, error) {
@@ -50,7 +50,7 @@ func parseDuration(s string) (time.Duration, error) {
 	return v, nil
 }
 
-// Size 是写成 "64MiB"、"32KiB" 的字节数，也可以直接写整数。
+// Size is a byte count written as "64MiB" or "32KiB", or as a plain integer.
 type Size int64
 
 var sizeUnits = []struct {
@@ -61,7 +61,7 @@ var sizeUnits = []struct {
 	{"GB", 1e9}, {"MB", 1e6}, {"KB", 1e3}, {"B", 1},
 }
 
-// UnmarshalYAML 接受整数或带单位的字符串。
+// UnmarshalYAML accepts an integer or a string with a unit.
 func (s *Size) UnmarshalYAML(n *yaml.Node) error {
 	var raw string
 	if err := n.Decode(&raw); err != nil {
@@ -75,7 +75,7 @@ func (s *Size) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
-// MarshalYAML 用最大的整除单位输出。
+// MarshalYAML outputs the value in the largest unit that divides it exactly.
 func (s Size) MarshalYAML() (any, error) { return s.String(), nil }
 
 func (s Size) String() string {

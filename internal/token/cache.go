@@ -17,17 +17,17 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/lru"
 )
 
-// Credential 是取令牌用的账号。
+// Credential is the account used to obtain tokens.
 type Credential struct {
 	Username, Password string
 }
 
-// Request 描述要取的令牌。
+// Request describes the token to obtain.
 type Request struct {
 	Realm   string
 	Service string
 	Scopes  []string
-	Cred    *Credential // nil 表示匿名
+	Cred    *Credential // nil means anonymous
 }
 
 func (r Request) key() string {
@@ -40,17 +40,18 @@ func (r Request) key() string {
 	return r.Realm + "\x00" + r.Service + "\x00" + strings.Join(scopes, " ") + "\x00" + who
 }
 
-// StatusError 是令牌服务返回的非 200 状态。
+// StatusError is a non-200 status returned by the token service.
 type StatusError struct{ Status int }
 
-func (e *StatusError) Error() string { return fmt.Sprintf("令牌服务返回 %d", e.Status) }
+func (e *StatusError) Error() string { return fmt.Sprintf("token service returned %d", e.Status) }
 
 type entry struct {
 	token   string
 	expires time.Time
 }
 
-// Cache 取令牌并缓存。并发的同一请求只向令牌服务发一次。
+// Cache obtains tokens and caches them. Concurrent identical requests reach the token service only
+// once.
 type Cache struct {
 	client    *http.Client
 	timeout   time.Duration
@@ -59,14 +60,15 @@ type Cache struct {
 	entries   *lru.Cache[string, entry]
 	sf        singleflight.Group
 
-	// OnCredentialRejected 在配置的账号被令牌服务拒绝时调用（之后改用匿名），可以为 nil。
+	// OnCredentialRejected is called when the token service rejects the configured account (anonymous
+	// access is used after that); it may be nil.
 	OnCredentialRejected func(realm, username string)
 }
 
-// maxTokenResponse 是令牌响应正文的上限。
+// maxTokenResponse is the size limit for the token response body.
 const maxTokenResponse = 1 << 20
 
-// NewCache 创建缓存。client 应当是带拨号拦截的上游客户端。
+// NewCache creates a cache. client should be the upstream client with the dial interception.
 func NewCache(client *http.Client, timeout time.Duration, userAgent string, maxEntries int) *Cache {
 	return &Cache{
 		client:    client,
@@ -77,20 +79,21 @@ func NewCache(client *http.Client, timeout time.Duration, userAgent string, maxE
 	}
 }
 
-// Get 返回令牌：缓存里有并且没过期就直接用，否则去取。
+// Get returns a token: a cached, unexpired one is used directly, otherwise a new one is obtained.
 func (c *Cache) Get(ctx context.Context, req Request) (string, error) {
 	k := req.key()
 	if e, ok := c.entries.Get(k); ok && c.now().Before(e.expires) {
 		return e.token, nil
 	}
-	// 取令牌和发起它的客户端连接脱钩：第一个客户端断开，不应让等着同一个令牌的其他请求一起失败
+	// Obtaining the token is decoupled from the client connection that triggered it: the first client
+	// disconnecting should not make other requests waiting for the same token fail with it
 	v, err, _ := c.sf.Do(k, func() (any, error) {
 		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.timeout)
 		defer cancel()
 		e, err := c.fetch(fctx, req)
 		var se *StatusError
 		if req.Cred != nil && errors.As(err, &se) && (se.Status == http.StatusUnauthorized || se.Status == http.StatusForbidden) {
-			// 账号被拒绝：退回匿名，别让配置错误把拉取全部拖垮
+			// Account rejected: fall back to anonymous, so a configuration error does not break every pull
 			if c.OnCredentialRejected != nil {
 				c.OnCredentialRejected(req.Realm, req.Cred.Username)
 			}
@@ -110,7 +113,7 @@ func (c *Cache) Get(ctx context.Context, req Request) (string, error) {
 	return v.(string), nil
 }
 
-// Invalidate 丢掉缓存的令牌（例如上游用它返回了 401）。
+// Invalidate discards the cached token (for example when the upstream returned 401 for it).
 func (c *Cache) Invalidate(req Request) { c.entries.Remove(req.key()) }
 
 func (c *Cache) fetch(ctx context.Context, req Request) (entry, error) {
@@ -150,19 +153,20 @@ func (c *Cache) fetch(ctx context.Context, req Request) (entry, error) {
 		ExpiresIn   int    `json:"expires_in"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxTokenResponse)).Decode(&body); err != nil {
-		return entry{}, fmt.Errorf("令牌响应不是合法的 JSON：%w", err)
+		return entry{}, fmt.Errorf("token response is not valid JSON: %w", err)
 	}
 	tok := body.Token
 	if tok == "" {
 		tok = body.AccessToken
 	}
 	if tok == "" {
-		return entry{}, errors.New("令牌响应里没有 token")
+		return entry{}, errors.New("token response contains no token")
 	}
 	return entry{token: tok, expires: c.now().Add(ttl(body.ExpiresIn))}, nil
 }
 
-// ttl 按 expires_in 计算缓存时长，提前一段时间过期，留出网络往返的余量。规范规定缺省为 60 秒。
+// ttl computes the cache duration from expires_in, expiring a little early to leave a margin for the
+// network round trip. The specification sets the default to 60 seconds.
 func ttl(expiresIn int) time.Duration {
 	if expiresIn <= 0 {
 		expiresIn = 60
