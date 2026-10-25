@@ -26,6 +26,7 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 	"github.com/openlinkos/registry-mirrors-relay/internal/ops"
 	"github.com/openlinkos/registry-mirrors-relay/internal/store"
+	"github.com/openlinkos/registry-mirrors-relay/internal/ui"
 )
 
 const (
@@ -573,7 +574,7 @@ func checkPage(t *testing.T, name, body string) {
 			t.Errorf("%s uses icon %s but has no symbol", name, m[1])
 		}
 	}
-	if strings.Contains(body, spriteMark) {
+	if strings.Contains(body, ui.SpriteMark) {
 		t.Errorf("%s: the icon placeholder was not replaced", name)
 	}
 	for k := range messagesZH {
@@ -728,9 +729,9 @@ func TestMessagesComplete(t *testing.T) {
 func TestAssets(t *testing.T) {
 	e := newEnv(t, envOpts{})
 	page := e.get("/admin/login").body
-	for _, name := range []string{"ui.css", "admin.css", "admin.js", "favicon.svg", "logo.svg"} {
-		u := e.h.assets.url(name)
-		if !strings.Contains(page, u) && name != "logo.svg" {
+	for _, name := range []string{"ui.css", "admin.css", "admin.js", ui.Mark("", "favicon.svg"), ui.Mark("", "logo-dark.svg")} {
+		u := e.h.assetURL(name)
+		if !strings.Contains(page, u) {
 			t.Errorf("the page should reference %s", u)
 		}
 		r := e.get(u)
@@ -745,7 +746,7 @@ func TestAssets(t *testing.T) {
 			t.Errorf("%s CSP: %s", name, r.Header.Get("Content-Security-Policy"))
 		}
 	}
-	css := e.get(e.h.assets.url("ui.css")).body
+	css := e.get(e.h.assetURL("ui.css")).body
 	m := regexp.MustCompile(`url\((fonts/Geist-Variable\.[0-9a-f]{10}\.woff2)\)`).FindStringSubmatch(css)
 	if m == nil || strings.Contains(css, "url(fonts/Geist-Variable.woff2)") {
 		t.Fatal("font URLs in the stylesheet should be rewritten to hashed names")
@@ -756,7 +757,7 @@ func TestAssets(t *testing.T) {
 	if r := e.get("/admin/assets/ui.css"); r.StatusCode != 404 {
 		t.Fatalf("names without a hash are not served: %d", r.StatusCode)
 	}
-	if r := e.do("POST", e.h.assets.url("admin.css"), url.Values{}, nil, nil); r.StatusCode != 405 {
+	if r := e.do("POST", e.h.assetURL("admin.css"), url.Values{}, nil, nil); r.StatusCode != 405 {
 		t.Fatalf("static files are GET only: %d", r.StatusCode)
 	}
 }

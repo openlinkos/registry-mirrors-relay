@@ -1,0 +1,2 @@
+The OpenLinkOS and LinkOS names and marks in this directory are not covered by the MIT licence of the code.
+They are for OpenLinkOS and LinkOS services; see the brand guidelines at https://openlinkos.com/brand.

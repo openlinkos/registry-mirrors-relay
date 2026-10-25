@@ -246,6 +246,7 @@ func (o *Ops) Admins() []AdminView {
 type SiteView struct {
 	Name      string            `json:"name"`
 	Operator  string            `json:"operator,omitempty"`
+	Brand     string            `json:"brand,omitempty"`
 	Links     map[string]string `json:"links,omitempty"`
 	Source    string            `json:"source"` // config | store
 	Updated   time.Time         `json:"updated,omitzero"`
@@ -258,7 +259,7 @@ type SiteView struct {
 // Site returns the effective site information.
 func (o *Ops) Site() SiteView {
 	rt := o.app.Runtime()
-	v := SiteView{Name: rt.Site.Name, Operator: rt.Site.Operator, Links: rt.Site.Links, Source: "config", ShowStatus: rt.Site.ShowStatus}
+	v := SiteView{Name: rt.Site.Name, Operator: rt.Site.Operator, Brand: rt.Site.Brand, Links: rt.Site.Links, Source: "config", ShowStatus: rt.Site.ShowStatus}
 	if s := rt.Data.Site; s != nil {
 		v.Source, v.Updated, v.UpdatedBy = "store", s.Updated, s.UpdatedBy
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/app"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
 	"github.com/openlinkos/registry-mirrors-relay/internal/store"
+	"github.com/openlinkos/registry-mirrors-relay/internal/ui"
 	"github.com/openlinkos/registry-mirrors-relay/internal/upstream"
 )
 
@@ -593,14 +594,18 @@ func (o *Ops) DeleteAdmin(who Actor, name string) error {
 type SiteInput struct {
 	Name     string            `json:"name"`
 	Operator string            `json:"operator"`
+	Brand    string            `json:"brand"`
 	Links    map[string]string `json:"links"`
 }
 
 // SetSite sets the site information, replacing the site section of the configuration file as a whole.
 func (o *Ops) SetSite(who Actor, in SiteInput) error {
-	in.Name, in.Operator = strings.TrimSpace(in.Name), strings.TrimSpace(in.Operator)
+	in.Name, in.Operator, in.Brand = strings.TrimSpace(in.Name), strings.TrimSpace(in.Operator), strings.TrimSpace(in.Brand)
 	if in.Name == "" || len(in.Name) > 80 || len(in.Operator) > 120 {
 		return bad("site.name")
+	}
+	if in.Brand != "" && !ui.IsBrand(in.Brand) {
+		return NewError(http.StatusBadRequest, "site.brand", in.Brand)
 	}
 	links := map[string]string{}
 	allowed := map[string]bool{}
@@ -622,7 +627,7 @@ func (o *Ops) SetSite(who Actor, in SiteInput) error {
 		links[k] = v
 	}
 	return o.change(who, "site.update", in.Name, "", func(d *store.Data) error {
-		d.Site = &store.Site{Name: in.Name, Operator: in.Operator, Links: links, Updated: time.Now().UTC(), UpdatedBy: who.String()}
+		d.Site = &store.Site{Name: in.Name, Operator: in.Operator, Brand: in.Brand, Links: links, Updated: time.Now().UTC(), UpdatedBy: who.String()}
 		return nil
 	})
 }

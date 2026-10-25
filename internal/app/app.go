@@ -426,7 +426,7 @@ func (a *App) build(cfg *config.Config, prev *Runtime) (_ *Runtime, err error) {
 	rt.Router = route.New(cfg)
 	rt.Site = cfg.Site
 	if s := data.Site; s != nil {
-		rt.Site = config.Site{Name: s.Name, Operator: s.Operator, Links: s.Links, ShowStatus: cfg.Site.ShowStatus}
+		rt.Site = config.Site{Name: s.Name, Operator: s.Operator, Brand: s.Brand, Links: s.Links, ShowStatus: cfg.Site.ShowStatus}
 	}
 	wcfg := *cfg
 	wcfg.Site = rt.Site

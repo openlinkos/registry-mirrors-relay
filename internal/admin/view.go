@@ -13,6 +13,7 @@ import (
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 	"github.com/openlinkos/registry-mirrors-relay/internal/status"
+	"github.com/openlinkos/registry-mirrors-relay/internal/ui"
 	"github.com/openlinkos/registry-mirrors-relay/internal/version"
 )
 
@@ -60,12 +61,18 @@ func (v *view) CSRF() string {
 	}
 	return v.c.sess.CSRF
 }
-func (v *view) Asset(name string) string { return v.h.assets.url(name) }
-func (v *view) Here() string             { return v.c.here() }
-func (v *view) SiteName() string         { return v.h.app.Runtime().Site.Name }
-func (v *view) Version() string          { return version.Version }
-func (v *view) Writable() bool           { return v.h.app.Store.Writable() }
-func (v *view) IsAdmin() bool            { return v.c.sess != nil && v.c.sess.Role == "admin" }
+func (v *view) Asset(name string) string { return v.h.assetURL(name) }
+
+// Brand is the site's brand (site.brand); empty is the neutral look.
+func (v *view) Brand() string { return v.h.app.Runtime().Site.Brand }
+
+// Mark is the address of one file of the site's mark: favicon.svg, logo.svg or logo-dark.svg.
+func (v *view) Mark(file string) string { return v.h.assetURL(ui.Mark(v.Brand(), file)) }
+func (v *view) Here() string            { return v.c.here() }
+func (v *view) SiteName() string        { return v.h.app.Runtime().Site.Name }
+func (v *view) Version() string         { return version.Version }
+func (v *view) Writable() bool          { return v.h.app.Store.Writable() }
+func (v *view) IsAdmin() bool           { return v.c.sess != nil && v.c.sess.Role == "admin" }
 
 // CanWrite: the admin role, and the operational data is writable.
 func (v *view) CanWrite() bool { return v.IsAdmin() && v.Writable() }
@@ -144,7 +151,7 @@ func (v *view) Group() string {
 // ---- Template functions
 
 var funcs = template.FuncMap{
-	"icon":  icon,
+	"icon":  ui.Icon,
 	"bytes": fmtBytes,
 	"num":   fmtNum,
 	"pct":   fmtPct,

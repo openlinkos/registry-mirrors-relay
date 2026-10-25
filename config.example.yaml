@@ -20,6 +20,9 @@ client_ip:
 site:
   name: Example Mirrors
   operator: Example Org
+  # The colours and marks of a brand of the OpenLinkOS design system, for OpenLinkOS and LinkOS services
+  # (linkos-mirrors, for one). Leave it out for the neutral look.
+  # brand: linkos-mirrors
   links:
     home: https://example.com
     status: https://status.example.com

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
+	"github.com/openlinkos/registry-mirrors-relay/internal/ui"
 )
 
 // CompileHostPatterns joins the host name patterns into one anchored, case-insensitive expression.
@@ -254,6 +255,14 @@ func validate(c *Config, res *Result) []error {
 		default:
 			bad("%s: page must be public, login or off", where)
 		}
+	}
+
+	if c.Site.Brand != "" && !ui.IsBrand(c.Site.Brand) {
+		var ids []string
+		for _, b := range ui.Brands() {
+			ids = append(ids, b.ID)
+		}
+		bad("site.brand %q is not a brand of the design system; leave it empty, or use one of: %s", c.Site.Brand, strings.Join(ids, ", "))
 	}
 
 	// Access control

@@ -1,0 +1,119 @@
+{
+  "openlinkos": {
+    "name": "OpenLinkOS",
+    "tier": "line",
+    "parent": "linkos",
+    "mark": "rings",
+    "word": "OpenLinkOS",
+    "url": { "en": "https://openlinkos.com/", "zh": "https://openlinkos.com/zh/" },
+    "description": {
+      "en": "Open-source software for the AI era",
+      "zh": "面向 AI 时代的开源软件"
+    },
+    "nav": null,
+    "colors": {
+      "mark": { "light": "#2563eb", "dark": "#6b9bff" },
+      "brand": {
+        "light": ["#1d4ed8", "#2563eb", "#2563eb"],
+        "dark": ["#6b9bff", "#5b8cff", "#2563eb"]
+      },
+      "soft": { "light": "rgba(37, 99, 235, 0.14)", "dark": "rgba(107, 155, 255, 0.16)" }
+    }
+  },
+  "origin": {
+    "name": "Origin",
+    "tier": "product",
+    "parent": "openlinkos",
+    "mark": "ring-dot",
+    "word": "Origin",
+    "url": { "en": "https://origin.openlinkos.com/", "zh": "https://origin.openlinkos.com/zh/" },
+    "description": {
+      "en": "Local-first, cross-agent personal memory for AI coding agents",
+      "zh": "本地优先、跨 Agent 的个人记忆，服务于 AI 编码 Agent"
+    },
+    "nav": "projects",
+    "colors": {
+      "mark": { "light": "#4f5bd5", "dark": "#8b96ff" },
+      "brand": {
+        "light": ["#4f5bd5", "#5f6ae0", "#4f5bd5"],
+        "dark": ["#8b96ff", "#7a85f7", "#4f5bd5"]
+      },
+      "soft": { "light": "rgba(79, 91, 213, 0.14)", "dark": "rgba(139, 150, 255, 0.16)" }
+    }
+  },
+  "agent": {
+    "name": "OpenLinkOS Agent",
+    "tier": "product",
+    "parent": "openlinkos",
+    "mark": "rings",
+    "word": "OpenLinkOS",
+    "descriptor": "Agent",
+    "url": {
+      "en": "https://github.com/openlinkos/agent",
+      "zh": "https://github.com/openlinkos/agent"
+    },
+    "description": {
+      "en": "A TypeScript framework for building AI agents",
+      "zh": "构建 AI Agent 的 TypeScript 框架"
+    },
+    "nav": "projects",
+    "colors": {
+      "mark": { "light": "#7c3aed", "dark": "#a78bfa" },
+      "brand": {
+        "light": ["#6d28d9", "#7c3aed", "#7c3aed"],
+        "dark": ["#a78bfa", "#9575f5", "#6d28d9"]
+      },
+      "soft": { "light": "rgba(124, 58, 237, 0.14)", "dark": "rgba(167, 139, 250, 0.16)" }
+    }
+  },
+  "linkos": {
+    "name": "LinkOS",
+    "tier": "master",
+    "mark": "rings",
+    "word": "LinkOS",
+    "url": { "en": "https://linkos.io/", "zh": "https://linkos.io/zh/" },
+    "description": {
+      "en": "The team behind OpenLinkOS and the LinkOS public services",
+      "zh": "OpenLinkOS 开源项目和 LinkOS 公共服务背后的团队"
+    },
+    "nav": null,
+    "colors": {
+      "mark": { "light": "#0d9b76", "dark": "#34d399" },
+      "brand": {
+        "light": ["#047857", "#059669", "#047857"],
+        "dark": ["#34d399", "#10b981", "#047857"]
+      },
+      "soft": { "light": "rgba(5, 150, 105, 0.14)", "dark": "rgba(52, 211, 153, 0.16)" }
+    }
+  },
+  "linkos-mirrors": {
+    "name": "LinkOS Mirrors",
+    "tier": "service",
+    "parent": "linkos",
+    "mark": "rings",
+    "word": "LinkOS",
+    "descriptor": "Mirrors",
+    "url": { "en": "https://linkos.org/mirrors", "zh": "https://linkos.org/zh/mirrors" },
+    "description": {
+      "en": "Free mirrors of public container registries",
+      "zh": "免费的公共容器镜像仓库加速服务"
+    },
+    "nav": "services",
+    "colors": "linkos"
+  },
+  "linkos-status": {
+    "name": "LinkOS Status",
+    "tier": "service",
+    "parent": "linkos",
+    "mark": "rings",
+    "word": "LinkOS",
+    "descriptor": "Status",
+    "url": { "en": "https://uptime.linkos.org/", "zh": "https://uptime.linkos.org/" },
+    "description": {
+      "en": "Live status of LinkOS services",
+      "zh": "LinkOS 各项服务的实时状态"
+    },
+    "nav": "services",
+    "colors": "linkos"
+  }
+}

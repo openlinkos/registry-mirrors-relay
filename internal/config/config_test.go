@@ -136,6 +136,15 @@ entrances:
 	}
 }
 
+func TestSiteBrand(t *testing.T) {
+	if c := mustParse(t, "site:\n  brand: linkos-mirrors\n").Config; c.Site.Brand != "linkos-mirrors" {
+		t.Errorf("brand = %q", c.Site.Brand)
+	}
+	if msg := parseErr(t, "site:\n  brand: nope\n"); !strings.Contains(msg, `site.brand "nope"`) || !strings.Contains(msg, "linkos-mirrors") {
+		t.Errorf("an unknown brand should be rejected and the brands listed: %s", msg)
+	}
+}
+
 func TestCredentialsRequirePublicOnly(t *testing.T) {
 	t.Setenv("HUB_PAT", "dckr_pat_secret")
 	base := `

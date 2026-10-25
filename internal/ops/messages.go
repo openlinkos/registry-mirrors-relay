@@ -46,6 +46,7 @@ var messages = map[string]i18n.Message{
 	"site.name":              i18n.M("The site name is required and at most 80 bytes long; the operator is at most 120 bytes long."),
 	"site.link_key":          i18n.M("Unknown link %s."),
 	"site.link":              i18n.M("The %s link must be a full http(s) address."),
+	"site.brand":             i18n.M("%s is not a brand of the design system."),
 	"store.readonly":         i18n.M("Operational data is read-only (admin.store.driver: none). Change the configuration file instead."),
 	"reload.failed":          i18n.M("Reloading the configuration failed"),
 	"config.invalid":         i18n.M("The configuration was not saved"),

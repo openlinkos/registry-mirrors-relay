@@ -86,6 +86,7 @@ type Admin struct {
 type Site struct {
 	Name      string            `json:"name"`
 	Operator  string            `json:"operator,omitempty"`
+	Brand     string            `json:"brand,omitempty"`
 	Links     map[string]string `json:"links,omitempty"`
 	Updated   time.Time         `json:"updated"`
 	UpdatedBy string            `json:"updated_by,omitempty"`

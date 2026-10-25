@@ -213,7 +213,7 @@ var hanExempt = []string{
 	"internal/i18n/zh.go",
 	"internal/i18n/i18n_test.go", // tests the translations
 	"internal/admin/messages_zh.go",
-	"internal/admin/assets/vendor/",
+	"internal/ui/vendor/",
 }
 
 // hanPending lists files still being translated. It must shrink to nothing.

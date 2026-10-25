@@ -7,19 +7,19 @@
 <meta name="referrer" content="same-origin">
 <meta name="color-scheme" content="{{if eq .Theme "auto"}}light dark{{else}}{{.Theme}}{{end}}">
 <title>{{.Title}} – {{.SiteName}} {{.T "app.admin"}}</title>
-<link rel="icon" href="{{.Asset "favicon.svg"}}" type="image/svg+xml">
+<link rel="icon" href="{{.Mark "favicon.svg"}}" type="image/svg+xml">
 <link rel="stylesheet" href="{{.Asset "ui.css"}}">
 <link rel="stylesheet" href="{{.Asset "admin.css"}}">
 <script type="module" src="{{.Asset "admin.js"}}"></script>
 </head>
-<body data-brand="linkos-mirrors">
+<body{{with .Brand}} data-brand="{{.}}"{{end}}>
 <svg data-sprite hidden></svg>
 {{if or .Bare (not .Sess)}}{{template "authShell" .}}{{else}}{{template "appShell" .}}{{end}}
 </body>
 </html>
 {{end}}
 
-{{define "logo"}}{{if eq .V.Theme "dark"}}<img src="{{.V.Asset "logo-dark.svg"}}" alt="" width="{{.Size}}" height="{{.Size}}">{{else if eq .V.Theme "light"}}<img src="{{.V.Asset "logo.svg"}}" alt="" width="{{.Size}}" height="{{.Size}}">{{else}}<picture><source media="(prefers-color-scheme: dark)" srcset="{{.V.Asset "logo-dark.svg"}}"><img src="{{.V.Asset "logo.svg"}}" alt="" width="{{.Size}}" height="{{.Size}}"></picture>{{end}}{{end}}
+{{define "logo"}}{{if eq .V.Theme "dark"}}<img src="{{.V.Mark "logo-dark.svg"}}" alt="" width="{{.Size}}" height="{{.Size}}">{{else if eq .V.Theme "light"}}<img src="{{.V.Mark "logo.svg"}}" alt="" width="{{.Size}}" height="{{.Size}}">{{else}}<picture><source media="(prefers-color-scheme: dark)" srcset="{{.V.Mark "logo-dark.svg"}}"><img src="{{.V.Mark "logo.svg"}}" alt="" width="{{.Size}}" height="{{.Size}}"></picture>{{end}}{{end}}
 
 {{define "langForm"}}<form method="post" action="/admin/prefs">
   <input type="hidden" name="lang" value="{{.V.OtherLang}}">
@@ -87,7 +87,7 @@
 {{define "authShell"}}<main class="ol-auth" id="main">
   {{if .Bare}}<aside class="ol-auth-aside">
     <div class="ol-auth-rings" aria-hidden="true"></div>
-    <a class="ol-auth-brand" href="/admin/"><img src="{{.Asset "logo-dark.svg"}}" alt="" width="24" height="24"><span>{{.SiteName}}</span></a>
+    <a class="ol-auth-brand" href="/admin/"><img src="{{.Mark "logo-dark.svg"}}" alt="" width="24" height="24"><span>{{.SiteName}}</span></a>
     <p class="ol-auth-statement">{{.T "auth.statement"}}</p>
   </aside>{{end}}
   <div class="ol-auth-body">

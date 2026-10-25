@@ -63,9 +63,12 @@ type ClientIP struct {
 
 // Site is the site information shown on the usage page and in the admin console.
 type Site struct {
-	Name     string            `yaml:"name"`
-	Operator string            `yaml:"operator"`
-	Links    map[string]string `yaml:"links"` // home, status, terms, privacy, abuse, source
+	Name     string `yaml:"name"`
+	Operator string `yaml:"operator"`
+	// Brand is a brand of the OpenLinkOS design system (ui.Brands), for OpenLinkOS and LinkOS services: its
+	// colours and marks on the usage page and in the console. Empty is the neutral look.
+	Brand string            `yaml:"brand"`
+	Links map[string]string `yaml:"links"` // home, status, terms, privacy, abuse, source
 	// ShowStatus shows the service status on the usage page (each upstream's reachability and availability over
 	// the last 24 hours), with the data from /status.json. It holds only what is safe to publish: no raw errors,
 	// addresses, quotas or request counts.

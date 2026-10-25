@@ -31,6 +31,7 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/clientip"
 	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 	"github.com/openlinkos/registry-mirrors-relay/internal/ops"
+	"github.com/openlinkos/registry-mirrors-relay/internal/ui"
 	"github.com/openlinkos/registry-mirrors-relay/internal/version"
 )
 
@@ -76,7 +77,7 @@ type Handler struct {
 	ops      *ops.Ops
 	log      *slog.Logger
 	now      func() time.Time
-	assets   *assets
+	assets   *ui.Set
 	tmpl     *template.Template
 	sessions *sessions
 	limiter  *loginLimiter
@@ -422,20 +423,20 @@ func sessionCookie(value string, secure bool, maxAge int) *http.Cookie {
 }
 
 func (h *Handler) serveAsset(c *ctx, file string) error {
-	f, ok := h.assets.byFile[file]
+	f, ok := h.assets.Lookup(file)
 	if !ok {
 		return fail(http.StatusNotFound, "error.notFound")
 	}
 	hd := c.w.Header()
-	hd.Set("Content-Type", f.ctype)
-	hd.Set("Content-Length", strconv.Itoa(len(f.body)))
+	hd.Set("Content-Type", f.Type)
+	hd.Set("Content-Length", strconv.Itoa(len(f.Body)))
 	hd.Set("Cache-Control", "private, max-age=31536000, immutable")
 	hd.Del("Vary")
-	if strings.HasPrefix(f.ctype, "image/svg") {
+	if strings.HasPrefix(f.Type, "image/svg") {
 		hd.Set("Content-Security-Policy", SVGCSP)
 	}
 	c.w.WriteHeader(http.StatusOK)
-	_, _ = c.w.Write(f.body)
+	_, _ = c.w.Write(f.Body)
 	return nil
 }
 
@@ -637,7 +638,7 @@ func (h *Handler) render(c *ctx, page string, v *view) error {
 	if err := h.tmpl.ExecuteTemplate(&buf, "layout", v); err != nil {
 		return err
 	}
-	body := h.assets.withSprite(buf.Bytes())
+	body := ui.WithSprite(buf.Bytes())
 	status := c.status
 	if status == 0 {
 		status = http.StatusOK
