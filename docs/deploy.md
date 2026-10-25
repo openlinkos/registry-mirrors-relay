@@ -40,7 +40,7 @@ docker run -d --name relay --restart unless-stopped \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
   -p 8080:8080 \
   -v relay-data:/var/lib/registry-mirrors-relay \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.5.0
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.6.0
 docker logs relay 2>&1 | grep 'generated password'
 ```
 
@@ -99,9 +99,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: registry-mirror
 resources:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.5.0
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.6.0
 components:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.5.0
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.6.0
 ```
 
 ```bash
@@ -164,7 +164,7 @@ kubectl create namespace registry-mirror
 openssl rand -base64 18 > admin-password
 kubectl -n registry-mirror create secret generic registry-mirrors-relay-admin --from-file=password=admin-password
 rm admin-password
-helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version 0.5.0 \
+helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version 0.6.0 \
   -n registry-mirror -f values.yaml
 helm test registry-mirrors-relay -n registry-mirror
 kubectl -n registry-mirror port-forward svc/registry-mirrors-relay 8080:80   # then open http://127.0.0.1:8080/admin/
@@ -271,15 +271,15 @@ cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 sha256sum --ignore-missing -c SHA256SUMS
 
-cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.5.0 \
+cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.6.0 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.5.0 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.6.0 -R openlinkos/registry-mirrors-relay
 
-cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.5.0 \
+cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.6.0 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.5.0 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.6.0 -R openlinkos/registry-mirrors-relay
 ```
 
 ## Usage page and service status
@@ -299,6 +299,15 @@ How the page is built:
 - **English and Chinese.** The page carries both. It shows the one in `?lang=en` or `?lang=zh`, then the one chosen in the `relay-lang` cookie (shared with the admin console), then the browser's, and English otherwise; the menu in the header switches it. The theme (auto, light, dark) is kept in the browser.
 - **Cache-friendly and locked down.** The page changes only when the configuration does, so a CDN can cache it (`Cache-Control: no-cache` asks it to revalidate). Its stylesheet, script, fonts and marks are served from `/assets/` under names that carry their hash and are cached for a year. Nothing is loaded from elsewhere; the Content-Security-Policy allows only the site's own files, no inline script or style, and Trusted Types with no policy.
 - **Without JavaScript** the page still reads whole in English: every runtime's steps one after another, and the mirror addresses; the converter, the language and theme switches and the live status need the script.
+
+## Upgrading from v0.5
+
+v0.6.0 changes no configuration, but some things you may notice:
+
+- **The usage page is new.** It is built from the configuration, in English and Chinese, with the service status, a converter and the client configuration (see [Usage page and service status](#usage-page-and-service-status)). It is served at `/` with its files under `/assets/`, and its Content-Security-Policy no longer allows inline styles. Its language follows `?lang=`, the `relay-lang` cookie and the browser, and is English when the browser asks for neither Chinese nor English (the old page showed Chinese). `/site.json` is still served.
+- **`site.brand`** gives the usage page and the console the colours and marks of an OpenLinkOS or LinkOS service. Without it both take a neutral look; until v0.5 the console always used the LinkOS Mirrors marks.
+- **The console's pages moved.** Each setting is changed on the page that uses it: entrances on Entrances (a page per entrance, with its client configuration), upstreams on Upstreams, rate limits on Rate limits, the usage page's name, brand, links and status on Usage page. Configuration lists the changes made in the console and holds the cache and upstream connections; Settings is gone. The old addresses (`/admin/usage`, `/admin/settings`, `/admin/config/entrances`, `/admin/config/upstream`) redirect to the new ones.
+- **Client accounts** are created on their own page, which then shows how to sign in; each account's page lists its latest requests. The language is chosen in the account menu at the foot of the sidebar.
 
 ## Upgrading from v0.4
 

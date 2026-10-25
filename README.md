@@ -24,7 +24,7 @@ docker run -d --name relay --restart unless-stopped \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
   -p 8080:8080 \
   -v relay-data:/var/lib/registry-mirrors-relay \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.5.0
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.6.0
 docker logs relay 2>&1 | grep 'generated password'   # the first administrator's password, shown once
 ```
 
@@ -89,6 +89,7 @@ Each release on the [Releases](https://github.com/openlinkos/registry-mirrors-re
 - [x] v0.3.0: edit entrances, upstreams, limits, cache and more from the console (on top of the configuration file, exportable)
 - [x] v0.4.0: the admin console is open to every address by default (protected by sign-in), on the pull host name through a CDN or reverse proxy
 - [x] v0.5.0: an admin command that works while the service runs (`admin password`), a generated first password; the code is in English and messages follow the reader's language
+- [x] v0.6.0: a redesigned console (every setting on the page that uses it, a page per entrance and per client account) and usage page, on the design system, with `site.brand`
 
 ## Development
 

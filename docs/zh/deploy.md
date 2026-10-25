@@ -40,7 +40,7 @@ docker run -d --name relay --restart unless-stopped \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
   -p 8080:8080 \
   -v relay-data:/var/lib/registry-mirrors-relay \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.5.0
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.6.0
 docker logs relay 2>&1 | grep 'generated password'
 ```
 
@@ -99,9 +99,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: registry-mirror
 resources:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.5.0
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.6.0
 components:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.5.0
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.6.0
 ```
 
 ```bash
@@ -164,7 +164,7 @@ kubectl create namespace registry-mirror
 openssl rand -base64 18 > admin-password
 kubectl -n registry-mirror create secret generic registry-mirrors-relay-admin --from-file=password=admin-password
 rm admin-password
-helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version 0.5.0 \
+helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version 0.6.0 \
   -n registry-mirror -f values.yaml
 helm test registry-mirrors-relay -n registry-mirror
 kubectl -n registry-mirror port-forward svc/registry-mirrors-relay 8080:80   # 打开 http://127.0.0.1:8080/admin/；有 Ingress 时也可以用域名
@@ -271,15 +271,15 @@ cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 sha256sum --ignore-missing -c SHA256SUMS
 
-cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.5.0 \
+cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.6.0 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.5.0 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.6.0 -R openlinkos/registry-mirrors-relay
 
-cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.5.0 \
+cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.6.0 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.5.0 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.6.0 -R openlinkos/registry-mirrors-relay
 ```
 
 ## 用法页和服务状态
@@ -299,6 +299,15 @@ gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.5
 - **中英文。** 页面里两种语言都有。依次按 `?lang=en` 或 `?lang=zh`、`relay-lang` Cookie 里选过的语言（和管理后台共用）、浏览器的语言决定，都不匹配时用英文；页头的菜单可以切换。配色（自动、浅色、深色）记在浏览器里。
 - **便于缓存，限制严格。** 页面只随配置变化，CDN 可以缓存（`Cache-Control: no-cache` 要求重新验证）。样式、脚本、字体和标志放在 `/assets/` 下，文件名带内容哈希，缓存一年。不从别处加载任何东西；内容安全策略只允许本站文件，不允许内联脚本和样式，并启用不带任何策略的 Trusted Types。
 - **没有 JavaScript 时**，页面照样能完整阅读（英文）：各运行时的步骤依次列出，还有各上游的加速地址；地址转换、语言和配色切换、实时状态需要脚本。
+
+## 从 v0.5 升级
+
+v0.6.0 不改配置，但有几处变化会被察觉：
+
+- **用法页是新的。**按配置生成，中英文都有，包括服务状态、地址转换和客户端配置（见[用法页和服务状态](#用法页和服务状态)）。它在 `/`，用到的文件在 `/assets/` 下，Content-Security-Policy 不再允许内联样式。语言依次按 `?lang=`、`relay-lang` Cookie 和浏览器，浏览器既不要中文也不要英文时用英文（旧页面默认中文）。`/site.json` 照常提供。
+- **`site.brand`** 让用法页和后台用 OpenLinkOS 或 LinkOS 服务的配色和标志。不写时两者都是中性外观；v0.5 及以前，后台总是用 LinkOS Mirrors 的标志。
+- **后台的页面调整了。**每项设置在用到它的页面上改：入口在「入口」（每个入口一页，带它的客户端配置），上游在「上游」，限流在「限流」，用法页的名称、品牌、链接和状态在「用法页」。「配置」页列出后台做过的修改，并负责缓存和上游连接；「设置」页去掉了。旧地址（`/admin/usage`、`/admin/settings`、`/admin/config/entrances`、`/admin/config/upstream`）会跳到新的页面。
+- **客户端账号**在单独的页面新建，建好后显示怎么登录；每个账号的页面列出它最近的请求。语言在侧栏底部的账号菜单里选。
 
 ## 从 v0.4 升级
 

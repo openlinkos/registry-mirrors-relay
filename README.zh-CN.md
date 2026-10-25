@@ -24,7 +24,7 @@ docker run -d --name relay --restart unless-stopped \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
   -p 8080:8080 \
   -v relay-data:/var/lib/registry-mirrors-relay \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.5.0
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.6.0
 docker logs relay 2>&1 | grep 'generated password'   # 第一个管理员的口令，只出现这一次
 ```
 
@@ -89,6 +89,7 @@ Docker Compose（CDN 之后、直接用 ACME、Caddy 在前三种）、Kubernete
 - [x] v0.3.0：在后台改入口、上游、限流、缓存等配置（叠加在配置文件之上，可导出）
 - [x] v0.4.0：管理后台默认对所有地址开放（靠登录保护），经 CDN、反向代理用拉取的域名就能打开
 - [x] v0.5.0：admin 命令能直接对运行中的服务操作（`admin password`），首次启动生成口令；代码改用英文，界面和错误信息按读者的语言显示
+- [x] v0.6.0：重新设计的后台（每项设置在用到它的页面上改，每个入口、每个客户端账号一页）和用法页，基于设计系统，新增 `site.brand`
 
 ## 开发
 
