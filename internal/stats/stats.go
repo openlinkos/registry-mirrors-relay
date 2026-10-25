@@ -346,6 +346,7 @@ func (c *Collector) Summarize(d time.Duration, n int) Summary {
 // Filter holds the conditions for querying recent requests; empty fields do not filter.
 type Filter struct {
 	ClientIP, Upstream, Image string
+	User                      string // the account, exactly
 	Query                     string // found in the URI, User-Agent, client IP or image, or equal to the account name
 	Status                    int    // 0 means any; 4 means 4xx, 5 means 5xx
 }
@@ -353,6 +354,8 @@ type Filter struct {
 func (f Filter) match(r *Request) bool {
 	switch {
 	case f.ClientIP != "" && r.ClientIP != f.ClientIP:
+		return false
+	case f.User != "" && r.User != f.User:
 		return false
 	case f.Upstream != "" && r.Upstream != f.Upstream:
 		return false

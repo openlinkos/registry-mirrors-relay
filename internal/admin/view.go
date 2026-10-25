@@ -4,6 +4,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"html/template"
 	"io/fs"
 	"math"
@@ -43,12 +44,33 @@ func (v *view) T(key string, args ...any) string { return tr(v.c.lang, key, args
 func (v *view) Lang() string     { return string(v.c.lang) }
 func (v *view) HTMLLang() string { return v.c.lang.HTML() }
 
-// OtherLang is the language the switch offers.
-func (v *view) OtherLang() i18n.Lang {
-	if v.c.lang == i18n.ZH {
-		return i18n.EN
+// langItem is one language in the language menu: written in that language, the current one marked.
+type langItem struct {
+	Code, HTML, Name string
+	Current          bool
+}
+
+// Langs are the languages the menu offers.
+func (v *view) Langs() []langItem {
+	var out []langItem
+	for _, l := range i18n.Langs {
+		out = append(out, langItem{Code: string(l), HTML: l.HTML(), Name: l.Name(), Current: l == v.c.lang})
 	}
-	return i18n.ZH
+	return out
+}
+
+// LangName is the name of the interface language, in that language.
+func (v *view) LangName() string { return v.c.lang.Name() }
+
+// Host is the host name the browser used to reach the console.
+func (v *view) Host() string { return v.c.r.Host }
+
+// NoticeTone is the tone of the success notice: a failed check is a warning.
+func (v *view) NoticeTone() string {
+	if v.c.r.URL.Query().Get("ok") == "upstream.failed" {
+		return "warning"
+	}
+	return "success"
 }
 
 // Err renders an error in the interface language; nil is "".
@@ -115,10 +137,10 @@ var navTable = []struct {
 	items [][3]string // key, path, icon
 }{
 	{"", [][3]string{{"overview", "/admin/", "layout-dashboard"}}},
-	{"nav.groupService", [][3]string{{"upstreams", "/admin/upstreams", "server"}, {"usage", "/admin/usage", "plug"}}},
-	{"nav.groupAccess", [][3]string{{"users", "/admin/users", "user"}, {"rules", "/admin/rules", "shield-check"}, {"limits", "/admin/limits", "activity"}}},
-	{"nav.groupRecords", [][3]string{{"requests", "/admin/requests", "list"}, {"abuse", "/admin/abuse", "triangle-alert"}, {"audit", "/admin/audit", "scroll-text"}}},
-	{"nav.groupSystem", [][3]string{{"settings", "/admin/settings", "settings"}, {"config", "/admin/config", "wrench"}, {"admins", "/admin/admins", "key-round"}, {"system", "/admin/system", "cpu"}}},
+	{"nav.groupService", [][3]string{{"upstreams", "/admin/upstreams", "server"}, {"entrances", "/admin/entrances", "route"}, {"site", "/admin/site", "book-open"}}},
+	{"nav.groupAccess", [][3]string{{"users", "/admin/users", "users"}, {"rules", "/admin/rules", "list-filter"}, {"limits", "/admin/limits", "gauge"}}},
+	{"nav.groupRecords", [][3]string{{"requests", "/admin/requests", "list"}, {"abuse", "/admin/abuse", "shield-alert"}, {"audit", "/admin/audit", "scroll-text"}}},
+	{"nav.groupSystem", [][3]string{{"config", "/admin/config", "sliders-horizontal"}, {"admins", "/admin/admins", "key-round"}, {"system", "/admin/system", "cpu"}}},
 }
 
 func (v *view) NavGroups() []navGroup {
@@ -163,6 +185,11 @@ var funcs = template.FuncMap{
 	"tone":  statusTone,
 	"str":   func(v any) string { return fmt.Sprint(v) },
 	"list":  func(s ...string) []string { return s },
+	// An avatar's initials and colour, from a name
+	"initials":   initials,
+	"avatarTone": avatarTone,
+	// who did something, as people read it: an administrator by name, other actors as recorded
+	"who": func(actor string) string { return strings.TrimPrefix(actor, "admin:") },
 	// Strips covering the last 24 hours
 	"hours":     hoursStrip,
 	"ratios":    ratioStrip,
@@ -347,6 +374,34 @@ func statusTone(status int) string {
 		return "info"
 	}
 	return "success"
+}
+
+// initials are the first one or two letters of a name, for an avatar: "ci-runner" → "CR", "bob" → "BO".
+func initials(name string) string {
+	var parts []string
+	for _, p := range strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' || r == '.' || r == '@' || r == ' ' }) {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	first := func(s string, n int) string {
+		r := []rune(s)
+		return string(r[:min(n, len(r))])
+	}
+	switch len(parts) {
+	case 0:
+		return "?"
+	case 1:
+		return strings.ToUpper(first(parts[0], 2))
+	}
+	return strings.ToUpper(first(parts[0], 1) + first(parts[1], 1))
+}
+
+// avatarTone is the series colour class of a name's avatar: the same name always gets the same colour.
+func avatarTone(name string) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(name))
+	return "ol-series-" + strconv.Itoa(int(h.Sum32()%8)+1)
 }
 
 // Dur is the written form of a duration.

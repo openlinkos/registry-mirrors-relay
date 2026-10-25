@@ -3,78 +3,42 @@
 {{template "notices" .}}
 {{if $d.EditOff}}<div class="ol-notices">{{template "alert" (dict "Tone" "warning" "Text" (.T "config.editOff"))}}</div>{{else if not .Writable}}<div class="ol-notices">{{template "alert" (dict "Tone" "info" "Text" (.T "config.readOnly"))}}</div>{{end}}
 
-<section class="ol-section" id="overrides">
-  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "config.overrides"}}</h2><p class="ol-section-description">{{.T "config.overridesHelp"}}</p></div>
-  {{if $d.Overrides}}<div class="ol-table-wrap"><table class="ol-table">
-    <thead><tr><th>{{.T "config.key"}}</th><th>{{.T "config.state"}}</th><th>{{.T "config.updated"}}</th><th></th></tr></thead>
-    <tbody>{{range $d.Overrides}}<tr>
-      <td class="ol-mono">{{.Key}}<details class="ol-details"><summary>{{$v.T "config.value"}}</summary><div class="ol-code ol-code-wrap"><pre><code>{{.Value}}</code></pre></div></details>{{with .Cause}}<p class="ol-hint ol-tone-danger admin-wrap">{{$v.Err .}}</p>{{end}}</td>
+<section class="ol-section" id="overrides" aria-labelledby="ledger-title">
+  <div class="ol-section-header"><h2 class="ol-section-title" id="ledger-title">{{.T "config.overrides"}}</h2><p class="ol-section-description">{{.T "config.overridesHelp"}}</p>
+    {{if $d.Ledger}}<div class="ol-section-actions"><button class="ol-btn ol-btn-secondary ol-btn-sm" type="button" popovertarget="export-menu">{{icon "download" "sm"}}{{.T "config.export"}}{{icon "chevron-down" "sm"}}</button>
+      <div class="ol-menu ol-menu-end" id="export-menu" popover>
+        <a class="ol-menu-item" href="/admin/config/export">{{icon "file-text"}}{{.T "config.exportOverrides"}}</a>
+        <a class="ol-menu-item" href="/admin/config/export?format=merged">{{icon "file-cog"}}{{.T "config.exportMerged"}}</a>
+      </div></div>{{end}}
+  </div>
+  {{if $d.Ledger}}<div class="ol-stack"><div class="ol-table-wrap"><table class="ol-table">
+    <thead><tr><th scope="col">{{.T "config.key"}}</th><th scope="col">{{.T "config.state"}}</th><th scope="col">{{.T "config.updated"}}</th><th scope="col" class="ol-actions"><span class="ol-sr-only">{{.T "action.actions"}}</span></th></tr></thead>
+    <tbody>{{range $d.Ledger}}<tr>
+      <td><a class="ol-cell-title" href="{{.Edit}}">{{.Title}}</a><span class="ol-cell-sub ol-mono">{{.Key}}</span>
+        <details class="ol-details"><summary>{{$v.T "config.value"}}</summary><div class="ol-code ol-code-wrap"><pre><code>{{.Value}}</code></pre></div></details>
+        {{with .Cause}}<p class="ol-hint ol-tone-danger ol-break">{{$v.Err .}}</p>{{end}}</td>
       <td>{{template "ovState" (dict "S" .State "V" $v)}}</td>
-      <td class="ol-nowrap">{{time .Updated}}{{with .UpdatedBy}}<div class="ol-cell-sub">{{.}}</div>{{end}}</td>
-      <td>{{if $v.CanWrite}}{{template "resetButton" (dict "V" $v "Key" .Key)}}{{end}}</td>
+      <td class="ol-nowrap">{{time .Updated}}{{with .UpdatedBy}}<span class="ol-cell-sub">{{who .}}</span>{{end}}</td>
+      <td class="ol-actions">{{if $v.CanWrite}}{{template "resetButton" (dict "V" $v "Key" .Key)}}{{end}}</td>
     </tr>{{end}}</tbody>
   </table></div>
-  <div class="ol-toolbar admin-after">
-    <a class="ol-btn ol-btn-secondary ol-btn-sm" href="/admin/config/export">{{icon "download" "sm"}}{{.T "config.exportOverrides"}}</a>
-    <a class="ol-btn ol-btn-secondary ol-btn-sm" href="/admin/config/export?format=merged">{{icon "download" "sm"}}{{.T "config.exportMerged"}}</a>
-  </div>
-  <p class="ol-hint">{{.T "config.exportHelp"}}</p>
-  {{else}}<p class="ol-muted">{{.T "config.noOverrides"}}</p>{{end}}
+  <p class="ol-hint">{{.T "config.exportHelp"}}</p></div>
+  {{else}}{{template "empty" (dict "Icon" "file-cog" "Title" (.T "config.noOverridesTitle") "Text" (.T "config.noOverrides"))}}{{end}}
 </section>
 
 {{range $d.Sections}}{{$s := .}}
-<section class="ol-section" id="{{.Key}}">
-  <div class="ol-section-header">
-    <h2 class="ol-section-title">{{.Title}}</h2>
-    <p class="ol-section-description">{{.Help}}{{with .Override}} {{template "ovState" (dict "S" .State "V" $v)}}{{end}}</p>
-  </div>
-  {{if $d.Editable}}<form method="post" action="/admin/config/save" class="ol-form">
-    {{template "csrf" $v}}<input type="hidden" name="key" value="{{.Key}}">
-    <div class="ol-grid ol-grid-2">{{range .Fields}}{{template "cfgField" (dict "F" . "V" $v "ID" (print $s.Key "-" .Name))}}{{end}}</div>
-    <div class="ol-form-actions"><button type="submit" class="ol-btn ol-btn-primary">{{icon "check" "sm"}}{{$v.T "action.save"}}</button></div>
-  </form>
-  {{with .Override}}<div class="admin-after">{{template "resetButton" (dict "V" $v "Key" .Key)}}</div>{{end}}
-  {{else}}<dl class="ol-dl">{{range .Fields}}<dt>{{.Label}}</dt><dd class="ol-mono">{{if .Value}}{{.Value}}{{else}}—{{end}}{{if .Changed}} <span class="ol-muted">{{$v.T "config.fileValue" "v" (or .File "—")}}</span>{{end}}</dd>{{end}}</dl>{{end}}
+<section class="ol-section" id="{{.Key}}" aria-labelledby="{{.Key}}-title">
+  <div class="ol-section-header"><h2 class="ol-section-title" id="{{.Key}}-title">{{.Title}}</h2><p class="ol-section-description">{{.Help}}</p>{{with .Override}}{{template "ovState" (dict "S" .State "V" $v)}}{{end}}</div>
+  {{if $d.Editable}}<form method="post" action="/admin/config/save" class="ol-panel">
+    {{template "csrf" $v}}<input type="hidden" name="key" value="{{.Key}}"><input type="hidden" name="back" value="/admin/config#{{.Key}}">
+    <div class="ol-settings">{{range .Fields}}{{template "settingRow" (dict "F" . "V" $v "ID" (print $s.Key "-" .Name) "Edit" true)}}{{end}}</div>
+    <div class="ol-panel-footer"><span>{{$v.T "config.saveHelp"}}</span>{{if .Override}}{{template "resetSubmit" (dict "V" $v "Key" .Key)}}{{end}}<button type="submit" class="ol-btn ol-btn-primary ol-btn-sm">{{$v.T "config.saveSection" "section" .Title}}</button></div>
+  </form>{{else}}<div class="ol-settings">{{range .Fields}}{{template "settingRow" (dict "F" . "V" $v "ID" (print $s.Key "-" .Name))}}{{end}}</div>{{end}}
 </section>
 {{end}}
 
-<section class="ol-section" id="entrances">
-  <div class="ol-section-header">
-    <h2 class="ol-section-title">{{.T "usage.entrances"}}</h2>
-    <p class="ol-section-description">{{.T "config.entrancesHelp"}}{{with $d.EntOver}} {{template "ovState" (dict "S" .State "V" $v)}}{{end}}</p>
-    <div class="ol-section-actions"><a class="ol-btn ol-btn-secondary ol-btn-sm" href="/admin/config/entrances">{{if $d.Editable}}{{icon "pencil" "sm"}}{{.T "config.editEntrances"}}{{else}}{{icon "list" "sm"}}{{.T "config.viewEntrances"}}{{end}}</a></div>
-  </div>
-  <div class="ol-table-wrap"><table class="ol-table ol-table-compact">
-    <thead><tr><th>{{.T "usage.entrance"}}</th><th>{{.T "usage.hosts"}}</th><th>{{.T "usage.mode"}}</th><th>{{.T "usage.auth"}}</th><th>{{.T "usage.page"}}</th></tr></thead>
-    <tbody>{{range $d.Entrances}}<tr>
-      <td>{{.Name}}</td><td class="ol-mono admin-wrap">{{.Hosts}}</td>
-      <td>{{if .Upstream}}{{$v.T "usage.fixed" "upstream" .Upstream}}{{else}}{{$v.T "usage.single"}}{{end}}</td>
-      <td>{{if eq .Auth "basic"}}{{$v.T "usage.basic"}}{{else}}{{$v.T "usage.open"}}{{end}}</td>
-      <td>{{$v.T (print "usage.page." .Page)}}</td>
-    </tr>{{end}}</tbody>
-  </table></div>
-</section>
-
-<section class="ol-section" id="upstreams">
-  <div class="ol-section-header">
-    <h2 class="ol-section-title">{{.T "nav.upstreams"}}</h2>
-    <p class="ol-section-description">{{.T "config.upstreamsHelp"}}</p>
-    {{if $d.Editable}}<div class="ol-section-actions"><a class="ol-btn ol-btn-secondary ol-btn-sm" href="/admin/config/upstream">{{icon "plus" "sm"}}{{.T "config.upstreamNew"}}</a></div>{{end}}
-  </div>
-  <div class="ol-table-wrap"><table class="ol-table ol-table-compact">
-    <thead><tr><th>{{.T "upstreams.name"}}</th><th>{{.T "upstreams.registry"}}</th><th>{{.T "config.source"}}</th><th>{{.T "config.state"}}</th><th></th></tr></thead>
-    <tbody>{{range $d.Upstreams}}<tr>
-      <td>{{.Name}}{{if .Disabled}} {{template "badge" (dict "Text" ($v.T "config.disabled") "Square" true)}}{{end}}{{if .Credentials}} {{template "badge" (dict "Text" ($v.T "upstreams.credentials") "Tone" "info" "Square" true)}}{{end}}</td>
-      <td class="ol-mono">{{.Registry}}</td>
-      <td>{{$v.T (print "config.source." .Source)}}</td>
-      <td>{{with .Override}}{{template "ovState" (dict "S" .State "V" $v)}}{{else}}—{{end}}</td>
-      <td><a class="ol-btn ol-btn-ghost ol-btn-xs" href="/admin/config/upstream?name={{.Name}}">{{if $d.Editable}}{{icon "pencil" "sm"}}{{$v.T "action.edit"}}{{else}}{{$v.T "config.details"}}{{end}}</a></td>
-    </tr>{{end}}</tbody>
-  </table></div>
-</section>
-
-<section class="ol-section">
-  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "config.fileOnly"}}</h2><p class="ol-section-description">{{.T "config.fileOnlyHelp"}}</p></div>
+<section class="ol-section" aria-labelledby="file-title">
+  <div class="ol-section-header"><h2 class="ol-section-title" id="file-title">{{.T "config.fileOnly"}}</h2><p class="ol-section-description">{{.T "config.fileOnlyHelp"}}</p></div>
   <details class="ol-details"><summary>{{.T "config.effective"}}</summary>
     {{template "snippet" (dict "ID" "effective-config" "Label" "config.yaml" "Code" $d.Effective "V" $v)}}
     <p class="ol-hint">{{.T "config.effectiveHelp"}}</p>

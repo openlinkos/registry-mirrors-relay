@@ -1,0 +1,53 @@
+{{define "content"}}
+{{template "header" (dict "Title" (.T "users.create") "Desc" (.T "users.createDescription"))}}
+{{template "notices" .}}
+<form method="post" action="/admin/users/create">
+  {{template "csrf" .}}
+  <section class="ol-form-section" aria-labelledby="n-account">
+    <div class="ol-form-section-header"><h2 class="ol-form-section-title" id="n-account">{{.T "users.account"}}</h2><p class="ol-form-section-description">{{.T "users.accountHelp"}}</p></div>
+    <div class="ol-form-section-body">
+      <div class="ol-field">
+        <label class="ol-label" for="name">{{.T "users.name"}} <span class="ol-required">*</span></label>
+        <input class="ol-input ol-input-mono" id="name" name="name" value="{{.F "name"}}" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}" autocomplete="off" spellcheck="false" aria-describedby="name-hint" autofocus>
+        <p class="ol-hint" id="name-hint">{{.T "users.nameHint"}}</p>
+      </div>
+      <div class="ol-field">
+        <label class="ol-label" for="note">{{.T "users.note"}}</label>
+        <input class="ol-input" id="note" name="note" value="{{.F "note"}}" maxlength="500" aria-describedby="note-hint">
+        <p class="ol-hint" id="note-hint">{{.T "users.noteHint"}}</p>
+      </div>
+    </div>
+  </section>
+  <section class="ol-form-section" aria-labelledby="n-password">
+    <div class="ol-form-section-header"><h2 class="ol-form-section-title" id="n-password">{{.T "users.password"}}</h2><p class="ol-form-section-description">{{.T "users.passwordHelp"}}</p></div>
+    <div class="ol-form-section-body">
+      <div class="ol-field">
+        <label class="ol-label" for="password">{{.T "users.passwordOwn"}}</label>
+        <input class="ol-input" id="password" type="password" name="password" minlength="12" maxlength="72" autocomplete="new-password" aria-describedby="password-hint">
+        <p class="ol-hint" id="password-hint">{{.T "users.passwordHint"}}</p>
+      </div>
+    </div>
+  </section>
+  <section class="ol-form-section" aria-labelledby="n-limits">
+    <div class="ol-form-section-header"><h2 class="ol-form-section-title" id="n-limits">{{.T "users.limits"}}</h2><p class="ol-form-section-description">{{.T "users.limitsHelp"}}</p></div>
+    <div class="ol-form-section-body">
+      <div class="ol-grid ol-grid-2">
+        <div class="ol-field">
+          <label class="ol-label" for="manifest_rate">{{.T "users.rateLabel"}}</label>
+          <input class="ol-input" id="manifest_rate" name="manifest_rate" type="number" min="0" max="1000" step="0.1" value="{{.F "manifest_rate"}}" placeholder="{{.T "users.defaultLimits"}}" aria-describedby="rate-hint">
+          <p class="ol-hint" id="rate-hint">{{.T "users.rateHint"}}</p>
+        </div>
+        <div class="ol-field">
+          <label class="ol-label" for="blob_streams">{{.T "users.streamsLabel"}}</label>
+          <input class="ol-input" id="blob_streams" name="blob_streams" type="number" min="0" max="10000" step="1" value="{{.F "blob_streams"}}" placeholder="{{.T "users.defaultLimits"}}" aria-describedby="streams-hint">
+          <p class="ol-hint" id="streams-hint">{{.T "users.streamsHint"}}</p>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section class="ol-form-section">
+    <div></div>
+    <div class="ol-form-section-body"><div class="ol-form-actions"><button type="submit" class="ol-btn ol-btn-primary">{{icon "user-plus" "sm"}}{{.T "users.createButton"}}</button><a class="ol-btn ol-btn-ghost" href="/admin/users">{{.T "action.cancel"}}</a></div></div>
+  </section>
+</form>
+{{end}}

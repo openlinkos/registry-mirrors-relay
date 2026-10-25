@@ -1,134 +1,21 @@
 /*
- * The admin console's few additions to the OpenLinkOS design system (@openlinkos/ui, loaded as ui.css
- * before this file). Everything else uses the design system's own classes. Only design system variables
- * are used; no colours are hard-coded. The rules are not in any layer, so they take precedence over the
- * design system.
+ * The console's few additions to the OpenLinkOS design system (@openlinkos/ui, loaded as ui.css before this
+ * file). Everything else uses the design system's own classes. Only design system variables are used. The
+ * rules are not in any layer, so they take precedence over the design system.
  */
 
-/* Overview charts: SVG drawn on the server; the colours are given here, with no inline styles in the
-   page. */
-.admin-chart {
-  display: block;
-  inline-size: 100%;
+/* The overview's charts stretch to their column (preserveAspectRatio="none") at a fixed height. */
+.ol-chart > .ol-chart-svg[preserveAspectRatio="none"] {
   block-size: 9rem;
+  margin-block: var(--ol-space-3) var(--ol-space-2);
 }
 
-.admin-chart-grid {
-  stroke: var(--ol-color-border);
-  stroke-width: 1;
+/* A row of fields in a panel ends with the panel's padding, not a toolbar's margin. */
+.ol-panel-body.ol-toolbar {
+  margin-block-end: 0;
 }
 
-.admin-chart-area {
-  fill: var(--ol-color-accent-bg);
-}
-
-.admin-chart-line {
-  fill: none;
-  stroke: var(--ol-color-accent-solid);
-  stroke-width: 1.5;
-}
-
-.admin-chart-error {
-  fill: none;
-  stroke: var(--ol-color-danger-solid);
-  stroke-width: 1.5;
-}
-
-.admin-chart-axis {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--ol-space-2);
-  margin-block-start: var(--ol-space-1);
-  color: var(--ol-color-fg-muted);
-  font-size: var(--ol-font-size-xs);
-}
-
-.admin-legend {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ol-space-1);
-}
-
-.admin-legend::before {
-  content: "";
-  inline-size: 0.75rem;
-  block-size: 2px;
-  background: var(--ol-color-accent-solid);
-}
-
-.admin-legend-error::before {
-  background: var(--ol-color-danger-solid);
-}
-
-/* Small forms in table rows (delete, add to allowlist): like buttons, they take only their own width. */
-.admin-inline {
-  display: inline-flex;
-  margin: 0;
-}
-
-/* Longer values in tables (URIs, regular expressions): wrap rather than widen the table. */
-.admin-wrap {
-  overflow-wrap: anywhere;
-  max-inline-size: 36rem;
-}
-
-.admin-input-short {
-  max-inline-size: 9rem;
-}
-
-/* Notes below forms and text after tables. */
-.admin-after {
-  margin-block-start: var(--ol-space-3);
-}
-
-/* Strips for the last 24 hours: one cell per hour, coloured by availability band; cells without data
-   use the border colour. */
-.admin-hours-cell {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ol-space-2);
-}
-
-.admin-hours {
-  display: inline-flex;
-  gap: 2px;
-  align-items: stretch;
-  block-size: 1.125rem;
-}
-
-.admin-hour {
-  inline-size: 5px;
-  border-radius: 2px;
-  background: var(--ol-color-border);
-}
-
-.admin-hour.ok {
-  background: var(--ol-color-success-solid);
-}
-
-.admin-hour.mid {
-  background: var(--ol-color-warning-solid);
-}
-
-.admin-hour.bad {
-  background: var(--ol-color-danger-solid);
-}
-
-.admin-hours-pct {
-  color: var(--ol-color-fg-muted);
-  font-size: var(--ol-font-size-xs);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-/* Entrance edit table: inputs in the table do not shrink with their columns; when they do not fit, the
-   whole table scrolls horizontally */
-.admin-edit-table .ol-input,
-.admin-edit-table .ol-select {
-  inline-size: 100%;
-  min-inline-size: 8rem;
-}
-
-.admin-edit-table .admin-col-wide {
-  min-inline-size: 16rem;
+/* An entrance with a fixed upstream has no default upstream: the field shows only for a single domain. */
+.ol-form-section-body:has(#upstream option[value=""]:not(:checked)) > .admin-single-only {
+  display: none;
 }

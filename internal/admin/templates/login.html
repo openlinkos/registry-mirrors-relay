@@ -12,11 +12,11 @@
     <label class="ol-label" for="password">{{.T "auth.password"}}</label>
     <input class="ol-input ol-input-lg" id="password" type="password" name="password" required maxlength="128" autocomplete="current-password" spellcheck="false"{{if .Data.Username}} autofocus{{end}}>
   </div>
-  <button type="submit" class="ol-btn ol-btn-primary ol-btn-lg ol-btn-block">{{.T "auth.signIn"}}</button>
+  <button type="submit" class="ol-btn ol-btn-primary ol-btn-lg ol-btn-block">{{icon "log-in"}}{{.T "auth.signIn"}}</button>
 </form>
 <details class="ol-details">
   <summary>{{.T "auth.forgot"}}</summary>
   <p class="ol-hint">{{.T "auth.forgotHelp"}}</p>
-  <div class="ol-code"><pre><code>registry-mirrors-relay admin password</code></pre></div>
+  {{template "snippet" (dict "ID" "forgot-command" "Code" "registry-mirrors-relay admin password" "V" .)}}
 </details>
 {{end}}

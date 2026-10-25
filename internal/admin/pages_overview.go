@@ -108,9 +108,9 @@ func (h *Handler) overviewPage(c *ctx) error {
 	}
 	d.Peak = fmtBytes(peak)
 	d.Traffic = chartSVG(tr(c.lang, "overview.trafficChart", "total", fmtBytes(d.Day.Bytes), "peak", d.Peak),
-		chartSeries{traffic, "admin-chart-line"})
+		chartSeries{traffic, "ol-series-1"})
 	d.Requests = chartSVG(tr(c.lang, "overview.requestsChart", "total", fmtNum(d.Day.Requests), "errors", fmtNum(d.Day.Status4xx+d.Day.Status5xx)),
-		chartSeries{reqs, "admin-chart-line"}, chartSeries{errs, "admin-chart-error"})
+		chartSeries{reqs, "ol-series-1"}, chartSeries{errs, "ol-series-danger"})
 
 	sum := h.app.Stats.Summarize(24*time.Hour, 10)
 	d.Images, d.Clients = sum.Images, sum.Clients

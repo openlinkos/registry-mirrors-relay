@@ -16,8 +16,8 @@ const (
 	chartH = 120
 )
 
-// chartSeries is one line: its values and its style class (see admin.css). The area under the first line
-// is filled.
+// chartSeries is one line: its values and its series class from the design system (ol-series-1, or a status
+// tone such as ol-series-danger). The area under the first line is tinted.
 type chartSeries struct {
 	Values []float64
 	Class  string
@@ -35,19 +35,21 @@ func chartSVG(label string, series ...chartSeries) template.HTML {
 		}
 	}
 	var b strings.Builder
-	b.WriteString(`<svg class="admin-chart" viewBox="0 0 ` + strconv.Itoa(chartW) + ` ` + strconv.Itoa(chartH) +
+	b.WriteString(`<svg class="ol-chart-svg" viewBox="0 0 ` + strconv.Itoa(chartW) + ` ` + strconv.Itoa(chartH) +
 		`" preserveAspectRatio="none" role="img" aria-label="` + template.HTMLEscapeString(label) + `">`)
 	for _, f := range []float64{0.25, 0.5, 0.75} {
 		y := ftoa(chartH * f)
-		b.WriteString(`<line class="admin-chart-grid" x1="0" x2="` + strconv.Itoa(chartW) + `" y1="` + y + `" y2="` + y + `" vector-effect="non-scaling-stroke"/>`)
+		b.WriteString(`<line class="ol-chart-grid" x1="0" x2="` + strconv.Itoa(chartW) + `" y1="` + y + `" y2="` + y + `"/>`)
 	}
+	b.WriteString(`<line class="ol-chart-axis" x1="0" x2="` + strconv.Itoa(chartW) + `" y1="` + strconv.Itoa(chartH) + `" y2="` + strconv.Itoa(chartH) + `"/>`)
 	if n >= 2 {
 		for i, s := range series {
 			pts := points(s.Values, n, peak)
+			b.WriteString(`<g class="` + s.Class + `">`)
 			if i == 0 {
-				b.WriteString(`<path class="admin-chart-area" d="M0,` + strconv.Itoa(chartH) + ` L` + pts + ` L` + strconv.Itoa(chartW) + `,` + strconv.Itoa(chartH) + ` Z"/>`)
+				b.WriteString(`<path class="ol-chart-area" d="M0,` + strconv.Itoa(chartH) + ` L` + pts + ` L` + strconv.Itoa(chartW) + `,` + strconv.Itoa(chartH) + ` Z"/>`)
 			}
-			b.WriteString(`<path class="` + s.Class + `" d="M` + pts + `" vector-effect="non-scaling-stroke"/>`)
+			b.WriteString(`<path class="ol-chart-line" d="M` + pts + `"/></g>`)
 		}
 	}
 	b.WriteString(`</svg>`)
@@ -77,19 +79,23 @@ func ftoa(f float64) string { return strconv.FormatFloat(f, 'f', 1, 64) }
 // hourLabel is the time of one cell (UTC), used in the title.
 func hourLabel(start int64) string { return time.Unix(start, 0).UTC().Format("01-02 15:00 UTC") }
 
-// hoursStrip draws the upstream availability over the last 24 hours: one cell per hour, coloured by
-// status.Level; cells without data are grey. As with the chart there are only class names, no inline
-// styles; each cell's title gives the time and the number of checks, and aria-label sums up the strip.
+// uptimeCell is the design system's class of an uptime cell for a status.Level.
+var uptimeCell = map[string]string{"ok": ` class="ol-uptime-ok"`, "mid": ` class="ol-uptime-degraded"`, "bad": ` class="ol-uptime-down"`}
+
+// hoursStrip draws the upstream availability over the last 24 hours as an uptime strip: one cell per hour,
+// coloured by status.Level; cells without data stay grey. As with the chart there are only class names, no
+// inline styles; each cell's title gives the time and the number of checks, and aria-label sums up the
+// strip.
 func hoursStrip(hs []status.Hour, label string) template.HTML {
 	var b strings.Builder
-	b.WriteString(`<span class="admin-hours" role="img" aria-label="` + template.HTMLEscapeString(label+" "+hoursPct(hs)) + `">`)
+	b.WriteString(`<span class="ol-uptime" role="img" aria-label="` + template.HTMLEscapeString(label+" "+hoursPct(hs)) + `">`)
 	for _, h := range hs {
 		class, title := "", hourLabel(h.Start)+" · —"
 		if h.Total > 0 {
-			class = " " + status.Level(float64(h.OK)/float64(h.Total))
+			class = uptimeCell[status.Level(float64(h.OK)/float64(h.Total))]
 			title = hourLabel(h.Start) + " · " + strconv.Itoa(h.OK) + "/" + strconv.Itoa(h.Total)
 		}
-		b.WriteString(`<span class="admin-hour` + class + `" title="` + template.HTMLEscapeString(title) + `"></span>`)
+		b.WriteString(`<span` + class + ` title="` + template.HTMLEscapeString(title) + `"></span>`)
 	}
 	b.WriteString(`</span>`)
 	return template.HTML(b.String()) //nolint:gosec // only numbers, class names and the escaped label
@@ -99,14 +105,14 @@ func hoursStrip(hs []status.Hour, label string) template.HTML {
 // have no value and their cells are grey.
 func ratioStrip(rs []status.Ratio, label string) template.HTML {
 	var b strings.Builder
-	b.WriteString(`<span class="admin-hours" role="img" aria-label="` + template.HTMLEscapeString(label) + `">`)
+	b.WriteString(`<span class="ol-uptime" role="img" aria-label="` + template.HTMLEscapeString(label) + `">`)
 	for _, r := range rs {
 		class, title := "", hourLabel(r.Start)+" · —"
 		if r.Value != nil {
-			class = " " + status.Level(*r.Value)
+			class = uptimeCell[status.Level(*r.Value)]
 			title = hourLabel(r.Start) + " · " + fmtPct(*r.Value, 1.0)
 		}
-		b.WriteString(`<span class="admin-hour` + class + `" title="` + template.HTMLEscapeString(title) + `"></span>`)
+		b.WriteString(`<span` + class + ` title="` + template.HTMLEscapeString(title) + `"></span>`)
 	}
 	b.WriteString(`</span>`)
 	return template.HTML(b.String()) //nolint:gosec // only numbers, class names and the escaped label

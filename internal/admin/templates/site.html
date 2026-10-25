@@ -1,0 +1,57 @@
+{{define "content"}}{{$v := .}}{{$d := .Data}}{{$s := $d.Site}}
+<div class="ol-page-header">
+  <div class="ol-page-heading">
+    <h1 class="ol-page-title">{{.T "nav.site"}}</h1>
+    <p class="ol-page-description">{{.T "site.description"}}</p>
+  </div>
+  {{with $d.PageURL}}<div class="ol-page-actions"><a class="ol-btn ol-btn-secondary" href="{{.}}" target="_blank" rel="noreferrer">{{icon "external-link"}}{{$v.T "site.open"}}</a></div>{{end}}
+</div>
+{{template "notices" .}}
+
+<form method="post" action="/admin/site/save" id="site" class="ol-section">
+  {{if .CanWrite}}{{template "csrf" .}}{{end}}
+  <section class="ol-form-section" aria-labelledby="s-identity">
+    <div class="ol-form-section-header"><h2 class="ol-form-section-title" id="s-identity">{{.T "site.identity"}}</h2><p class="ol-form-section-description">{{if eq $s.Source "store"}}{{.T "settings.fromStore" "by" (who $s.UpdatedBy)}} {{time $s.Updated}}{{else}}{{.T "settings.fromConfig"}}{{end}}</p></div>
+    <div class="ol-form-section-body">
+      {{if .CanWrite}}
+      <div class="ol-field"><label class="ol-label" for="name">{{.T "settings.name"}} <span class="ol-required">*</span></label><input class="ol-input" id="name" name="name" value="{{or (.F "name") $s.Name}}" required maxlength="80" aria-describedby="name-hint"><p class="ol-hint" id="name-hint">{{.T "settings.nameHint"}}</p></div>
+      <div class="ol-field"><label class="ol-label" for="operator">{{.T "settings.operator"}}</label><input class="ol-input" id="operator" name="operator" value="{{or (.F "operator") $s.Operator}}" maxlength="120" aria-describedby="operator-hint"><p class="ol-hint" id="operator-hint">{{.T "settings.operatorHint"}}</p></div>
+      <div class="ol-field"><label class="ol-label" for="brand">{{.T "site.brand"}}</label><select class="ol-select" id="brand" name="brand" aria-describedby="brand-hint">{{$cur := or (.F "brand") $s.Brand}}<option value="">{{.T "site.brandNone"}}</option>{{range $d.Brands}}<option value="{{.ID}}"{{if eq .ID $cur}} selected{{end}}>{{.Name}}</option>{{end}}</select><p class="ol-hint" id="brand-hint">{{.T "site.brandHint"}}</p></div>
+      {{else}}<dl class="ol-dl ol-dl-stack">
+        <dt>{{.T "settings.name"}}</dt><dd>{{$s.Name}}</dd>
+        <dt>{{.T "settings.operator"}}</dt><dd>{{if $s.Operator}}{{$s.Operator}}{{else}}—{{end}}</dd>
+        <dt>{{.T "site.brand"}}</dt><dd>{{if $s.Brand}}{{$s.Brand}}{{else}}{{.T "site.brandNone"}}{{end}}</dd>
+      </dl>{{end}}
+    </div>
+  </section>
+  <section class="ol-form-section" aria-labelledby="s-links">
+    <div class="ol-form-section-header"><h2 class="ol-form-section-title" id="s-links">{{.T "site.links"}}</h2><p class="ol-form-section-description">{{.T "site.linksHelp"}}</p></div>
+    <div class="ol-form-section-body">
+      {{if .CanWrite}}{{range $d.LinkKeys}}<div class="ol-field"><label class="ol-label" for="link_{{.}}">{{$v.T (print "settings.link." .)}}</label><input class="ol-input ol-input-mono" id="link_{{.}}" name="link_{{.}}" type="url" value="{{or ($v.F (print "link_" .)) (index $s.Links .)}}" placeholder="https://" maxlength="500" spellcheck="false"></div>{{end}}
+      {{else}}<dl class="ol-dl ol-dl-stack">{{range $d.LinkKeys}}<dt>{{$v.T (print "settings.link." .)}}</dt><dd class="ol-mono ol-break">{{with index $s.Links .}}{{.}}{{else}}—{{end}}</dd>{{end}}</dl>{{end}}
+    </div>
+  </section>
+  {{if .CanWrite}}<section class="ol-form-section">
+    <div></div>
+    <div class="ol-form-section-body"><div class="ol-form-actions"><button type="submit" class="ol-btn ol-btn-primary">{{icon "check" "sm"}}{{.T "site.save"}}</button></div></div>
+  </section>{{end}}
+</form>
+{{if and .CanWrite (eq $s.Source "store")}}<form method="post" action="/admin/site/reset" class="ol-section ol-cluster" data-confirm="{{.T "settings.resetConfirm"}}">{{template "csrf" .}}<button type="submit" class="ol-btn ol-btn-ghost ol-btn-sm">{{icon "rotate-ccw" "sm"}}{{.T "settings.reset"}}</button></form>{{end}}
+
+<section class="ol-section" id="status" aria-labelledby="status-title">
+  <div class="ol-section-header"><h2 class="ol-section-title" id="status-title">{{.T "site.status"}}</h2>{{with $d.Status.Override}}{{template "ovState" (dict "S" .State "V" $v)}}{{end}}</div>
+  {{if .CanEditConfig}}<form method="post" action="/admin/site/status" class="ol-panel">
+    {{template "csrf" .}}<input type="hidden" name="key" value="site"><input type="hidden" name="back" value="/admin/site">
+    <div class="ol-settings">{{range $d.Status.Fields}}{{template "settingRow" (dict "F" . "V" $v "ID" (print "site-" .Name) "Edit" true)}}{{end}}</div>
+    <div class="ol-panel-footer"><span>{{.T "site.statusFooter"}}</span>{{if $d.Status.Override}}{{template "resetSubmit" (dict "V" $v "Key" "site")}}{{end}}<button type="submit" class="ol-btn ol-btn-primary ol-btn-sm">{{.T "site.statusSave"}}</button></div>
+  </form>{{else}}<div class="ol-settings">{{range $d.Status.Fields}}{{template "settingRow" (dict "F" . "V" $v "ID" (print "site-" .Name))}}{{end}}</div>{{end}}
+</section>
+
+<section class="ol-section" aria-labelledby="pages-title">
+  <div class="ol-section-header"><h2 class="ol-section-title" id="pages-title">{{.T "site.pages"}}</h2><p class="ol-section-description">{{.T "site.pagesHelp"}}</p></div>
+  <div class="ol-table-wrap"><table class="ol-table ol-table-compact">
+    <thead><tr><th scope="col">{{.T "entrances.entrance"}}</th><th scope="col">{{.T "usage.hosts"}}</th><th scope="col">{{.T "usage.page"}}</th></tr></thead>
+    <tbody>{{range $d.Entrances}}<tr><td><a class="ol-row-link" href="/admin/entrances/view?i={{.Index}}">{{.Title}}</a></td><td class="ol-mono ol-text-sm">{{.Hosts}}</td><td>{{if eq .Page "off"}}<span class="ol-subtle">{{$v.T "usage.page.off"}}</span>{{else}}{{$v.T (print "usage.page." .Page)}}{{end}}</td></tr>{{end}}</tbody>
+  </table></div>
+</section>
+{{end}}

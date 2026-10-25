@@ -464,7 +464,15 @@ func (c *ctx) done(path, notice, name string) error {
 	if name != "" {
 		q.Set("v", name)
 	}
-	return c.redirect(path + "?" + q.Encode())
+	path, frag, _ := strings.Cut(path, "#")
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	if frag != "" {
+		frag = "#" + frag
+	}
+	return c.redirect(path + sep + q.Encode() + frag)
 }
 
 // safeNext is the address the next parameter points to: it can only be a page in the console, otherwise

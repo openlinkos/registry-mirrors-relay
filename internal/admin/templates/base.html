@@ -15,24 +15,24 @@
 <body{{with .Brand}} data-brand="{{.}}"{{end}}>
 <svg data-sprite hidden></svg>
 {{if or .Bare (not .Sess)}}{{template "authShell" .}}{{else}}{{template "appShell" .}}{{end}}
+{{with .Notice}}<div class="ol-toaster" role="status"><div class="ol-toast ol-toast-{{$.NoticeTone}} ol-toast-auto">{{if eq $.NoticeTone "warning"}}{{icon "triangle-alert"}}{{else}}{{icon "circle-check"}}{{end}}<span>{{.}}</span></div></div>{{end}}
 </body>
 </html>
 {{end}}
 
+{{/* The site's mark at the given size, for light and dark backgrounds as the theme asks */}}
 {{define "logo"}}{{if eq .V.Theme "dark"}}<img src="{{.V.Mark "logo-dark.svg"}}" alt="" width="{{.Size}}" height="{{.Size}}">{{else if eq .V.Theme "light"}}<img src="{{.V.Mark "logo.svg"}}" alt="" width="{{.Size}}" height="{{.Size}}">{{else}}<picture><source media="(prefers-color-scheme: dark)" srcset="{{.V.Mark "logo-dark.svg"}}"><img src="{{.V.Mark "logo.svg"}}" alt="" width="{{.Size}}" height="{{.Size}}"></picture>{{end}}{{end}}
 
-{{define "langForm"}}<form method="post" action="/admin/prefs">
-  <input type="hidden" name="lang" value="{{.V.OtherLang}}">
-  <input type="hidden" name="next" value="{{.V.Here}}">
-  <button type="submit" class="{{.Class}}" lang="{{.V.OtherLang.HTML}}">{{icon "languages" "sm"}}{{.V.OtherLang.Name}}</button>
-</form>{{end}}
+{{/* The languages, each in its own language, as menu items; the current one is checked */}}
+{{define "langItems"}}{{$v := .}}{{range .Langs}}<form method="post" action="/admin/prefs"><input type="hidden" name="lang" value="{{.Code}}"><input type="hidden" name="next" value="{{$v.Here}}"><button type="submit" class="ol-menu-item" lang="{{.HTML}}"{{if .Current}} aria-current="true"{{end}}>{{.Name}}</button></form>{{end}}{{end}}
 
+{{/* The colour scheme: Auto, Light, Dark. Compact shows only the icons */}}
 {{define "themeForm"}}<form method="post" action="/admin/prefs">
   <input type="hidden" name="next" value="{{.V.Here}}">
-  <fieldset class="ol-segmented{{if not .Compact}} ol-segmented-block{{end}}">
+  <fieldset class="ol-segmented{{if .Compact}} ol-segmented-icons{{else if not .Inline}} ol-segmented-block{{end}}">
     <legend class="ol-sr-only">{{.V.T "prefs.theme"}}</legend>
     {{$v := .V}}{{$compact := .Compact}}
-    {{range $t := (list "auto" "light" "dark")}}<button type="submit" name="theme" value="{{$t}}" aria-pressed="{{if eq $v.Theme $t}}true{{else}}false{{end}}" title="{{$v.T (print "theme." $t)}}"{{if $compact}} aria-label="{{$v.T (print "theme." $t)}}"{{end}}>{{if eq $t "auto"}}{{icon "sun-moon" "sm"}}{{else if eq $t "light"}}{{icon "sun" "sm"}}{{else}}{{icon "moon" "sm"}}{{end}}{{if not $compact}}{{$v.T (print "theme." $t)}}{{end}}</button>{{end}}
+    {{range $t := (list "auto" "light" "dark")}}<button type="submit" name="theme" value="{{$t}}" aria-pressed="{{if eq $v.Theme $t}}true{{else}}false{{end}}" title="{{$v.T (print "theme." $t)}}"{{if $compact}} aria-label="{{$v.T (print "theme." $t)}}"{{end}}>{{if eq $t "auto"}}{{icon "sun-moon" "sm"}}{{else if eq $t "light"}}{{icon "sun" "sm"}}{{else}}{{icon "moon" "sm"}}{{end}}{{if not $compact}}<span>{{$v.T (print "theme." $t)}}</span>{{end}}</button>{{end}}
   </fieldset>
 </form>{{end}}
 
@@ -41,8 +41,7 @@
   <aside class="ol-sidebar">
     <input type="checkbox" id="nav-toggle" class="ol-nav-toggle">
     <div class="ol-sidebar-head">
-      <a class="ol-brand" href="/admin/">{{template "logo" (dict "V" . "Size" 22)}}<span>{{.SiteName}}</span></a>
-      <span class="ol-brand-tag">{{.T "app.admin"}}</span>
+      <a class="ol-brand" href="/admin/">{{template "logo" (dict "V" . "Size" 24)}}<span>{{.SiteName}}</span></a>
       <label for="nav-toggle" class="ol-btn ol-btn-ghost ol-btn-icon ol-nav-toggle-button">{{icon "menu"}}<span class="ol-sr-only">{{.T "nav.menu"}}</span></label>
     </div>
     <nav class="ol-nav" aria-label="{{.T "nav.label"}}">
@@ -55,10 +54,18 @@
     </nav>
     <div class="ol-sidebar-foot">
       {{template "themeForm" (dict "V" . "Compact" false)}}
-      <div class="ol-cluster">
-        <a class="ol-btn ol-btn-ghost ol-btn-sm" href="/admin/account">{{icon "user" "sm"}}{{.Sess.Admin}}</a>
-        {{template "langForm" (dict "V" . "Class" "ol-btn ol-btn-ghost ol-btn-sm")}}
-        <form method="post" action="/admin/logout"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button type="submit" class="ol-btn ol-btn-ghost ol-btn-sm">{{icon "log-out" "sm"}}{{.T "auth.signOut"}}</button></form>
+      <button class="ol-sidebar-account" type="button" popovertarget="account-menu">
+        <span class="ol-avatar ol-avatar-sm {{avatarTone .Sess.Admin}}">{{initials .Sess.Admin}}</span>
+        <span class="ol-sidebar-account-text"><span class="ol-sidebar-account-name">{{.Sess.Admin}}</span><span class="ol-sidebar-account-meta">{{.T (print "role." .Sess.Role)}}</span></span>
+        {{icon "chevrons-up-down" "sm"}}
+      </button>
+      <div class="ol-menu ol-menu-above" id="account-menu" popover>
+        <a class="ol-menu-item" href="/admin/account">{{icon "user-cog"}}{{.T "nav.account"}}</a>
+        <hr class="ol-menu-separator">
+        <div class="ol-menu-label">{{.T "prefs.language"}}</div>
+        {{template "langItems" .}}
+        <hr class="ol-menu-separator">
+        <form method="post" action="/admin/logout"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button type="submit" class="ol-menu-item">{{icon "log-out"}}{{.T "auth.signOut"}}</button></form>
       </div>
     </div>
   </aside>
@@ -86,9 +93,10 @@
 
 {{define "authShell"}}<main class="ol-auth" id="main">
   {{if .Bare}}<aside class="ol-auth-aside">
-    <div class="ol-auth-rings" aria-hidden="true"></div>
+    <div class="ol-auth-rings" aria-hidden="true"><img class="ol-rings-mark" src="{{.Mark "logo-dark.svg"}}" alt=""></div>
     <a class="ol-auth-brand" href="/admin/"><img src="{{.Mark "logo-dark.svg"}}" alt="" width="24" height="24"><span>{{.SiteName}}</span></a>
     <p class="ol-auth-statement">{{.T "auth.statement"}}</p>
+    <p class="ol-auth-meta">{{.Host}}</p>
   </aside>{{end}}
   <div class="ol-auth-body">
     <div class="ol-auth-card">
@@ -96,25 +104,26 @@
     </div>
     <div class="ol-auth-foot">
       <span>registry-mirrors-relay {{.Version}}</span>
-      {{template "langForm" (dict "V" . "Class" "ol-btn ol-btn-link")}}
       <a href="https://github.com/openlinkos/registry-mirrors-relay" rel="noreferrer">{{.T "app.docs"}}</a>
+      <button class="ol-btn ol-btn-ghost ol-btn-xs" type="button" popovertarget="lang-menu">{{icon "languages" "sm"}}<span lang="{{.HTMLLang}}">{{.LangName}}</span>{{icon "chevron-down" "sm"}}</button>
+      <div class="ol-menu ol-menu-above" id="lang-menu" popover>{{template "langItems" .}}</div>
       {{template "themeForm" (dict "V" . "Compact" true)}}
     </div>
   </div>
 </main>{{end}}
 
-{{/* Page header: title, description, metadata */}}
+{{/* Page header: title, description, facts, and optionally one primary action (Primary: href, label, icon) */}}
 {{define "header"}}<div class="ol-page-header">
   <div class="ol-page-heading">
     <h1 class="ol-page-title">{{.Title}}</h1>
     {{with .Desc}}<p class="ol-page-description">{{.}}</p>{{end}}
     {{with .Meta}}<ul class="ol-page-meta">{{range .}}<li>{{.}}</li>{{end}}</ul>{{end}}
   </div>
+  {{with .Primary}}<div class="ol-page-actions"><a class="ol-btn ol-btn-primary" href="{{.Href}}">{{with .Icon}}{{icon .}}{{end}}{{.Label}}</a></div>{{end}}
 </div>{{end}}
 
-{{/* Success notice (on return from a PRG redirect) and form errors */}}
-{{define "notices"}}{{if or .Notice .FormErr .Warns}}<div class="ol-notices">
-  {{with .Notice}}{{template "alert" (dict "Tone" "success" "Text" .)}}{{end}}
+{{/* Form errors and the warnings after a save; success notices are toasts (see the layout) */}}
+{{define "notices"}}{{if or .FormErr .Warns}}<div class="ol-notices">
   {{with .FormErr}}{{template "alert" (dict "Tone" "danger" "Text" .)}}{{end}}
   {{range .Warns}}{{template "alert" (dict "Tone" "warning" "Text" .)}}{{end}}
 </div>{{end}}{{end}}
@@ -125,6 +134,7 @@
   <span class="ol-empty-icon">{{icon .Icon "lg"}}</span>
   <p class="ol-empty-title">{{.Title}}</p>
   {{with .Text}}<p class="ol-empty-text">{{.}}</p>{{end}}
+  {{with .Href}}<a class="ol-btn ol-btn-secondary ol-btn-sm" href="{{.}}">{{with $.ActionIcon}}{{icon . "sm"}}{{end}}{{$.Action}}</a>{{end}}
 </div>{{end}}
 
 {{define "badge"}}<span class="ol-badge{{if and .Tone (ne .Tone "neutral")}} ol-badge-{{.Tone}}{{end}}{{if .Square}} ol-badge-square{{end}}">{{if .Dot}}<span class="ol-dot"></span>{{end}}{{.Text}}</span>{{end}}
@@ -136,7 +146,7 @@
 {{define "copyLabelled"}}<button type="button" class="ol-btn ol-btn-secondary ol-btn-sm" data-copy="{{.ID}}" data-copied="{{.V.T "action.copied"}}" hidden><span data-copy-icon>{{icon "copy" "sm"}}</span><span data-copied-icon hidden>{{icon "check" "sm"}}</span><span data-copy-label>{{.V.T "action.copy"}}</span></button>{{end}}
 
 {{define "snippet"}}<div class="ol-code">
-  <div class="ol-code-label">{{icon "terminal" "sm"}}{{.Label}}</div>
+  {{with .Label}}<div class="ol-code-label">{{icon "terminal" "sm"}}{{.}}</div>{{end}}
   <pre id="{{.ID}}"><code>{{.Code}}</code></pre>
   {{template "copy" (dict "ID" .ID "V" .V)}}
 </div>{{end}}
@@ -146,27 +156,45 @@
 {{/* State of a console override */}}
 {{define "ovState"}}{{if eq .S "active"}}{{template "badge" (dict "Text" (.V.T "config.state.active") "Tone" "accent" "Square" true)}}{{else if eq .S "drift"}}{{template "badge" (dict "Text" (.V.T "config.state.drift") "Tone" "warning" "Square" true)}}{{else if eq .S "suspended"}}{{template "badge" (dict "Text" (.V.T "config.state.suspended") "Tone" "danger" "Square" true)}}{{else}}{{template "badge" (dict "Text" (.V.T "config.state.ignored") "Square" true)}}{{end}}{{end}}
 
-{{/* Remove one console override and go back to the configuration file's value */}}
-{{define "resetButton"}}<form method="post" action="/admin/config/reset" class="admin-inline" data-confirm="{{.V.T "config.resetConfirm" "key" .Key}}">{{template "csrf" .V}}<input type="hidden" name="key" value="{{.Key}}"><button type="submit" class="ol-btn ol-btn-ghost ol-btn-xs">{{icon "rotate-ccw" "sm"}}{{if .Label}}{{.Label}}{{else}}{{.V.T "config.reset"}}{{end}}</button></form>{{end}}
+{{/* Remove one console override and go back to the configuration file's value; Back is the page to return to */}}
+{{define "resetButton"}}<form method="post" action="/admin/config/reset" data-confirm="{{.V.T "config.resetConfirm" "key" .Key}}">{{template "csrf" .V}}<input type="hidden" name="key" value="{{.Key}}">{{with .Back}}<input type="hidden" name="back" value="{{.}}">{{end}}<button type="submit" class="ol-btn ol-btn-ghost ol-btn-sm">{{icon "rotate-ccw" "sm"}}{{if .Label}}{{.Label}}{{else}}{{.V.T "config.reset"}}{{end}}</button></form>{{end}}
 
-{{/* One field in a configuration form (cfgField): F is the field, ID is the input's id */}}
-{{define "cfgField"}}{{$f := .F}}<div class="ol-field">
-  {{if eq $f.Kind "bool"}}<label class="ol-check"><input type="checkbox" role="switch" class="ol-switch" id="{{.ID}}" name="{{$f.Name}}" value="true"{{if eq $f.Value "true"}} checked{{end}}{{if $f.Locked}} disabled{{end}}> {{$f.Label}}</label>
-  {{else}}<label class="ol-label" for="{{.ID}}">{{$f.Label}}</label>
-  {{if $f.Choices}}<select class="ol-select" id="{{.ID}}" name="{{$f.Name}}"{{if $f.Locked}} disabled{{end}}>{{range $f.Choices}}<option value="{{.}}"{{if eq . $f.Value}} selected{{end}}>{{.}}</option>{{end}}</select>
-  {{else if eq $f.Kind "list"}}<textarea class="ol-textarea ol-input-mono" id="{{.ID}}" name="{{$f.Name}}" rows="2" spellcheck="false"{{if $f.Locked}} disabled{{end}}>{{$f.Value}}</textarea>
-  {{else}}<input class="ol-input ol-input-mono{{if ne $f.Kind "string"}} admin-input-short{{end}}" id="{{.ID}}" name="{{$f.Name}}" value="{{$f.Value}}"{{if or (eq $f.Kind "int") (eq $f.Kind "float")}} inputmode="decimal"{{end}} autocomplete="off" spellcheck="false"{{if $f.Locked}} disabled{{end}}>{{end}}{{end}}
-  {{if or $f.Hint $f.Changed $f.Locked}}<p class="ol-hint">{{$f.Hint}}{{if $f.Locked}} {{.V.T "config.locked"}}{{end}}{{if $f.Changed}} {{.V.T "config.fileValue" "v" (or $f.File "—")}}{{end}}</p>{{end}}
+{{/* Inside a settings form (which carries key and back): a second submit button that resets the override */}}
+{{define "resetSubmit"}}<button type="submit" formaction="/admin/config/reset" formnovalidate class="ol-btn ol-btn-ghost ol-btn-sm" data-confirm="{{.V.T "config.resetConfirm" "key" .Key}}">{{icon "rotate-ccw" "sm"}}{{.V.T "config.resetToFile"}}</button>{{end}}
+
+{{/* The control of one configuration field: F is the field, ID the input's id */}}
+{{define "cfgControl"}}{{$f := .F}}{{if eq $f.Kind "bool"}}<input type="checkbox" role="switch" class="ol-switch" id="{{.ID}}" name="{{$f.Name}}" value="true"{{if eq $f.Value "true"}} checked{{end}}{{if $f.Locked}} disabled{{end}}{{if or $f.Hint $f.Changed}} aria-describedby="{{.ID}}-hint"{{end}}>
+{{else if $f.Choices}}<select class="ol-select" id="{{.ID}}" name="{{$f.Name}}"{{if $f.Locked}} disabled{{end}}{{if or $f.Hint $f.Changed}} aria-describedby="{{.ID}}-hint"{{end}}>{{range $f.Choices}}<option value="{{.}}"{{if eq . $f.Value}} selected{{end}}>{{.}}</option>{{end}}</select>
+{{else if eq $f.Kind "list"}}<textarea class="ol-textarea ol-input-mono" id="{{.ID}}" name="{{$f.Name}}" rows="2" spellcheck="false"{{if $f.Locked}} disabled{{end}}{{if or $f.Hint $f.Changed}} aria-describedby="{{.ID}}-hint"{{end}}>{{$f.Value}}</textarea>
+{{else}}<input class="ol-input ol-input-mono" id="{{.ID}}" name="{{$f.Name}}" value="{{$f.Value}}"{{if or (eq $f.Kind "int") (eq $f.Kind "float")}} inputmode="decimal"{{end}} autocomplete="off" spellcheck="false"{{if $f.Locked}} disabled{{end}}{{if or $f.Hint $f.Changed}} aria-describedby="{{.ID}}-hint"{{end}}>{{end}}{{end}}
+
+{{/* The hint under a configuration field: its help, and the file's value when it was changed here */}}
+{{define "cfgHint"}}{{$f := .F}}{{if or $f.Hint $f.Changed $f.Locked}}<p class="{{.Class}}" id="{{.ID}}-hint">{{$f.Hint}}{{if $f.Locked}} {{.V.T "config.locked"}}{{end}}{{if $f.Changed}} {{.V.T "config.fileValue" "v" (or $f.File "—")}}{{end}}</p>{{end}}{{end}}
+
+{{/* One configuration field as a row of a settings list; read-only shows the value */}}
+{{define "settingRow"}}{{$f := .F}}<div class="ol-setting">
+  <div class="ol-setting-text">{{if .Edit}}<label class="ol-setting-title" for="{{.ID}}">{{$f.Label}}</label>{{else}}<span class="ol-setting-title">{{$f.Label}}</span>{{end}}{{template "cfgHint" (dict "F" $f "ID" .ID "V" .V "Class" "ol-setting-description")}}</div>
+  <div class="ol-setting-control">{{if .Edit}}{{template "cfgControl" (dict "F" $f "ID" .ID)}}{{else if eq $f.Kind "bool"}}<span class="ol-text-sm">{{if eq $f.Value "true"}}{{.V.T "value.on"}}{{else}}{{.V.T "value.off"}}{{end}}</span>{{else}}<span class="ol-mono ol-text-sm ol-break">{{if $f.Value}}{{$f.Value}}{{else}}—{{end}}</span>{{end}}</div>
 </div>{{end}}
 
-{{/* Delete button in a table row: a small form with only hidden fields */}}
-{{define "deleteButton"}}<form method="post" action="{{.Action}}" class="admin-inline" data-confirm="{{.Confirm}}">
+{{/* One configuration field in a form */}}
+{{define "cfgField"}}{{$f := .F}}<div class="ol-field">
+  {{if eq $f.Kind "bool"}}<label class="ol-check">{{template "cfgControl" (dict "F" $f "ID" .ID)}} {{$f.Label}}</label>
+  {{else}}<label class="ol-label" for="{{.ID}}">{{$f.Label}}</label>{{template "cfgControl" (dict "F" $f "ID" .ID)}}{{end}}
+  {{template "cfgHint" (dict "F" $f "ID" .ID "V" .V "Class" "ol-hint")}}
+</div>{{end}}
+
+{{/* Delete button: a small form with only hidden fields */}}
+{{define "deleteButton"}}<form method="post" action="{{.Action}}" data-confirm="{{.Confirm}}">
   <input type="hidden" name="_csrf" value="{{.V.CSRF}}">
   {{range $k, $v := .Fields}}<input type="hidden" name="{{$k}}" value="{{$v}}">{{end}}
   <button type="submit" class="ol-btn ol-btn-danger-soft ol-btn-xs">{{icon "trash-2" "sm"}}{{if .Label}}{{.Label}}{{else}}{{.V.T "action.delete"}}{{end}}</button>
 </form>{{end}}
 
-{{define "pager"}}{{if or .Prev .Next}}<nav class="ol-pager" aria-label="{{.V.T "pager.label"}}"><span>{{.V.T "pager.page" "n" .Page}}</span><span class="ol-pager-links">{{if .Prev}}<a class="ol-btn ol-btn-secondary ol-btn-sm" href="{{.Prev}}">{{.V.T "pager.previous"}}</a>{{else}}<a class="ol-btn ol-btn-secondary ol-btn-sm" aria-disabled="true">{{.V.T "pager.previous"}}</a>{{end}}{{if .Next}}<a class="ol-btn ol-btn-secondary ol-btn-sm" href="{{.Next}}">{{.V.T "pager.next"}}</a>{{else}}<a class="ol-btn ol-btn-secondary ol-btn-sm" aria-disabled="true">{{.V.T "pager.next"}}</a>{{end}}</span></nav>{{end}}{{end}}
+{{define "pager"}}{{if or .Prev .Next}}<nav class="ol-pager" aria-label="{{.V.T "pager.label"}}"><span>{{.V.T "pager.page" "n" .Page}}</span><span class="ol-pager-links">{{if .Prev}}<a class="ol-btn ol-btn-secondary ol-btn-sm" href="{{.Prev}}">{{icon "chevron-left" "sm"}}{{.V.T "pager.previous"}}</a>{{else}}<a class="ol-btn ol-btn-secondary ol-btn-sm" aria-disabled="true">{{icon "chevron-left" "sm"}}{{.V.T "pager.previous"}}</a>{{end}}{{if .Next}}<a class="ol-btn ol-btn-secondary ol-btn-sm" href="{{.Next}}">{{.V.T "pager.next"}}{{icon "chevron-right" "sm"}}</a>{{else}}<a class="ol-btn ol-btn-secondary ol-btn-sm" aria-disabled="true">{{.V.T "pager.next"}}{{icon "chevron-right" "sm"}}</a>{{end}}</span></nav>{{end}}{{end}}
 
-{{define "overallStatus"}}{{if eq .S "ok"}}{{template "badge" (dict "Text" (.V.T "status.overall.ok") "Tone" "success" "Dot" true)}}{{else if eq .S "degraded"}}{{template "badge" (dict "Text" (.V.T "status.overall.degraded") "Tone" "warning" "Dot" true)}}{{else if eq .S "down"}}{{template "badge" (dict "Text" (.V.T "status.overall.down") "Tone" "danger" "Dot" true)}}{{else}}{{template "badge" (dict "Text" (.V.T "status.overall.unknown") "Dot" true)}}{{end}}{{end}}
+{{define "overallStatus"}}{{if eq .S "ok"}}<span class="ol-status ol-status-success"><span class="ol-dot ol-dot-live"></span>{{.V.T "status.overall.ok"}}</span>{{else if eq .S "degraded"}}<span class="ol-status ol-status-warning"><span class="ol-dot ol-dot-live"></span>{{.V.T "status.overall.degraded"}}</span>{{else if eq .S "down"}}<span class="ol-status ol-status-danger"><span class="ol-dot ol-dot-live"></span>{{.V.T "status.overall.down"}}</span>{{else}}<span class="ol-status"><span class="ol-dot"></span>{{.V.T "status.overall.unknown"}}</span>{{end}}{{end}}
 {{define "upstreamStatus"}}{{if .U.BreakerOpen}}{{template "badge" (dict "Text" (.V.T "upstreams.breakerOpen") "Tone" "danger" "Dot" true)}}{{else if not .U.Health}}{{template "badge" (dict "Text" (.V.T "upstreams.unknown") "Dot" true)}}{{else if .U.Health.OK}}{{template "badge" (dict "Text" (.V.T "upstreams.ok") "Tone" "success" "Dot" true)}}{{else}}{{template "badge" (dict "Text" (.V.T "upstreams.down") "Tone" "danger" "Dot" true)}}{{end}}{{end}}
+
+{{/* An account's limits as chips, or "Default" */}}
+{{define "limitChips"}}{{if or .U.ManifestRate .U.BlobStreams}}<span class="ol-cluster">{{if .U.ManifestRate}}<span class="ol-chip">{{.V.T "users.rate" "n" (num .U.ManifestRate)}}</span>{{end}}{{if .U.BlobStreams}}<span class="ol-chip">{{.V.T "users.streams" "n" (num .U.BlobStreams)}}</span>{{end}}</span>{{else}}<span class="ol-subtle">{{.V.T "users.defaultLimits"}}</span>{{end}}{{end}}

@@ -1,20 +1,33 @@
-{{define "content"}}{{$a := .Data}}
-{{template "header" (dict "Title" $a.Name "Desc" (.T "admin.description"))}}
+{{define "content"}}{{$a := .Data}}{{$v := .}}
+<div class="ol-page-header">
+  <div class="ol-page-heading">
+    <div class="ol-title-row"><span class="ol-entity"><span class="ol-avatar ol-avatar-lg {{avatarTone $a.Name}}">{{initials $a.Name}}</span><h1 class="ol-page-title">{{$a.Name}}</h1></span>{{if eq $a.Role "admin"}}{{template "badge" (dict "Text" (.T "role.admin") "Tone" "accent")}}{{else}}{{template "badge" (dict "Text" (.T "role.viewer"))}}{{end}}{{if $a.Disabled}}{{template "badge" (dict "Text" (.T "users.disabled") "Tone" "warning" "Dot" true)}}{{end}}</div>
+    <p class="ol-page-description">{{.T "admin.description"}}</p>
+  </div>
+</div>
 {{template "notices" .}}
 {{if and .CanWrite (eq $a.Source "store")}}
-<section class="ol-section">
-  <form method="post" action="/admin/admins/update" class="ol-form">
-    {{template "csrf" .}}
-    <input type="hidden" name="name" value="{{$a.Name}}">
-    <div class="ol-field"><label class="ol-label" for="role">{{.T "admins.role"}}</label><select class="ol-select" id="role" name="role"><option value="viewer"{{if eq $a.Role "viewer"}} selected{{end}}>{{.T "role.viewer"}}</option><option value="admin"{{if eq $a.Role "admin"}} selected{{end}}>{{.T "role.admin"}}</option></select></div>
-    <div class="ol-field"><label class="ol-check"><input type="checkbox" role="switch" class="ol-switch" name="disabled"{{if $a.Disabled}} checked{{end}}> {{.T "admin.disable"}}</label></div>
-    <div class="ol-field"><label class="ol-label" for="password">{{.T "user.newPassword"}}</label><input class="ol-input" id="password" type="password" name="password" minlength="12" maxlength="72" autocomplete="new-password"><p class="ol-hint">{{.T "admin.passwordHint"}}</p></div>
-    <div class="ol-form-actions">
-      <button type="submit" class="ol-btn ol-btn-primary">{{icon "check" "sm"}}{{.T "action.save"}}</button>
-      <a class="ol-btn ol-btn-ghost" href="/admin/admins">{{.T "action.cancel"}}</a>
+<form method="post" action="/admin/admins/update">
+  {{template "csrf" .}}
+  <input type="hidden" name="name" value="{{$a.Name}}">
+  <section class="ol-form-section" aria-labelledby="a-access">
+    <div class="ol-form-section-header"><h2 class="ol-form-section-title" id="a-access">{{.T "admin.access"}}</h2><p class="ol-form-section-description">{{.T "admins.adminsHelp"}}</p></div>
+    <div class="ol-form-section-body">
+      <div class="ol-field"><label class="ol-label" for="role">{{.T "admins.role"}}</label><select class="ol-select" id="role" name="role"><option value="viewer"{{if eq $a.Role "viewer"}} selected{{end}}>{{.T "role.viewer"}}</option><option value="admin"{{if eq $a.Role "admin"}} selected{{end}}>{{.T "role.admin"}}</option></select></div>
+      <label class="ol-check"><input type="checkbox" role="switch" class="ol-switch" name="disabled"{{if $a.Disabled}} checked{{end}}> {{.T "admin.disable"}}</label>
     </div>
-  </form>
-</section>
+  </section>
+  <section class="ol-form-section" aria-labelledby="a-password">
+    <div class="ol-form-section-header"><h2 class="ol-form-section-title" id="a-password">{{.T "user.resetPassword"}}</h2><p class="ol-form-section-description">{{.T "admin.passwordHelp"}}</p></div>
+    <div class="ol-form-section-body">
+      <div class="ol-field"><label class="ol-label" for="password">{{.T "user.newPassword"}}</label><input class="ol-input" id="password" type="password" name="password" minlength="12" maxlength="72" autocomplete="new-password" aria-describedby="password-hint"><p class="ol-hint" id="password-hint">{{.T "admin.passwordHint"}}</p></div>
+    </div>
+  </section>
+  <section class="ol-form-section">
+    <div></div>
+    <div class="ol-form-section-body"><div class="ol-form-actions"><button type="submit" class="ol-btn ol-btn-primary">{{icon "check" "sm"}}{{.T "admin.save"}}</button><a class="ol-btn ol-btn-ghost" href="/admin/admins">{{.T "action.cancel"}}</a></div></div>
+  </section>
+</form>
 {{else}}
 <dl class="ol-dl">
   <dt>{{.T "admins.role"}}</dt><dd>{{.T (print "role." $a.Role)}}</dd>

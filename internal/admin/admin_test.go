@@ -510,20 +510,25 @@ func TestWriteRoutesPinned(t *testing.T) {
 	e := newEnv(t, envOpts{})
 	want := []string{
 		"/admin/account/password", "/admin/admins/create", "/admin/admins/delete", "/admin/admins/update",
-		"/admin/bans/add", "/admin/bans/delete", "/admin/config/entrances/save", "/admin/config/reset",
-		"/admin/config/save", "/admin/config/upstream/save", "/admin/login", "/admin/logout", "/admin/prefs", "/admin/reauth",
-		"/admin/reload", "/admin/rules/image/add", "/admin/rules/image/delete", "/admin/rules/ip/add",
-		"/admin/rules/ip/delete", "/admin/sessions/revoke", "/admin/settings/reset", "/admin/settings/site",
-		"/admin/tokens/create", "/admin/tokens/delete", "/admin/upstreams/check", "/admin/upstreams/hosts/add",
-		"/admin/upstreams/hosts/delete", "/admin/users/create", "/admin/users/delete", "/admin/users/update",
+		"/admin/bans/add", "/admin/bans/delete", "/admin/config/reset", "/admin/config/save",
+		"/admin/entrances/delete", "/admin/entrances/save", "/admin/limits/save", "/admin/login", "/admin/logout",
+		"/admin/prefs", "/admin/reauth", "/admin/reload", "/admin/rules/image/add", "/admin/rules/image/delete",
+		"/admin/rules/ip/add", "/admin/rules/ip/delete", "/admin/sessions/revoke", "/admin/site/reset",
+		"/admin/site/save", "/admin/site/status", "/admin/tokens/create", "/admin/tokens/delete",
+		"/admin/upstreams/check", "/admin/upstreams/hosts/add", "/admin/upstreams/hosts/delete",
+		"/admin/upstreams/save", "/admin/users/create", "/admin/users/delete", "/admin/users/toggle",
+		"/admin/users/update",
 	}
 	if got := e.h.WriteRoutes(); !slices.Equal(got, want) {
 		t.Fatalf("the console's writes changed:\n%v", got)
 	}
 	// Sensitive operations all require a recently entered password
 	for _, r := range e.h.routes {
+		// Configuration changes, wherever they are made, as well as administrators and tokens
 		sensitive := strings.HasPrefix(r.path, "/admin/admins/") || strings.HasPrefix(r.path, "/admin/tokens/") ||
-			strings.HasPrefix(r.path, "/admin/config/") || r.path == "/admin/sessions/revoke" || r.path == "/admin/account/password"
+			strings.HasPrefix(r.path, "/admin/config/") || strings.HasPrefix(r.path, "/admin/entrances/") ||
+			slices.Contains([]string{"/admin/sessions/revoke", "/admin/account/password", "/admin/upstreams/save",
+				"/admin/limits/save", "/admin/site/status"}, r.path)
 		if r.method == http.MethodPost && sensitive && r.auth != authFresh {
 			t.Errorf("%s should require re-authentication", r.path)
 		}
@@ -587,7 +592,7 @@ func checkPage(t *testing.T, name, body string) {
 func TestPagesRender(t *testing.T) {
 	e := newEnv(t, envOpts{yaml: "entrances:\n  - {name: mirror, hosts: [mirror.test]}\n  - {hosts: [ghcr.test], upstream: ghcr.io, auth: basic}\n"})
 	admin := e.login("alice", alicePW)
-	if r := e.post(admin, "/admin/users/create", url.Values{"name": {"bob"}, "password": {"bob-password-123"}, "manifest_rate": {"5"}}); r.StatusCode != 303 {
+	if r := e.post(admin, "/admin/users/create", url.Values{"name": {"bob"}, "password": {"bob-password-123"}, "manifest_rate": {"5"}}); r.StatusCode != 200 || strings.Contains(r.body, `id="secret-value"`) {
 		t.Fatalf("create account: %d %s", r.StatusCode, r.body)
 	}
 	e.post(admin, "/admin/rules/image/add", url.Values{"pattern": {"ghcr.io/evil/**"}, "kind": {"deny"}, "status": {"451"}})
@@ -595,20 +600,25 @@ func TestPagesRender(t *testing.T) {
 	fillStats(e.app)
 	viewer := e.login("victor", victorPW)
 	pages := []string{
-		"/admin/", "/admin/upstreams", "/admin/usage", "/admin/usage?host=mirror.test&scheme=http", "/admin/users",
+		"/admin/", "/admin/upstreams", "/admin/upstreams/edit?name=ghcr.io", "/admin/upstreams/edit",
+		"/admin/entrances", "/admin/entrances/view?i=0", "/admin/entrances/view?i=0&host=mirror.test&scheme=http",
+		"/admin/entrances/view?i=1", "/admin/entrances/view?new=1", "/admin/site", "/admin/users",
+		"/admin/users?q=bo&status=active", "/admin/users?q=nobody", "/admin/users/new",
 		"/admin/users/edit?name=bob", "/admin/rules", "/admin/rules?image=ghcr.io/evil/miner:1", "/admin/rules?image=nginx",
-		"/admin/limits", "/admin/requests", "/admin/requests?status=5&q=x", "/admin/requests?page=3", "/admin/abuse",
-		"/admin/abuse?hours=168", "/admin/audit", "/admin/settings", "/admin/admins", "/admin/admins/edit?name=victor",
-		"/admin/system", "/admin/account", "/admin/reauth", "/admin/config", "/admin/config/entrances",
-		"/admin/config/upstream?name=ghcr.io", "/admin/config/upstream", "/admin/nope",
+		"/admin/limits", "/admin/requests", "/admin/requests?status=5&q=x", "/admin/requests?user=bob", "/admin/requests?page=3",
+		"/admin/abuse", "/admin/abuse?hours=168", "/admin/audit", "/admin/admins", "/admin/admins/edit?name=victor",
+		"/admin/system", "/admin/account", "/admin/reauth", "/admin/config", "/admin/nope",
 	}
 	for _, lang := range []string{"zh", "en"} {
 		for _, who := range []testSession{admin, viewer} {
 			for _, p := range pages {
 				r := e.get(p, who.cookie, langCookie+"="+lang)
 				want := 200
-				if p == "/admin/nope" {
+				switch {
+				case p == "/admin/nope":
 					want = 404
+				case who == viewer && (p == "/admin/users/new" || p == "/admin/entrances/view?new=1"):
+					want = 403 // pages that only create something
 				}
 				if r.StatusCode != want {
 					t.Fatalf("%s (%s): %d %s", p, lang, r.StatusCode, r.body)
@@ -625,11 +635,23 @@ func TestPagesRender(t *testing.T) {
 		checkPage(t, p, r.body)
 	}
 	// The read-only role does not see the edit forms
-	if r := e.get("/admin/users", viewer.cookie); strings.Contains(r.body, `action="/admin/users/create"`) {
-		t.Error("the read-only role should not see the create form")
+	if r := e.get("/admin/users", viewer.cookie); strings.Contains(r.body, `href="/admin/users/new"`) || strings.Contains(r.body, `action="/admin/users/toggle"`) {
+		t.Error("the read-only role should not see the create button or the account actions")
 	}
-	if r := e.get("/admin/users", admin.cookie); !strings.Contains(r.body, `action="/admin/users/create"`) {
-		t.Error("an administrator should see the create form")
+	if r := e.get("/admin/users", admin.cookie); !strings.Contains(r.body, `href="/admin/users/new"`) || !strings.Contains(r.body, `action="/admin/users/toggle"`) {
+		t.Error("an administrator should see the create button and the account actions")
+	}
+	if r := e.get("/admin/users/new", admin.cookie); !strings.Contains(r.body, `action="/admin/users/create"`) {
+		t.Error("the new account page should have the create form")
+	}
+	// Addresses of earlier versions lead to their new places
+	for old, want := range map[string]string{
+		"/admin/usage": "/admin/entrances", "/admin/settings": "/admin/site", "/admin/config/entrances": "/admin/entrances",
+		"/admin/config/upstream?name=ghcr.io": "/admin/upstreams/edit?name=ghcr.io",
+	} {
+		if r := e.get(old, admin.cookie); r.StatusCode != 303 || r.Header.Get("Location") != want {
+			t.Errorf("%s: %d %s, want %s", old, r.StatusCode, r.Header.Get("Location"), want)
+		}
 	}
 	// Live numbers on the overview
 	r := e.get("/admin/live", admin.cookie)
@@ -835,11 +857,28 @@ func TestCRUDAndOwnPassword(t *testing.T) {
 	if r := e.post(s, "/admin/users/create", url.Values{"name": {"ci"}, "password": {"another-password"}}); r.StatusCode != 409 {
 		t.Fatalf("duplicate name: %d", r.StatusCode)
 	}
-	if r := e.post(s, "/admin/users/update", url.Values{"name": {"ci"}, "disabled": {"on"}, "manifest_rate": {"3"}}); r.StatusCode != 303 {
+	if r := e.post(s, "/admin/users/update", url.Values{"name": {"ci"}, "part": {"limits"}, "manifest_rate": {"3"}, "note": {"build"}}); r.StatusCode != 303 {
 		t.Fatalf("update: %d %s", r.StatusCode, r.body)
+	}
+	if r := e.post(s, "/admin/users/toggle", url.Values{"name": {"ci"}, "disabled": {"true"}, "next": {"/admin/users"}}); r.StatusCode != 303 ||
+		r.Header.Get("Location") != "/admin/users?ok=user.disabled&v=ci" {
+		t.Fatalf("disable: %d %s", r.StatusCode, r.Header.Get("Location"))
 	}
 	if u := e.app.Runtime().Users["ci"]; !u.Disabled || u.ManifestRPS != 3 {
 		t.Fatalf("the update should take effect: %+v", u)
+	}
+	if r := e.post(s, "/admin/users/toggle", url.Values{"name": {"ci"}, "disabled": {"false"}, "next": {"/admin/users/edit?name=ci"}}); r.StatusCode != 303 ||
+		r.Header.Get("Location") != "/admin/users/edit?name=ci&ok=user.enabled&v=ci" || e.app.Runtime().Users["ci"].Disabled {
+		t.Fatalf("enable: %d %s", r.StatusCode, r.Header.Get("Location"))
+	}
+	// A new password: typed, or generated and shown once; the limits stay
+	r = e.post(s, "/admin/users/update", url.Values{"name": {"ci"}, "part": {"password"}})
+	if r.StatusCode != 200 || !strings.Contains(r.body, `id="secret-value"`) {
+		t.Fatalf("generate a new password: %d", r.StatusCode)
+	}
+	pw = regexp.MustCompile(`id="secret-value">([^<]+)<`).FindStringSubmatch(r.body)[1]
+	if ok, _ := e.app.Auth.Verify(e.app.Runtime().Users["ci"], pw); !ok || e.app.Runtime().Users["ci"].ManifestRPS != 3 {
+		t.Fatal("the new password should work and the limits stay")
 	}
 	if r := e.post(s, "/admin/users/delete", url.Values{"name": {"ci"}}); r.StatusCode != 303 || e.app.Runtime().Users["ci"] != nil {
 		t.Fatalf("delete: %d", r.StatusCode)
@@ -916,7 +955,7 @@ func TestReadOnlyStoreWithConfigAdmin(t *testing.T) {
 	e := newEnv(t, envOpts{store: store.NewReadOnly(), yaml: "admin:\n  store: {driver: none}\n  initial_admin: {username: root, password: {env: T_ADMIN_PW}}\n"})
 	s := e.login("root", "config-admin-password")
 	page := e.get("/admin/users", s.cookie)
-	if !strings.Contains(page.body, tr(i18n.EN, "readonly.banner")) || strings.Contains(page.body, `action="/admin/users/create"`) {
+	if !strings.Contains(page.body, tr(i18n.EN, "readonly.banner")) || strings.Contains(page.body, `href="/admin/users/new"`) {
 		t.Fatal("read-only shows the notice and no forms")
 	}
 	if r := e.post(s, "/admin/bans/add", url.Values{"cidr": {"198.51.100.7"}, "duration": {"1h"}}); r.StatusCode != 409 || !strings.Contains(r.body, "read-only") {
@@ -1054,48 +1093,60 @@ func TestConfigPages(t *testing.T) {
 		t.Fatal("the configuration page should list the override and allow resetting it")
 	}
 	checkPage(t, "config", r.body)
-	// Invalid input: redisplayed with the explanation and the filled-in values, not saved
+	// The limits are also saved on their own page, which they go back to
+	form.Set("max_inflight", "78")
+	if r := e.post(s, "/admin/limits/save", form); r.StatusCode != 303 || r.Header.Get("Location") != "/admin/limits?ok=config.saved&v=limits" ||
+		e.app.Runtime().Config.Limits.MaxInflight != 78 {
+		t.Fatalf("save on the limits page: %d %s", r.StatusCode, r.Header.Get("Location"))
+	}
+	// Invalid input: redisplayed with the explanation and the filled-in values, on the page that edits them, not saved
 	form.Set("max_inflight", "lots")
-	if r := e.post(s, "/admin/config/save", form); r.StatusCode != 400 || !strings.Contains(r.body, `value="lots"`) {
-		t.Fatalf("invalid input: %d", r.StatusCode)
+	for _, path := range []string{"/admin/config/save", "/admin/limits/save"} {
+		if r := e.post(s, path, form); r.StatusCode != 400 || !strings.Contains(r.body, `value="lots"`) || !strings.Contains(r.body, `action="/admin/limits/save"`) {
+			t.Fatalf("invalid input at %s: %d", path, r.StatusCode)
+		}
+	}
+	form.Set("max_inflight", "77")
+	if r := e.post(s, "/admin/limits/save", form); r.StatusCode != 303 {
+		t.Fatalf("save: %d", r.StatusCode)
 	}
 	if r := e.post(s, "/admin/config/save", url.Values{"key": {"listen"}}); r.StatusCode != 400 {
 		t.Fatalf("a section that cannot be changed: %d", r.StatusCode)
 	}
 	// Switches: unticked counts as false
-	if r := e.post(s, "/admin/config/save", url.Values{"key": {"site"}}); r.StatusCode != 303 || e.app.Runtime().Site.ShowStatus {
-		t.Fatalf("turn off the service status: %d", r.StatusCode)
+	if r := e.post(s, "/admin/site/status", url.Values{"key": {"site"}}); r.StatusCode != 303 || e.app.Runtime().Site.ShowStatus ||
+		r.Header.Get("Location") != "/admin/site?ok=config.saved&v=site" {
+		t.Fatalf("turn off the service status: %d %s", r.StatusCode, r.Header.Get("Location"))
+	}
+	// A reset goes back to the page it was made from
+	if r := e.post(s, "/admin/config/reset", url.Values{"key": {"site"}, "back": {"/admin/site"}}); r.StatusCode != 303 || !e.app.Runtime().Site.ShowStatus ||
+		r.Header.Get("Location") != "/admin/site?ok=config.reset&v=site" {
+		t.Fatalf("reset from the usage page's page: %d %s", r.StatusCode, r.Header.Get("Location"))
 	}
 
 	// Create an upstream, then add an entrance that always forwards to it
-	r = e.post(s, "/admin/config/upstream/save", url.Values{"new": {"1"}, "upstream": {"CR.example.com"}, "registry": {"registry.example.com"},
+	r = e.post(s, "/admin/upstreams/save", url.Values{"new": {"1"}, "upstream": {"CR.example.com"}, "registry": {"registry.example.com"},
 		"token_realm_hosts": {"auth.example.com"}, "unlisted_redirect": {"pass"}})
 	if r.StatusCode != 303 || e.app.Runtime().Config.Upstreams["cr.example.com"] == nil {
 		t.Fatalf("create upstream: %d %s", r.StatusCode, r.body)
 	}
-	if r := e.post(s, "/admin/config/upstream/save", url.Values{"new": {"1"}, "upstream": {"ghcr.io"}, "registry": {"x.example.com"}}); r.StatusCode != 409 {
+	if r := e.post(s, "/admin/upstreams/save", url.Values{"new": {"1"}, "upstream": {"ghcr.io"}, "registry": {"x.example.com"}}); r.StatusCode != 409 {
 		t.Fatalf("same name as an existing one: %d", r.StatusCode)
 	}
-	if r := e.post(s, "/admin/config/upstream/save", url.Values{"new": {"1"}, "upstream": {"nodot"}}); r.StatusCode != 400 {
+	if r := e.post(s, "/admin/upstreams/save", url.Values{"new": {"1"}, "upstream": {"nodot"}}); r.StatusCode != 400 {
 		t.Fatalf("invalid name: %d", r.StatusCode)
 	}
 	// No token_realm_hosts: saved, but the warning is shown directly
-	r = e.post(s, "/admin/config/upstream/save", url.Values{"new": {"1"}, "upstream": {"bare.example.com"}, "registry": {"bare.example.com"}})
-	if r.StatusCode != 200 || !strings.Contains(r.body, "token_realm_hosts") || !strings.Contains(r.body, "ol-alert-success") {
+	r = e.post(s, "/admin/upstreams/save", url.Values{"new": {"1"}, "upstream": {"bare.example.com"}, "registry": {"bare.example.com"}})
+	if r.StatusCode != 200 || !strings.Contains(r.body, "token_realm_hosts") || !strings.Contains(r.body, "ol-toast-success") {
 		t.Fatalf("shown directly when there are warnings: %d", r.StatusCode)
 	}
 	checkPage(t, "upstream warnings", r.body)
-	r = e.get("/admin/config/entrances", s.cookie)
-	checkPage(t, "entrances", r.body)
-	if !strings.Contains(r.body, `name="rows" value="3"`) {
-		t.Fatal("one entrance plus two empty rows")
-	}
-	ent := url.Values{"rows": {"3"},
-		"name_0": {"default"}, "hosts_0": {"*"}, "upstream_0": {""}, "default_upstream_0": {"docker.io"}, "auth_0": {"none"}, "page_0": {"public"},
-		"name_1": {""}, "hosts_1": {"cr.test"}, "upstream_1": {"cr.example.com"}, "auth_1": {"none"}, "page_1": {"off"},
-		"hosts_2": {""}}
-	if r := e.post(s, "/admin/config/entrances/save", ent); r.StatusCode != 303 {
-		t.Fatalf("save entrances: %d %s", r.StatusCode, r.body)
+	r = e.get("/admin/entrances/view?new=1", s.cookie)
+	checkPage(t, "new entrance", r.body)
+	if r := e.post(s, "/admin/entrances/save", url.Values{"new": {"1"}, "hosts": {"cr.test"}, "upstream": {"cr.example.com"},
+		"auth": {"none"}, "page": {"off"}}); r.StatusCode != 303 || r.Header.Get("Location") != "/admin/entrances/view?i=1&ok=config.saved&v=entrances" {
+		t.Fatalf("add an entrance: %d %s %s", r.StatusCode, r.Header.Get("Location"), r.body)
 	}
 	if en := e.app.Runtime().Router.Entrance("cr.test"); en == nil || en.Upstream != "cr.example.com" || en.Page != "off" {
 		t.Fatalf("the new entrance should take effect: %+v", en)
@@ -1104,9 +1155,17 @@ func TestConfigPages(t *testing.T) {
 	if r := e.post(s, "/admin/config/reset", url.Values{"key": {"upstreams/cr.example.com"}}); r.StatusCode != 422 {
 		t.Fatalf("a referenced upstream cannot be deleted: %d", r.StatusCode)
 	}
-	// Delete an entrance (tick delete)
-	ent.Set("delete_1", "1")
-	if r := e.post(s, "/admin/config/entrances/save", ent); r.StatusCode != 303 || e.app.Runtime().Router.Entrance("cr.test").Upstream != "" {
+	// Each entrance has its page; a form made from an entrance that changed since is refused
+	r = e.get("/admin/entrances/view?i=1", s.cookie)
+	checkPage(t, "entrance", r.body)
+	orig := regexp.MustCompile(`name="orig" value="([0-9a-f]+)"`).FindStringSubmatch(r.body)
+	if orig == nil || !strings.Contains(r.body, "certs.d/cr.example.com") {
+		t.Fatal("the entrance page should carry the form and the client configuration for its upstream")
+	}
+	if r := e.post(s, "/admin/entrances/delete", url.Values{"i": {"1"}, "orig": {"0000"}}); r.StatusCode != 409 {
+		t.Fatalf("a stale form: %d", r.StatusCode)
+	}
+	if r := e.post(s, "/admin/entrances/delete", url.Values{"i": {"1"}, "orig": {orig[1]}}); r.StatusCode != 303 || e.app.Runtime().Router.Entrance("cr.test").Upstream != "" {
 		t.Fatalf("delete entrance: %d", r.StatusCode)
 	}
 	if _, ok := e.app.Store.Data().ConfigOverrides["entrances"]; ok {
@@ -1146,10 +1205,10 @@ func TestConfigPages(t *testing.T) {
 func TestLocalizedConfigErrors(t *testing.T) {
 	e := newEnv(t, envOpts{})
 	s := e.login("alice", alicePW)
-	ent := url.Values{"_csrf": {s.csrf}, "rows": {"1"}, "name_0": {"x"}, "hosts_0": {"x.test"}, "upstream_0": {"nope.example.com"},
-		"auth_0": {"none"}, "page_0": {"public"}}
+	ent := url.Values{"_csrf": {s.csrf}, "new": {"1"}, "name": {"x"}, "hosts": {"x.test"}, "upstream": {"nope.example.com"},
+		"auth": {"none"}, "page": {"public"}}
 	for _, lang := range []i18n.Lang{i18n.EN, i18n.ZH} {
-		r := e.do("POST", "/admin/config/entrances/save", ent, []string{s.cookie, langCookie + "=" + string(lang)}, nil)
+		r := e.do("POST", "/admin/entrances/save", ent, []string{s.cookie, langCookie + "=" + string(lang)}, nil)
 		if r.StatusCode != 422 || !strings.Contains(r.body, i18n.T(lang, "The configuration was not saved")) {
 			t.Fatalf("%s: %d", lang, r.StatusCode)
 		}

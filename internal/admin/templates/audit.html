@@ -2,18 +2,18 @@
 {{template "header" (dict "Title" (.T "nav.audit") "Desc" (.T "audit.description"))}}
 {{template "notices" .}}
 <section class="ol-section">
-  {{if $d.Rows}}<div class="ol-table-wrap"><table class="ol-table ol-table-compact">
+  {{if $d.Rows}}<div class="ol-stack"><div class="ol-table-wrap"><table class="ol-table ol-table-compact">
     <thead><tr><th>{{.T "requests.time"}}</th><th>{{.T "audit.actor"}}</th><th>{{.T "audit.action"}}</th><th>{{.T "audit.target"}}</th><th>{{.T "audit.detail"}}</th></tr></thead>
     <tbody>{{range $d.Rows}}<tr>
       <td class="ol-nowrap">{{time .Time}}</td>
       <td>{{.Actor}}{{with .IP}}<span class="ol-cell-sub ol-mono">{{.}}</span>{{end}}</td>
       <td class="ol-mono">{{.Action}}</td>
-      <td class="ol-mono admin-wrap">{{.Target}}</td>
-      <td class="admin-wrap">{{.Detail}}</td>
+      <td class="ol-mono ol-break">{{.Target}}</td>
+      <td class="ol-break">{{.Detail}}</td>
     </tr>{{end}}</tbody>
   </table></div>
   {{template "pager" (dict "V" $v "Page" $d.Pager.Page "Prev" $d.Pager.Prev "Next" $d.Pager.Next)}}
-  {{if not .Writable}}<p class="ol-hint admin-after">{{.T "audit.memoryOnly"}}</p>{{end}}
+  {{if not .Writable}}<p class="ol-hint">{{.T "audit.memoryOnly"}}</p>{{end}}</div>
   {{else}}{{template "empty" (dict "Icon" "scroll-text" "Title" (.T "audit.none") "Text" (.T "audit.noneText"))}}{{end}}
 </section>
 {{end}}

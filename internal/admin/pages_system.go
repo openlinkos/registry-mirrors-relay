@@ -12,37 +12,57 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/app"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
 	"github.com/openlinkos/registry-mirrors-relay/internal/ops"
+	"github.com/openlinkos/registry-mirrors-relay/internal/ui"
 )
 
-// ---- Settings
+// ---- The usage page: what a browser sees at an entrance's domain
 
-type settingsData struct {
-	Site     ops.SiteView
-	LinkKeys []string
-	Log      config.Log
+type siteData struct {
+	Site      ops.SiteView
+	LinkKeys  []string
+	Brands    []ui.Brand
+	Status    cfgSection    // site.show_status, a configuration override
+	Entrances []entranceRow // and the usage page each one shows
+	PageURL   string        // the usage page of the first entrance that has a public one
 }
 
-func (h *Handler) settingsPage(c *ctx) error {
-	d := settingsData{Site: h.ops.Site(), LinkKeys: ops.SiteLinkKeys, Log: h.app.Runtime().Config.Log}
-	return h.render(c, "settings", &view{Title: tr(c.lang, "nav.settings"), Nav: "settings", Data: d})
+func (h *Handler) sitePage(c *ctx) error {
+	rt := h.app.Runtime()
+	d := siteData{Site: h.ops.Site(), LinkKeys: ops.SiteLinkKeys, Brands: ui.Brands(), Status: h.section(c, "site")}
+	scheme := "https"
+	if pub, https := h.publicOrigin(); pub != "" && !https {
+		scheme = "http"
+	}
+	for i, e := range rt.Config.Entrances {
+		d.Entrances = append(d.Entrances, rowOf(i, e))
+		if d.PageURL == "" && e.Page == "public" {
+			for _, host := range e.Hosts {
+				if host != "*" {
+					d.PageURL = scheme + "://" + host + "/"
+					break
+				}
+			}
+		}
+	}
+	return h.render(c, "site", &view{Title: tr(c.lang, "nav.site"), Nav: "site", Data: d})
 }
 
 func (h *Handler) siteSave(c *ctx) error {
-	in := ops.SiteInput{Name: c.form.Get("name"), Operator: c.form.Get("operator"), Links: map[string]string{}}
+	in := ops.SiteInput{Name: c.form.Get("name"), Operator: c.form.Get("operator"), Brand: c.form.Get("brand"), Links: map[string]string{}}
 	for _, k := range ops.SiteLinkKeys {
 		in.Links[k] = c.form.Get("link_" + k)
 	}
 	if err := h.ops.SetSite(c.actor(), in); err != nil {
-		return c.retry(err, h.settingsPage)
+		return c.retry(err, h.sitePage)
 	}
-	return c.done("/admin/settings", "site.saved", "")
+	return c.done("/admin/site", "site.saved", "")
 }
 
 func (h *Handler) siteReset(c *ctx) error {
 	if err := h.ops.ResetSite(c.actor()); err != nil {
-		return c.retry(err, h.settingsPage)
+		return c.retry(err, h.sitePage)
 	}
-	return c.done("/admin/settings", "site.reset", "")
+	return c.done("/admin/site", "site.reset", "")
 }
 
 // ---- Administrators, tokens, login sessions
@@ -165,7 +185,7 @@ type systemData struct {
 	Writable                                        bool
 	Reload                                          *app.ReloadStatus
 	Dropped                                         uint64
-	Config                                          string
+	Log                                             config.Log
 	// Management entrance (console, API, metrics)
 	MgmtAddr, PullAddr  string // an empty MgmtAddr means the port is shared with the pull entrance
 	Allow, ProxiedAllow string
@@ -191,9 +211,7 @@ func (h *Handler) systemPage(c *ctx) error {
 	if l := debug.SetMemoryLimit(-1); l > 0 && l < 1<<62 {
 		d.MemLimit = uint64(l)
 	}
-	if b, err := cfg.Print(); err == nil {
-		d.Config = string(b)
-	}
+	d.Log = cfg.Log
 	return h.render(c, "system", &view{Title: tr(c.lang, "nav.system"), Nav: "system", Data: d})
 }
 

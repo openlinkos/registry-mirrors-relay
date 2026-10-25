@@ -1,42 +1,41 @@
 {{define "content"}}{{$v := .}}{{$d := .Data}}{{$l := $d.Limits}}
 {{template "header" (dict "Title" (.T "nav.limits") "Desc" (.T "limits.description"))}}
 {{template "notices" .}}
-<div class="ol-stats">
-  <div class="ol-stat"><span class="ol-stat-label">{{.T "limits.inflight"}}</span><span class="ol-stat-value">{{num $d.Stats.Inflight}}</span><span class="ol-stat-meta">{{.T "limits.of" "n" (num $l.MaxInflight)}}</span></div>
-  <div class="ol-stat"><span class="ol-stat-label">{{.T "limits.blobStreams"}}</span><span class="ol-stat-value">{{num $d.Stats.BlobStreams}}</span><span class="ol-stat-meta">{{.T "limits.of" "n" (num $l.MaxBlobStreams)}}</span></div>
-  <div class="ol-stat"><span class="ol-stat-label">{{.T "limits.limited"}}</span><span class="ol-stat-value">{{num $d.Stats.Limited}}</span><span class="ol-stat-meta">{{.T "limits.sinceStart"}}</span></div>
-  <div class="ol-stat"><span class="ol-stat-label">{{.T "limits.tracked"}}</span><span class="ol-stat-value">{{num $d.Stats.TrackedClients}}</span><span class="ol-stat-meta">{{.T "limits.of" "n" (num $l.TrackedClients)}}</span></div>
-</div>
-
 <section class="ol-section">
-  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "limits.settings"}}</h2><p class="ol-section-description">{{.T "limits.settingsHelp"}}</p>{{if .CanEditConfig}}<div class="ol-section-actions"><a class="ol-btn ol-btn-secondary ol-btn-sm" href="/admin/config#limits">{{icon "pencil" "sm"}}{{.T "limits.editConfig"}}</a></div>{{end}}</div>
-  <dl class="ol-dl">
-    <dt>{{.T "limits.manifestRate"}}</dt><dd>{{if $l.ManifestRate}}{{.T "limits.rateValue" "rate" (num $l.ManifestRate) "burst" (num $l.ManifestBurst) "head" (num $l.HeadWeight)}}{{else}}{{.T "limits.unlimited"}}{{end}}</dd>
-    <dt>{{.T "limits.perClientStreams"}}</dt><dd>{{if $l.BlobStreamsPerClient}}{{num $l.BlobStreamsPerClient}}{{else}}{{.T "limits.unlimited"}}{{end}}</dd>
-    <dt>{{.T "limits.maxInflight"}}</dt><dd>{{if $l.MaxInflight}}{{num $l.MaxInflight}}{{else}}{{.T "limits.unlimited"}}{{end}}</dd>
-    <dt>{{.T "limits.maxBlobStreams"}}</dt><dd>{{if $l.MaxBlobStreams}}{{num $l.MaxBlobStreams}}{{else}}{{.T "limits.unlimited"}}{{end}}</dd>
-    <dt>{{.T "limits.authFailures"}}</dt><dd>{{if $l.AuthFailuresPerMin}}{{.T "limits.perMinute" "n" (num $l.AuthFailuresPerMin)}}{{else}}{{.T "limits.unlimited"}}{{end}}</dd>
-    <dt>{{.T "limits.exempt"}}</dt><dd class="ol-mono">{{if $l.ExemptCIDRs}}{{join $l.ExemptCIDRs ", "}}{{else}}—{{end}}</dd>
-  </dl>
+<div class="ol-stats">
+  <div class="ol-stat"><span class="ol-stat-label"><span class="ol-stat-icon">{{icon "activity" "sm"}}</span>{{.T "limits.inflight"}}</span><span class="ol-stat-value">{{num $d.Stats.Inflight}}</span><span class="ol-stat-meta">{{if $l.MaxInflight}}{{.T "limits.of" "n" (num $l.MaxInflight)}}{{else}}{{.T "limits.unlimited"}}{{end}}</span></div>
+  <div class="ol-stat"><span class="ol-stat-label"><span class="ol-stat-icon">{{icon "layers" "sm"}}</span>{{.T "limits.blobStreams"}}</span><span class="ol-stat-value">{{num $d.Stats.BlobStreams}}</span><span class="ol-stat-meta">{{if $l.MaxBlobStreams}}{{.T "limits.of" "n" (num $l.MaxBlobStreams)}}{{else}}{{.T "limits.unlimited"}}{{end}}</span></div>
+  <div class="ol-stat"><span class="ol-stat-label"><span class="ol-stat-icon ol-tone-warning">{{icon "ban" "sm"}}</span>{{.T "limits.limited"}}</span><span class="ol-stat-value">{{num $d.Stats.Limited}}</span><span class="ol-stat-meta">{{.T "limits.sinceStart"}}</span></div>
+  <div class="ol-stat"><span class="ol-stat-label"><span class="ol-stat-icon">{{icon "users" "sm"}}</span>{{.T "limits.tracked"}}</span><span class="ol-stat-value">{{num $d.Stats.TrackedClients}}</span><span class="ol-stat-meta">{{.T "limits.of" "n" (num $l.TrackedClients)}}</span></div>
+</div>
 </section>
 
-<section class="ol-section">
-  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "limits.recent"}}</h2><p class="ol-section-description">{{.T "limits.recentHelp"}}</p></div>
+<section class="ol-section" id="settings" aria-labelledby="settings-title">
+  <div class="ol-section-header"><h2 class="ol-section-title" id="settings-title">{{.T "limits.settings"}}</h2><p class="ol-section-description">{{.T "cfg.limitsHelp"}}</p>{{with $d.Settings.Override}}{{template "ovState" (dict "S" .State "V" $v)}}{{end}}</div>
+  {{if .CanEditConfig}}<form method="post" action="/admin/limits/save" class="ol-panel">
+    {{template "csrf" .}}<input type="hidden" name="key" value="limits"><input type="hidden" name="back" value="/admin/limits">
+    <div class="ol-settings">{{range $d.Settings.Fields}}{{template "settingRow" (dict "F" . "V" $v "ID" (print "limits-" .Name) "Edit" true)}}{{end}}</div>
+    <div class="ol-panel-footer"><span>{{.T "limits.saveHelp"}}</span>{{if $d.Settings.Override}}{{template "resetSubmit" (dict "V" $v "Key" "limits")}}{{end}}<button type="submit" class="ol-btn ol-btn-primary ol-btn-sm">{{.T "limits.save"}}</button></div>
+  </form>{{else}}<div class="ol-settings">{{range $d.Settings.Fields}}{{template "settingRow" (dict "F" . "V" $v "ID" (print "limits-" .Name))}}{{end}}</div>{{end}}
+</section>
+
+<section class="ol-section" aria-labelledby="recent-title">
+  <div class="ol-section-header"><h2 class="ol-section-title" id="recent-title">{{.T "limits.recent"}}</h2><p class="ol-section-description">{{.T "limits.recentHelp"}}</p></div>
   {{if $d.Limited}}<div class="ol-table-wrap"><table class="ol-table">
-    <thead><tr><th>{{.T "requests.client"}}</th><th>{{.T "requests.user"}}</th><th class="ol-num">{{.T "limits.times"}}</th><th>{{.T "limits.last"}}</th><th></th></tr></thead>
+    <thead><tr><th scope="col">{{.T "requests.client"}}</th><th scope="col">{{.T "requests.user"}}</th><th scope="col" class="ol-num">{{.T "limits.times"}}</th><th scope="col">{{.T "limits.last"}}</th><th scope="col" class="ol-actions"><span class="ol-sr-only">{{.T "action.actions"}}</span></th></tr></thead>
     <tbody>{{range $d.Limited}}<tr>
       <td class="ol-mono"><a href="/admin/requests?client_ip={{.Client}}">{{.Client}}</a></td><td>{{if .User}}<a href="/admin/users/edit?name={{.User}}">{{.User}}</a>{{else}}—{{end}}</td>
       <td class="ol-num">{{num .Count}}</td><td class="ol-nowrap">{{time .Last}}</td>
-      <td>{{if $v.CanWrite}}<a class="ol-btn ol-btn-danger-soft ol-btn-xs" href="/admin/rules?ban={{.Client}}#bans">{{icon "ban" "sm"}}{{$v.T "rules.ban"}}</a>{{end}}</td>
+      <td class="ol-actions">{{if $v.CanWrite}}<a class="ol-btn ol-btn-danger-soft ol-btn-xs" href="/admin/rules?ban={{.Client}}#bans">{{icon "ban" "sm"}}{{$v.T "rules.ban"}}</a>{{end}}</td>
     </tr>{{end}}</tbody>
-  </table></div>{{else}}{{template "empty" (dict "Icon" "activity" "Title" (.T "limits.noneLimited") "Text" (.T "limits.noneLimitedText"))}}{{end}}
+  </table></div>{{else}}{{template "empty" (dict "Icon" "gauge" "Title" (.T "limits.noneLimited") "Text" (.T "limits.noneLimitedText"))}}{{end}}
 </section>
 
-<section class="ol-section">
-  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "limits.overrides"}}</h2><p class="ol-section-description">{{.T "limits.overridesHelp"}}</p></div>
+<section class="ol-section" aria-labelledby="own-title">
+  <div class="ol-section-header"><h2 class="ol-section-title" id="own-title">{{.T "limits.overrides"}}</h2><p class="ol-section-description">{{.T "limits.overridesHelp"}}</p></div>
   {{if $d.Overrides}}<div class="ol-table-wrap"><table class="ol-table ol-table-compact">
-    <thead><tr><th>{{.T "users.name"}}</th><th>{{.T "users.rateLabel"}}</th><th>{{.T "users.streamsLabel"}}</th></tr></thead>
-    <tbody>{{range $d.Overrides}}<tr><td><a href="/admin/users/edit?name={{.Name}}">{{.Name}}</a></td><td>{{if .ManifestRate}}{{num .ManifestRate}}{{else}}—{{end}}</td><td>{{if .BlobStreams}}{{num .BlobStreams}}{{else}}—{{end}}</td></tr>{{end}}</tbody>
-  </table></div>{{else}}<p class="ol-muted">{{.T "limits.noOverrides"}}</p>{{end}}
+    <thead><tr><th scope="col">{{.T "users.name"}}</th><th scope="col">{{.T "users.limits"}}</th></tr></thead>
+    <tbody>{{range $d.Overrides}}<tr><td><span class="ol-entity"><span class="ol-avatar ol-avatar-sm {{avatarTone .Name}}">{{initials .Name}}</span><a class="ol-entity-title ol-row-link" href="/admin/users/edit?name={{.Name}}">{{.Name}}</a></span></td><td>{{template "limitChips" (dict "U" . "V" $v)}}</td></tr>{{end}}</tbody>
+  </table></div>{{else}}<p class="ol-muted ol-text-sm">{{.T "limits.noOverrides"}}</p>{{end}}
 </section>
 {{end}}

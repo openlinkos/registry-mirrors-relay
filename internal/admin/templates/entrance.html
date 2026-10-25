@@ -1,0 +1,85 @@
+{{define "content"}}{{$v := .}}{{$d := .Data}}{{$r := $d.Row}}
+<div class="ol-page-header">
+  <div class="ol-page-heading">
+    <div class="ol-title-row"><h1 class="ol-page-title">{{.Title}}</h1>{{if not $d.New}}{{if eq $r.Auth "basic"}}{{template "badge" (dict "Text" (.T "usage.basic") "Tone" "warning")}}{{else}}{{template "badge" (dict "Text" (.T "usage.open"))}}{{end}}{{end}}</div>
+    <p class="ol-page-description">{{if $d.New}}{{.T "entrances.newDescription"}}{{else if $r.Upstream}}{{.T "entrance.fixedDescription" "upstream" $r.Upstream}}{{else}}{{.T "entrance.singleDescription"}}{{end}}</p>
+    {{if not $d.New}}<ul class="ol-page-meta"><li>{{icon "globe" "sm"}}<span class="ol-mono">{{$r.Hosts}}</span></li><li>{{icon "book-open" "sm"}}{{.T "entrance.pageMeta" "page" (.T (print "usage.page." $r.Page))}}</li></ul>{{end}}
+  </div>
+  {{with $d.PageURL}}<div class="ol-page-actions"><a class="ol-btn ol-btn-secondary" href="{{.}}" target="_blank" rel="noreferrer">{{icon "external-link"}}{{$v.T "entrance.openPage"}}</a></div>{{end}}
+</div>
+{{template "notices" .}}
+
+{{if not $d.New}}<section class="ol-section" aria-labelledby="connect-title">
+  <div class="ol-section-header"><h2 class="ol-section-title" id="connect-title">{{.T "entrance.connect"}}</h2><p class="ol-section-description">{{.T "entrance.connectHelp"}}</p></div>
+  <form method="get" action="/admin/entrances/view" class="ol-toolbar">
+    <input type="hidden" name="i" value="{{$r.Index}}">
+    <div class="ol-field">
+      <label class="ol-label" for="host">{{.T "usage.host"}}</label>
+      {{if $d.Hosts}}<select class="ol-select ol-input-sm ol-input-mono" id="host" name="host">{{range $d.Hosts}}<option value="{{.}}"{{if eq . $d.Host}} selected{{end}}>{{.}}</option>{{end}}</select>
+      {{else}}<input class="ol-input ol-input-sm ol-input-mono" id="host" name="host" value="{{$d.Host}}" maxlength="253" autocomplete="off" spellcheck="false">{{end}}
+    </div>
+    <div class="ol-field">
+      <label class="ol-label" for="scheme">{{.T "usage.scheme"}}</label>
+      <select class="ol-select ol-input-sm" id="scheme" name="scheme"><option value="https"{{if eq $d.Scheme "https"}} selected{{end}}>https</option><option value="http"{{if eq $d.Scheme "http"}} selected{{end}}>http</option></select>
+    </div>
+    <button type="submit" class="ol-btn ol-btn-secondary ol-btn-sm">{{icon "refresh-cw" "sm"}}{{.T "usage.generate"}}</button>
+  </form>
+  {{if not $d.Hosts}}<div class="ol-notices">{{template "alert" (dict "Tone" "info" "Text" (.T "usage.noHost"))}}</div>{{end}}
+  <ol class="ol-steps">
+    {{range $d.Snippets}}<li>
+      <h3 class="ol-step-title">{{.Label}}</h3>
+      {{template "snippet" (dict "ID" .ID "Code" .Code "V" $v)}}
+      <p class="ol-hint">{{.Help}}</p>
+    </li>{{end}}
+  </ol>
+</section>{{end}}
+
+<section class="ol-section" aria-labelledby="settings-title">
+  <div class="ol-section-header"><h2 class="ol-section-title" id="settings-title">{{.T "entrance.settings"}}</h2>{{if not $d.New}}<p class="ol-section-description">{{.T "config.entrancesHelp"}}</p>{{end}}</div>
+  {{if $d.Editable}}<form method="post" action="/admin/entrances/save">
+    {{template "csrf" .}}
+    {{if $d.New}}<input type="hidden" name="new" value="1">{{else}}<input type="hidden" name="i" value="{{$r.Index}}"><input type="hidden" name="orig" value="{{$d.Orig}}">{{end}}
+    <section class="ol-form-section" aria-labelledby="e-where">
+      <div class="ol-form-section-header"><h3 class="ol-form-section-title" id="e-where">{{.T "entrance.where"}}</h3><p class="ol-form-section-description">{{.T "entrance.whereHelp"}}</p></div>
+      <div class="ol-form-section-body">
+        <div class="ol-field"><label class="ol-label" for="name">{{.T "usage.entrance"}}</label><input class="ol-input" id="name" name="name" value="{{$r.Name}}" maxlength="64" autocomplete="off" aria-describedby="name-hint"><p class="ol-hint" id="name-hint">{{.T "entrance.nameHint"}}</p></div>
+        <div class="ol-field"><label class="ol-label" for="hosts">{{.T "usage.hosts"}} <span class="ol-required">*</span></label><textarea class="ol-textarea ol-input-mono" id="hosts" name="hosts" rows="2" required maxlength="2000" spellcheck="false" placeholder="mirror.example.com" aria-describedby="hosts-hint">{{$r.Hosts}}</textarea><p class="ol-hint" id="hosts-hint">{{.T "entrance.hostsHint"}}</p></div>
+      </div>
+    </section>
+    <section class="ol-form-section" aria-labelledby="e-route">
+      <div class="ol-form-section-header"><h3 class="ol-form-section-title" id="e-route">{{.T "entrance.route"}}</h3><p class="ol-form-section-description">{{.T "entrance.routeHelp"}}</p></div>
+      <div class="ol-form-section-body">
+        <div class="ol-field"><label class="ol-label" for="upstream">{{.T "config.entranceUpstream"}}</label><select class="ol-select" id="upstream" name="upstream"><option value="">{{.T "usage.single"}}</option>{{range $d.Upstreams}}<option value="{{.}}"{{if eq . $r.Upstream}} selected{{end}}>{{$v.T "usage.fixed" "upstream" .}}</option>{{end}}</select></div>
+        <div class="ol-field admin-single-only"><label class="ol-label" for="default_upstream">{{.T "config.entranceDefault"}}</label><select class="ol-select" id="default_upstream" name="default_upstream"><option value="">{{.T "entrance.defaultNone"}}</option>{{range $d.Upstreams}}<option value="{{.}}"{{if eq . $r.DefaultUpstream}} selected{{end}}>{{.}}</option>{{end}}</select><p class="ol-hint">{{.T "entrance.defaultHint"}}</p></div>
+      </div>
+    </section>
+    <section class="ol-form-section" aria-labelledby="e-access">
+      <div class="ol-form-section-header"><h3 class="ol-form-section-title" id="e-access">{{.T "entrance.access"}}</h3><p class="ol-form-section-description">{{.T "entrance.accessHelp"}}</p></div>
+      <div class="ol-form-section-body">
+        <div class="ol-field"><label class="ol-label" for="auth">{{.T "usage.auth"}}</label><select class="ol-select" id="auth" name="auth"><option value="none"{{if ne $r.Auth "basic"}} selected{{end}}>{{.T "usage.open"}}</option><option value="basic"{{if eq $r.Auth "basic"}} selected{{end}}>{{.T "usage.basic"}}</option></select></div>
+        <div class="ol-field"><label class="ol-label" for="page">{{.T "usage.page"}}</label><select class="ol-select" id="page" name="page">{{range (list "public" "login" "off")}}<option value="{{.}}"{{if eq . $r.Page}} selected{{end}}>{{$v.T (print "usage.page." .)}}</option>{{end}}</select><p class="ol-hint">{{.T "entrance.pageHint"}}</p></div>
+      </div>
+    </section>
+    <section class="ol-form-section">
+      <div></div>
+      <div class="ol-form-section-body"><div class="ol-form-actions"><button type="submit" class="ol-btn ol-btn-primary">{{icon "check" "sm"}}{{if $d.New}}{{.T "entrances.create"}}{{else}}{{.T "entrance.save"}}{{end}}</button><a class="ol-btn ol-btn-ghost" href="/admin/entrances">{{.T "action.cancel"}}</a></div></div>
+    </section>
+  </form>
+  {{else}}<dl class="ol-dl">
+    <dt>{{.T "usage.entrance"}}</dt><dd>{{if $r.Name}}{{$r.Name}}{{else}}—{{end}}</dd>
+    <dt>{{.T "usage.hosts"}}</dt><dd class="ol-mono">{{$r.Hosts}}</dd>
+    <dt>{{.T "config.entranceUpstream"}}</dt><dd>{{if $r.Upstream}}{{$v.T "usage.fixed" "upstream" $r.Upstream}}{{else}}{{.T "usage.single"}}{{end}}</dd>
+    {{if not $r.Upstream}}<dt>{{.T "config.entranceDefault"}}</dt><dd class="ol-mono">{{if $r.DefaultUpstream}}{{$r.DefaultUpstream}}{{else}}docker.io{{end}}</dd>{{end}}
+    <dt>{{.T "usage.auth"}}</dt><dd>{{if eq $r.Auth "basic"}}{{.T "usage.basic"}}{{else}}{{.T "usage.open"}}{{end}}</dd>
+    <dt>{{.T "usage.page"}}</dt><dd>{{.T (print "usage.page." $r.Page)}}</dd>
+  </dl>{{end}}
+</section>
+
+{{if and $d.Editable (not $d.New)}}<section class="ol-section ol-panel ol-panel-danger" aria-labelledby="delete-title">
+  <div class="ol-panel-header"><h2 class="ol-panel-title" id="delete-title">{{icon "triangle-alert"}}{{.T "entrance.deleteTitle"}}</h2></div>
+  <div class="ol-panel-body ol-split">
+    <p class="ol-text-sm">{{.T "entrance.deleteHelp" "name" .Title}}</p>
+    <form method="post" action="/admin/entrances/delete" data-confirm="{{.T "entrance.deleteConfirm" "name" .Title}}">{{template "csrf" .}}<input type="hidden" name="i" value="{{$r.Index}}"><input type="hidden" name="orig" value="{{$d.Orig}}"><button type="submit" class="ol-btn ol-btn-danger ol-btn-sm">{{icon "trash-2" "sm"}}{{.T "entrance.delete"}}</button></form>
+  </div>
+</section>{{end}}
+{{end}}

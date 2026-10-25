@@ -2,40 +2,54 @@
 {{template "header" (dict "Title" (.T "nav.system") "Desc" (.T "system.description"))}}
 {{template "notices" .}}
 {{with $d.Reload}}{{if .Err}}<div class="ol-notices">{{template "alert" (dict "Tone" "danger" "Title" ($.T "system.reloadFailed") "Text" ($.Err .Cause))}}</div>{{end}}{{if .Restart}}<div class="ol-notices">{{template "alert" (dict "Tone" "warning" "Text" ($.T "overview.restartNeeded" "fields" (join .Restart ", ")))}}</div>{{end}}{{end}}
-<div class="ol-grid ol-grid-2">
-  <section class="ol-panel">
-    <div class="ol-panel-header"><h2 class="ol-panel-title">{{icon "cpu"}}{{.T "system.process"}}</h2></div>
+<section class="ol-section">
+<div class="ol-stats">
+  <div class="ol-stat"><span class="ol-stat-label"><span class="ol-stat-icon">{{icon "package" "sm"}}</span>{{.T "system.version"}}</span><span class="ol-stat-value ol-mono">{{$d.Version}}</span><span class="ol-stat-meta">{{$d.Go}}</span></div>
+  <div class="ol-stat"><span class="ol-stat-label"><span class="ol-stat-icon">{{icon "timer" "sm"}}</span>{{.T "system.uptime"}}</span><span class="ol-stat-value">{{$d.Uptime}}</span><span class="ol-stat-meta">{{time $d.Started}}</span></div>
+  <div class="ol-stat"><span class="ol-stat-label"><span class="ol-stat-icon">{{icon "cpu" "sm"}}</span>{{.T "system.memory"}}</span><span class="ol-stat-value">{{bytes $d.HeapInuse}}</span><span class="ol-stat-meta">{{.T "system.memoryMeta" "sys" (bytes $d.Sys)}}</span></div>
+  <div class="ol-stat"><span class="ol-stat-label"><span class="ol-stat-icon">{{icon "database" "sm"}}</span>{{.T "system.store"}}</span><span class="ol-stat-value ol-mono">{{$d.StoreDriver}}</span><span class="ol-stat-meta">{{if $d.Writable}}{{.T "system.writable"}}{{else}}{{.T "system.readOnly"}}{{end}}</span></div>
+</div>
+</section>
+<div class="ol-grid ol-grid-2 ol-section">
+  <section class="ol-panel" aria-labelledby="process-title">
+    <div class="ol-panel-header"><h2 class="ol-panel-title" id="process-title">{{icon "cpu"}}{{.T "system.process"}}</h2></div>
     <div class="ol-panel-body"><dl class="ol-dl">
-      <dt>{{.T "system.version"}}</dt><dd class="ol-mono">{{$d.Version}} ({{$d.Go}})</dd>
-      <dt>{{.T "system.started"}}</dt><dd>{{time $d.Started}} · {{$d.Uptime}}</dd>
+      <dt>{{.T "system.started"}}</dt><dd>{{time $d.Started}}</dd>
       <dt>{{.T "system.memory"}}</dt><dd>{{.T "system.memoryValue" "heap" (bytes $d.HeapInuse) "sys" (bytes $d.Sys)}}</dd>
       <dt>{{.T "system.memLimit"}}</dt><dd>{{if $d.MemLimit}}{{bytes $d.MemLimit}}{{else}}{{.T "system.noLimit"}}{{end}}</dd>
-      <dt>{{.T "system.goroutines"}}</dt><dd>{{num $d.Goroutines}} · GOMAXPROCS {{$d.Procs}}</dd>
+      <dt>{{.T "system.goroutines"}}</dt><dd>{{num $d.Goroutines}}<span class="ol-cell-sub">GOMAXPROCS {{$d.Procs}}</span></dd>
       <dt>{{.T "system.dropped"}}</dt><dd>{{num $d.Dropped}}</dd>
+      <dt>{{.T "system.storePath"}}</dt><dd class="ol-mono ol-break">{{if eq $d.StoreDriver "bolt"}}{{$d.StorePath}}{{else}}—{{end}}</dd>
     </dl></div>
   </section>
-  <section class="ol-panel">
-    <div class="ol-panel-header"><h2 class="ol-panel-title">{{icon "settings"}}{{.T "system.config"}}</h2></div>
-    <div class="ol-panel-body ol-stack"><dl class="ol-dl">
+  <section class="ol-panel" aria-labelledby="config-title">
+    <div class="ol-panel-header"><h2 class="ol-panel-title" id="config-title">{{icon "file-cog"}}{{.T "system.config"}}</h2></div>
+    <div class="ol-panel-body"><dl class="ol-dl">
       <dt>{{.T "system.configPath"}}</dt><dd class="ol-mono ol-break">{{if $d.ConfigPath}}{{$d.ConfigPath}}{{else}}{{.T "system.defaultsOnly"}}{{end}}</dd>
       <dt>{{.T "system.runtimeBuilt"}}</dt><dd>{{time $d.Built}}</dd>
-      <dt>{{.T "system.lastReload"}}</dt><dd>{{with $d.Reload}}{{time .Time}}{{if .Err}} · {{$.T "system.failed"}}{{end}}{{else}}—{{end}}</dd>
-      <dt>{{.T "system.store"}}</dt><dd class="ol-mono ol-break">{{$d.StoreDriver}}{{if eq $d.StoreDriver "bolt"}} · {{$d.StorePath}}{{end}}{{if not $d.Writable}} · {{.T "system.readOnly"}}{{end}}</dd>
-      <dt>{{.T "system.mgmt"}}</dt><dd>{{if $d.MgmtAddr}}{{.T "system.mgmtSeparate" "addr" $d.MgmtAddr}}{{else}}{{.T "system.mgmtShared" "addr" $d.PullAddr}}{{end}}</dd>
+      <dt>{{.T "system.lastReload"}}</dt><dd>{{with $d.Reload}}{{time .Time}}{{if .Err}} {{template "badge" (dict "Text" ($.T "system.failed") "Tone" "danger")}}{{end}}{{else}}—{{end}}</dd>
+    </dl></div>
+    {{if .IsAdmin}}<form method="post" action="/admin/reload" class="ol-panel-footer">{{template "csrf" .}}<span>{{.T "system.reloadHelp"}}</span><button type="submit" class="ol-btn ol-btn-secondary ol-btn-sm"{{if not $d.ConfigPath}} disabled{{end}}>{{icon "refresh-cw" "sm"}}{{.T "system.reload"}}</button></form>{{end}}
+  </section>
+  <section class="ol-panel" aria-labelledby="mgmt-title">
+    <div class="ol-panel-header"><h2 class="ol-panel-title" id="mgmt-title">{{icon "shield"}}{{.T "system.mgmt"}}</h2></div>
+    <div class="ol-panel-body"><dl class="ol-dl">
+      <dt>{{.T "system.mgmtPort"}}</dt><dd>{{if $d.MgmtAddr}}{{.T "system.mgmtSeparate" "addr" $d.MgmtAddr}}{{else}}{{.T "system.mgmtShared" "addr" $d.PullAddr}}{{end}}</dd>
       <dt>{{.T "system.mgmtPublic"}}</dt><dd>{{if $d.Public}}{{.T "system.mgmtPublicOn"}}{{else}}{{.T "system.mgmtPublicOff"}}{{end}}</dd>
       <dt>{{.T "system.mgmtAllow"}}</dt><dd class="ol-mono ol-break">{{if $d.Allow}}{{$d.Allow}}{{else}}{{.T "system.mgmtNone"}}{{end}}</dd>
       <dt>{{.T "system.mgmtProxied"}}</dt><dd class="ol-mono ol-break">{{if $d.ProxiedAllow}}{{$d.ProxiedAllow}}{{else}}{{.T "system.mgmtProxiedOff"}}{{end}}</dd>
       <dt>{{.T "system.metrics"}}</dt><dd>{{if $d.Metrics}}{{.T "system.metricsOn"}}{{else}}{{.T "system.metricsOff"}}{{end}}</dd>
       <dt>{{.T "system.pprof"}}</dt><dd>{{if $d.Pprof}}{{.T "system.pprofOn"}}{{else}}{{.T "system.pprofOff"}}{{end}}</dd>
-    </dl>
-    {{if .IsAdmin}}<form method="post" action="/admin/reload">{{template "csrf" .}}<button type="submit" class="ol-btn ol-btn-secondary ol-btn-sm"{{if not $d.ConfigPath}} disabled{{end}}>{{icon "refresh-cw" "sm"}}{{.T "system.reload"}}</button></form><p class="ol-hint">{{.T "system.reloadHelp"}}</p>{{end}}
-    </div>
+    </dl></div>
+  </section>
+  <section class="ol-panel" aria-labelledby="log-title">
+    <div class="ol-panel-header"><h2 class="ol-panel-title" id="log-title">{{icon "scroll-text"}}{{.T "settings.log"}}</h2></div>
+    <div class="ol-panel-body"><dl class="ol-dl">
+      <dt>{{.T "settings.logLevel"}}</dt><dd class="ol-mono">{{$d.Log.Level}}</dd>
+      <dt>{{.T "settings.accessLog"}}</dt><dd class="ol-mono ol-break">{{$d.Log.Access.Output}}{{if eq $d.Log.Access.Output "file"}} → {{$d.Log.Access.Path}}{{end}}</dd>
+      {{if eq $d.Log.Access.Output "file"}}<dt>{{.T "settings.rotation"}}</dt><dd>{{.T "settings.rotationValue" "size" (str $d.Log.Access.MaxSize) "keep" (num $d.Log.Access.Keep)}}</dd>{{end}}
+    </dl></div>
+    <div class="ol-panel-footer">{{.T "settings.logHelp"}}</div>
   </section>
 </div>
-<section class="ol-section">
-  <details class="ol-details"><summary>{{.T "system.effective"}}</summary>
-    {{template "snippet" (dict "ID" "config-yaml" "Label" "config.yaml" "Code" $d.Config "V" .)}}
-    <p class="ol-hint">{{.T "system.effectiveHelp"}}</p>
-  </details>
-</section>
 {{end}}

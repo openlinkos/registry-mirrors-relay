@@ -57,7 +57,7 @@ type requestsData struct {
 func (h *Handler) requestsPage(c *ctx) error {
 	q := c.r.URL.Query()
 	f := stats.Filter{ClientIP: strings.TrimSpace(q.Get("client_ip")), Upstream: q.Get("upstream"),
-		Image: strings.TrimSpace(q.Get("image")), Query: strings.TrimSpace(q.Get("q"))}
+		Image: strings.TrimSpace(q.Get("image")), User: strings.TrimSpace(q.Get("user")), Query: strings.TrimSpace(q.Get("q"))}
 	f.Status, _ = strconv.Atoi(q.Get("status"))
 	page := pageParam(c, 49)
 	rows := h.app.Stats.Recent(f, (page+1)*perPage+1)

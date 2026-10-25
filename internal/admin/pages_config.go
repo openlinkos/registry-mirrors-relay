@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -33,23 +32,51 @@ type cfgSection struct {
 	Override         *ops.OverrideView
 }
 
-type cfgUpstream struct {
-	Name, Registry string
-	Disabled       bool
-	Credentials    bool
-	Source         string // builtin | config | console
-	Override       *ops.OverrideView
+// ledgerRow is one change made in the console, with what it is and where it is edited.
+type ledgerRow struct {
+	ops.OverrideView
+	Title, Edit string
 }
 
 type configData struct {
 	Editable  bool // can save: admin role, operational data writable, and no admin.config_edit: false
 	EditOff   bool // admin.config_edit: false
-	Overrides []ops.OverrideView
-	Sections  []cfgSection
-	Entrances []entranceView
-	EntOver   *ops.OverrideView
-	Upstreams []cfgUpstream
-	Effective string // the effective configuration (YAML, secrets hidden)
+	Ledger    []ledgerRow
+	Sections  []cfgSection // the settings edited on this page
+	Effective string       // the effective configuration (YAML, secrets hidden)
+}
+
+// globalSections are edited on the configuration page; the other sections on the page that uses them.
+var globalSections = []string{"cache", "proxy"}
+
+// ledgerOf says what an override is and where it is edited.
+func ledgerOf(lang i18n.Lang, o ops.OverrideView) ledgerRow {
+	r := ledgerRow{OverrideView: o}
+	switch name, isUpstream := strings.CutPrefix(o.Key, "upstreams/"); {
+	case isUpstream:
+		r.Title, r.Edit = tr(lang, "config.ledgerUpstream", "name", name), "/admin/upstreams/edit?name="+url.QueryEscape(name)
+	case o.Key == "entrances":
+		r.Title, r.Edit = tr(lang, "nav.entrances"), "/admin/entrances"
+	case o.Key == "limits":
+		r.Title, r.Edit = tr(lang, "nav.limits"), "/admin/limits"
+	case o.Key == "site":
+		r.Title, r.Edit = tr(lang, "nav.site"), "/admin/site#status"
+	default:
+		r.Title, r.Edit = tr(lang, "cfg."+o.Key), "/admin/config#"+o.Key
+	}
+	return r
+}
+
+// section is one section of settings with its fields, for the page that edits it. A section whose form is
+// being shown again after an error keeps what was entered.
+func (h *Handler) section(c *ctx, key string) cfgSection {
+	rt := h.app.Runtime()
+	var form url.Values
+	if c.form != nil && c.form.Get("key") == key {
+		form = c.form
+	}
+	return cfgSection{Key: key, Title: tr(c.lang, "cfg."+key), Help: tr(c.lang, "cfg."+key+"Help"),
+		Fields: fields(c.lang, rt.Config, rt.FileConfig, key, form), Override: overrideOf(h.ops.Overrides(), key)}
 }
 
 // fieldChoices are the fields whose value must be one of a few choices.
@@ -108,44 +135,12 @@ func fields(lang i18n.Lang, eff, file *config.Config, key string, form url.Value
 
 func (h *Handler) configPage(c *ctx) error {
 	rt := h.app.Runtime()
-	d := configData{Editable: h.canEditConfig(c), EditOff: !rt.FileConfig.Admin.ConfigEdit, Overrides: h.ops.Overrides()}
-	for _, key := range config.OverrideSections {
-		var form url.Values
-		if c.form != nil && c.form.Get("key") == key {
-			form = c.form
-		}
-		d.Sections = append(d.Sections, cfgSection{Key: key, Title: tr(c.lang, "cfg."+key), Help: tr(c.lang, "cfg."+key+"Help"),
-			Fields: fields(c.lang, rt.Config, rt.FileConfig, key, form), Override: overrideOf(d.Overrides, key)})
+	d := configData{Editable: h.canEditConfig(c), EditOff: !rt.FileConfig.Admin.ConfigEdit}
+	for _, o := range h.ops.Overrides() {
+		d.Ledger = append(d.Ledger, ledgerOf(c.lang, o))
 	}
-	for _, e := range rt.Config.Entrances {
-		d.Entrances = append(d.Entrances, entranceView{Name: e.Name, Hosts: strings.Join(e.Hosts, ", "), Upstream: e.Upstream, Auth: e.Auth, Page: e.Page})
-	}
-	d.EntOver = overrideOf(d.Overrides, "entrances")
-	builtin := config.BuiltinUpstreams()
-	names := make([]string, 0, len(rt.Config.Upstreams))
-	for n := range rt.Config.Upstreams {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, n := range names {
-		u := rt.Config.Upstreams[n]
-		cu := cfgUpstream{Name: n, Registry: u.Registry, Disabled: u.Disabled, Credentials: u.Credentials != nil, Source: "config",
-			Override: overrideOf(d.Overrides, config.UpstreamKey(n))}
-		switch {
-		case rt.FileConfig.Upstreams[n] == nil:
-			cu.Source = "console"
-		case builtin[n] != nil:
-			cu.Source = "builtin"
-		}
-		d.Upstreams = append(d.Upstreams, cu)
-	}
-	// Upstreams created in the console whose override has not taken effect (not in the effective
-	// configuration)
-	for i := range d.Overrides {
-		o := &d.Overrides[i]
-		if name, ok := strings.CutPrefix(o.Key, "upstreams/"); ok && rt.Config.Upstreams[name] == nil {
-			d.Upstreams = append(d.Upstreams, cfgUpstream{Name: name, Registry: "—", Source: "console", Override: o})
-		}
+	for _, key := range globalSections {
+		d.Sections = append(d.Sections, h.section(c, key))
 	}
 	if b, err := rt.Config.Print(); err == nil {
 		d.Effective = string(b)
@@ -194,19 +189,53 @@ func (h *Handler) configSave(c *ctx) error {
 	if !slices.Contains(config.OverrideSections, key) {
 		return fail(http.StatusBadRequest, "error.badForm")
 	}
+	page := h.configPage
+	switch key {
+	case "limits":
+		page = h.limitsPage
+	case "site":
+		page = h.sitePage
+	}
 	o, err := config.FormOverride(key, formValues(c.form, key, nil))
 	if err != nil {
-		return c.retry(badConfig(err), h.configPage)
+		return c.retry(badConfig(err), page)
 	}
-	return h.saveConfig(c, key, o.Value, "/admin/config", h.configPage)
+	back := "/admin/config"
+	if b := c.form.Get("back"); b != "" {
+		back = safeNext(b)
+	}
+	return h.saveConfig(c, key, o.Value, back, page)
 }
 
+// configReset removes one override; back is the page it was reset from (the configuration page by default).
 func (h *Handler) configReset(c *ctx) error {
 	key := c.form.Get("key")
+	back := "/admin/config"
+	if b := c.form.Get("back"); b != "" {
+		back = safeNext(b)
+	}
 	if err := h.ops.ResetConfig(c.actor(), key); err != nil {
 		return c.retry(err, h.configPage)
 	}
-	return c.done("/admin/config", "config.reset", key)
+	return c.done(back, "config.reset", key)
+}
+
+// limitsSave saves the rate limits, edited on the limits page.
+func (h *Handler) limitsSave(c *ctx) error {
+	o, err := config.FormOverride("limits", formValues(c.form, "limits", nil))
+	if err != nil {
+		return c.retry(badConfig(err), h.limitsPage)
+	}
+	return h.saveConfig(c, "limits", o.Value, "/admin/limits", h.limitsPage)
+}
+
+// siteStatusSave saves whether the usage page shows the service status, edited on the usage page's page.
+func (h *Handler) siteStatusSave(c *ctx) error {
+	o, err := config.FormOverride("site", formValues(c.form, "site", nil))
+	if err != nil {
+		return c.retry(badConfig(err), h.sitePage)
+	}
+	return h.saveConfig(c, "site", o.Value, "/admin/site", h.sitePage)
 }
 
 // configExport downloads the console overrides in effect: format=overrides (only the changed parts) or
@@ -230,92 +259,6 @@ func (h *Handler) configExport(c *ctx) error {
 	return nil
 }
 
-// ---- Entrance list
-
-// entranceRow is one row in the entrance form.
-type entranceRow struct {
-	Index                                              int
-	Name, Hosts, Upstream, DefaultUpstream, Auth, Page string
-}
-
-type entrancesData struct {
-	Editable  bool
-	Rows      []entranceRow
-	Upstreams []string // the upstreams that can be chosen (those not disabled)
-	Override  *ops.OverrideView
-	FileHosts []string // the entrances in the configuration file, for comparison
-}
-
-// blankEntranceRows is the number of empty rows left at the end of the form; filling one in makes a new
-// entrance.
-const blankEntranceRows = 2
-
-const maxEntranceRows = 200
-
-func (h *Handler) entrancesPage(c *ctx) error {
-	rt := h.app.Runtime()
-	d := entrancesData{Editable: h.canEditConfig(c), Override: overrideOf(h.ops.Overrides(), "entrances")}
-	for n, u := range rt.Config.Upstreams {
-		if !u.Disabled {
-			d.Upstreams = append(d.Upstreams, n)
-		}
-	}
-	sort.Strings(d.Upstreams)
-	if f := c.form; f != nil && f.Has("rows") {
-		n, _ := strconv.Atoi(f.Get("rows"))
-		for i := range min(n, maxEntranceRows) {
-			p := strconv.Itoa(i)
-			if f.Get("delete_"+p) != "" {
-				continue
-			}
-			d.Rows = append(d.Rows, entranceRow{Name: f.Get("name_" + p), Hosts: f.Get("hosts_" + p), Upstream: f.Get("upstream_" + p),
-				DefaultUpstream: f.Get("default_upstream_" + p), Auth: f.Get("auth_" + p), Page: f.Get("page_" + p)})
-		}
-	} else {
-		for _, e := range rt.Config.Entrances {
-			d.Rows = append(d.Rows, entranceRow{Name: e.Name, Hosts: strings.Join(e.Hosts, ", "), Upstream: e.Upstream,
-				DefaultUpstream: e.DefaultUpstream, Auth: e.Auth, Page: e.Page})
-		}
-	}
-	if d.Editable {
-		for range blankEntranceRows {
-			d.Rows = append(d.Rows, entranceRow{Auth: "none", Page: "public"})
-		}
-	}
-	for i := range d.Rows {
-		d.Rows[i].Index = i
-	}
-	for _, e := range rt.FileConfig.Entrances {
-		d.FileHosts = append(d.FileHosts, e.Name+": "+strings.Join(e.Hosts, ", "))
-	}
-	return h.render(c, "entrances", &view{Title: tr(c.lang, "config.entrancesTitle"), Nav: "config",
-		Crumbs: []crumb{{tr(c.lang, "nav.config"), "/admin/config"}}, Data: d})
-}
-
-func (h *Handler) entrancesSave(c *ctx) error {
-	n, err := strconv.Atoi(c.form.Get("rows"))
-	if err != nil || n < 0 || n > maxEntranceRows {
-		return fail(http.StatusBadRequest, "error.badForm")
-	}
-	var list []map[string]string
-	for i := range n {
-		p := strconv.Itoa(i)
-		if c.form.Get("delete_"+p) != "" || strings.TrimSpace(c.form.Get("hosts_"+p)) == "" {
-			continue
-		}
-		row := map[string]string{}
-		for _, f := range config.OverrideFields("entrances") {
-			row[f] = c.form.Get(f + "_" + p)
-		}
-		list = append(list, row)
-	}
-	o, err := config.FormEntrances(list)
-	if err != nil {
-		return c.retry(badConfig(err), h.entrancesPage)
-	}
-	return h.saveConfig(c, "entrances", o.Value, "/admin/config/entrances", h.entrancesPage)
-}
-
 // ---- A single upstream
 
 type upstreamEditData struct {
@@ -325,7 +268,37 @@ type upstreamEditData struct {
 	Source      string
 	Credentials bool
 	Fields      []cfgField
+	Groups      []fieldGroup // Fields in the sections of the form
 	Override    *ops.OverrideView
+}
+
+// fieldGroup is one section of a form: a title, what it is for, and its fields.
+type fieldGroup struct {
+	Key, Title, Help string
+	Fields           []cfgField
+}
+
+// upstreamGroups are the sections of an upstream's form, by field.
+var upstreamGroups = []struct {
+	key    string
+	fields []string
+}{
+	{"address", []string{"registry", "aliases", "library_prefix", "disabled"}},
+	{"redirects", []string{"redirect_hosts", "extra_redirect_hosts", "unlisted_redirect", "token_realm_hosts"}},
+}
+
+func groupFields(lang i18n.Lang, fs []cfgField) []fieldGroup {
+	var out []fieldGroup
+	for _, g := range upstreamGroups {
+		fg := fieldGroup{Key: g.key, Title: tr(lang, "upstream.group."+g.key), Help: tr(lang, "upstream.group."+g.key+"Help")}
+		for _, f := range fs {
+			if slices.Contains(g.fields, f.Name) {
+				fg.Fields = append(fg.Fields, f)
+			}
+		}
+		out = append(out, fg)
+	}
+	return out
 }
 
 func (h *Handler) upstreamEditPage(c *ctx) error {
@@ -372,11 +345,12 @@ func (h *Handler) upstreamEditPage(c *ctx) error {
 		}
 	}
 	d.Credentials = u != nil && u.Credentials != nil
+	d.Groups = groupFields(c.lang, d.Fields)
 	title := name
 	if d.New {
 		title = tr(c.lang, "config.upstreamNew")
 	}
-	return h.render(c, "upstream", &view{Title: title, Nav: "config", Crumbs: []crumb{{tr(c.lang, "nav.config"), "/admin/config#upstreams"}}, Data: d})
+	return h.render(c, "upstream", &view{Title: title, Nav: "upstreams", Crumbs: []crumb{{tr(c.lang, "nav.upstreams"), "/admin/upstreams"}}, Data: d})
 }
 
 func (h *Handler) upstreamSave(c *ctx) error {
@@ -407,5 +381,5 @@ func (h *Handler) upstreamSave(c *ctx) error {
 	if err != nil {
 		return c.retry(badConfig(err), h.upstreamEditPage)
 	}
-	return h.saveConfig(c, key, o.Value, "/admin/config/upstream?name="+url.QueryEscape(name), h.upstreamEditPage)
+	return h.saveConfig(c, key, o.Value, "/admin/upstreams/edit?name="+url.QueryEscape(name), h.upstreamEditPage)
 }

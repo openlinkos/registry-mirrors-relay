@@ -50,13 +50,15 @@ function copyButtons() {
   }
 }
 
-// Operations such as deletes ask for confirmation first. The server does not rely on this.
+// Operations such as deletes ask for confirmation first: a form's data-confirm, or that of the button that
+// submitted it (a reset next to a save). The server does not rely on this.
 function confirmForms() {
-  for (const form of document.querySelectorAll('form[data-confirm]')) {
-    form.addEventListener('submit', (ev) => {
-      if (!window.confirm(form.dataset.confirm || '')) ev.preventDefault();
-    });
-  }
+  document.addEventListener('submit', (ev) => {
+    const form = ev.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    const text = ev.submitter?.dataset.confirm || form.dataset.confirm;
+    if (text && !window.confirm(text)) ev.preventDefault();
+  });
 }
 
 // The numbers on the overview page refresh every 15 seconds (not while the page is in the background).
@@ -70,13 +72,23 @@ function liveValues() {
       .then((data) => {
         for (const el of els) {
           const v = data[el.dataset.live];
-          if (typeof v === 'string') el.textContent = v;
+          if (typeof v !== 'string' || v === el.textContent) continue;
+          el.textContent = v;
+          // A value that changed flashes once (the design system's .ol-flash)
+          el.classList.remove('ol-flash');
+          void el.offsetWidth;
+          el.classList.add('ol-flash');
         }
       })
       .catch(() => {});
   };
   setInterval(tick, 15000);
 }
+
+// The flash is removed when it ends, so the next change can flash again.
+document.addEventListener('animationend', (ev) => {
+  if (ev.target instanceof Element && ev.animationName === 'ol-flash') ev.target.classList.remove('ol-flash');
+});
 
 localTimes(document);
 copyButtons();

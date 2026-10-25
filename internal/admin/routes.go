@@ -17,6 +17,19 @@ func (h *Handler) routeTable() []route {
 	get := func(path string, run func(*ctx) error) route {
 		return route{method: http.MethodGet, path: path, auth: authSession, run: run}
 	}
+	// getAdmin is a page only the admin role can open: a form that creates something
+	getAdmin := func(path string, run func(*ctx) error) route {
+		return route{method: http.MethodGet, path: path, auth: authSession, write: true, run: run}
+	}
+	// moved is an old address that now lives elsewhere
+	moved := func(path, to string) route {
+		return route{method: http.MethodGet, path: path, auth: authSession, run: func(c *ctx) error {
+			if q := c.r.URL.RawQuery; q != "" {
+				return c.redirect(to + "?" + q)
+			}
+			return c.redirect(to)
+		}}
+	}
 	post := func(path string, run func(*ctx) error) route {
 		return route{method: http.MethodPost, path: path, auth: authSession, write: true, run: run}
 	}
@@ -34,14 +47,21 @@ func (h *Handler) routeTable() []route {
 		get("/admin/", h.overviewPage),
 		get("/admin/live", h.live),
 		get("/admin/upstreams", h.upstreamsPage),
+		get("/admin/upstreams/edit", h.upstreamEditPage),
 		post("/admin/upstreams/check", h.upstreamCheck),
 		post("/admin/upstreams/hosts/add", h.redirectHostAdd),
 		post("/admin/upstreams/hosts/delete", h.redirectHostDelete),
-		get("/admin/usage", h.usagePage),
+		get("/admin/entrances", h.entrancesPage),
+		get("/admin/entrances/view", h.entrancePage),
+		get("/admin/site", h.sitePage),
+		post("/admin/site/save", h.siteSave),
+		post("/admin/site/reset", h.siteReset),
 		get("/admin/users", h.usersPage),
+		getAdmin("/admin/users/new", h.userNewPage),
 		get("/admin/users/edit", h.userPage),
 		post("/admin/users/create", h.userCreate),
 		post("/admin/users/update", h.userUpdate),
+		post("/admin/users/toggle", h.userToggle),
 		post("/admin/users/delete", h.userDelete),
 		get("/admin/rules", h.rulesPage),
 		post("/admin/rules/ip/add", h.ipRuleAdd),
@@ -54,9 +74,6 @@ func (h *Handler) routeTable() []route {
 		get("/admin/requests", h.requestsPage),
 		get("/admin/abuse", h.abusePage),
 		get("/admin/audit", h.auditPage),
-		get("/admin/settings", h.settingsPage),
-		post("/admin/settings/site", h.siteSave),
-		post("/admin/settings/reset", h.siteReset),
 		get("/admin/admins", h.adminsPage),
 		get("/admin/admins/edit", h.adminPage),
 		fresh("/admin/admins/create", "/admin/admins", h.adminCreate),
@@ -67,14 +84,21 @@ func (h *Handler) routeTable() []route {
 		fresh("/admin/sessions/revoke", "/admin/admins", h.sessionRevoke),
 		get("/admin/config", h.configPage),
 		get("/admin/config/export", h.configExport),
-		get("/admin/config/entrances", h.entrancesPage),
-		get("/admin/config/upstream", h.upstreamEditPage),
 		// Configuration changes: entrances and upstreams decide where pull requests go, so like
-		// administrators and tokens they require a recently entered password
+		// administrators and tokens they require a recently entered password. Each setting is saved on
+		// the page that uses it.
 		fresh("/admin/config/save", "/admin/config", h.configSave),
-		fresh("/admin/config/entrances/save", "/admin/config/entrances", h.entrancesSave),
-		fresh("/admin/config/upstream/save", "/admin/config", h.upstreamSave),
 		fresh("/admin/config/reset", "/admin/config", h.configReset),
+		fresh("/admin/entrances/save", "/admin/entrances", h.entranceSave),
+		fresh("/admin/entrances/delete", "/admin/entrances", h.entranceDelete),
+		fresh("/admin/upstreams/save", "/admin/upstreams", h.upstreamSave),
+		fresh("/admin/limits/save", "/admin/limits", h.limitsSave),
+		fresh("/admin/site/status", "/admin/site", h.siteStatusSave),
+		// Addresses of earlier versions
+		moved("/admin/usage", "/admin/entrances"),
+		moved("/admin/settings", "/admin/site"),
+		moved("/admin/config/entrances", "/admin/entrances"),
+		moved("/admin/config/upstream", "/admin/upstreams/edit"),
 		get("/admin/system", h.systemPage),
 		post("/admin/reload", h.reload),
 		get("/admin/account", h.accountPage),
@@ -186,7 +210,7 @@ var notices = []string{
 	"user.created", "user.updated", "user.deleted", "rule.added", "rule.deleted", "ban.added", "ban.deleted",
 	"host.added", "host.deleted", "site.saved", "site.reset", "admin.created", "admin.updated", "admin.deleted",
 	"token.deleted", "session.revoked", "reloaded", "password.changed", "upstream.ok", "upstream.failed",
-	"config.saved", "config.reset",
+	"config.saved", "config.reset", "user.enabled", "user.disabled",
 }
 
 func (c *ctx) notice() string {

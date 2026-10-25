@@ -1,8 +1,8 @@
 {{define "content"}}{{$v := .}}{{$d := .Data}}
 {{template "header" (dict "Title" (.T "nav.abuse") "Desc" (.T "abuse.description"))}}
 {{template "notices" .}}
-<nav class="ol-segmented" aria-label="{{.T "abuse.period"}}">{{range $d.Periods}}<a href="/admin/abuse?hours={{.}}"{{if eq . $d.Hours}} aria-current="true"{{end}}>{{$v.T (print "abuse.hours" .)}}</a>{{end}}</nav>
-<p class="ol-muted ol-text-sm admin-after">{{.T "abuse.totals" "requests" (num $d.Totals.Requests) "bytes" (bytes $d.Totals.Bytes)}}</p>
+<div class="ol-cluster"><nav class="ol-segmented" aria-label="{{.T "abuse.period"}}">{{range $d.Periods}}<a href="/admin/abuse?hours={{.}}"{{if eq . $d.Hours}} aria-current="true"{{end}}><span>{{$v.T (print "abuse.hours" .)}}</span></a>{{end}}</nav>
+<p class="ol-muted ol-text-sm">{{.T "abuse.totals" "requests" (num $d.Totals.Requests) "bytes" (bytes $d.Totals.Bytes)}}</p></div>
 
 <section class="ol-section">
   <div class="ol-section-header"><h2 class="ol-section-title">{{.T "abuse.repeats"}}</h2><p class="ol-section-description">{{.T "abuse.repeatsHelp"}}</p></div>
@@ -10,7 +10,7 @@
     <thead><tr><th>{{.T "requests.client"}}</th><th>{{.T "abuse.layer"}}</th><th class="ol-num">{{.T "abuse.downloads"}}</th><th class="ol-num">{{.T "overview.bytes"}}</th><th></th></tr></thead>
     <tbody>{{range $d.Repeats}}<tr>
       <td class="ol-mono"><a href="/admin/requests?client_ip={{.Client}}">{{.Client}}</a></td>
-      <td class="admin-wrap">{{.Image}}<span class="ol-cell-sub ol-mono">{{.Digest}}</span></td>
+      <td class="ol-break">{{.Image}}<span class="ol-cell-sub ol-mono">{{.Digest}}</span></td>
       <td class="ol-num">{{if ge .Count 5}}{{template "badge" (dict "Text" (num .Count) "Tone" "warning")}}{{else}}{{num .Count}}{{end}}</td>
       <td class="ol-num">{{bytes .Bytes}}</td>
       <td>{{if $v.CanWrite}}<a class="ol-btn ol-btn-danger-soft ol-btn-xs" href="/admin/rules?ban={{.Client}}#bans">{{icon "ban" "sm"}}{{$v.T "rules.ban"}}</a>{{end}}</td>
@@ -20,7 +20,7 @@
 
 <section class="ol-section">
   <div class="ol-section-header"><h2 class="ol-section-title">{{.T "abuse.clients"}}</h2><p class="ol-section-description">{{.T "abuse.clientsHelp"}}</p></div>
-  {{if $d.Clients}}<div class="ol-table-wrap"><table class="ol-table">
+  {{if $d.Clients}}<div class="ol-stack"><div class="ol-table-wrap"><table class="ol-table">
     <thead><tr><th>{{.T "requests.client"}}</th><th class="ol-num">{{.T "overview.count"}}</th><th class="ol-num">{{.T "overview.bytes"}}</th><th class="ol-num">{{.T "abuse.share"}}</th><th></th></tr></thead>
     <tbody>{{range $d.Clients}}<tr>
       <td class="ol-mono"><a href="/admin/requests?client_ip={{.Key}}">{{.Key}}</a></td>
@@ -28,6 +28,6 @@
       <td>{{if $v.CanWrite}}<a class="ol-btn ol-btn-danger-soft ol-btn-xs" href="/admin/rules?ban={{.Key}}#bans">{{icon "ban" "sm"}}{{$v.T "rules.ban"}}</a>{{end}}</td>
     </tr>{{end}}</tbody>
   </table></div>
-  <p class="ol-hint admin-after">{{.T "abuse.estimate"}}</p>{{else}}{{template "empty" (dict "Icon" "user" "Title" (.T "overview.noTraffic") "Text" (.T "overview.noTrafficText"))}}{{end}}
+  <p class="ol-hint">{{.T "abuse.estimate"}}</p></div>{{else}}{{template "empty" (dict "Icon" "user" "Title" (.T "overview.noTraffic") "Text" (.T "overview.noTrafficText"))}}{{end}}
 </section>
 {{end}}

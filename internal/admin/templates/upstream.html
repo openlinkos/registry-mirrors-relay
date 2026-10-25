@@ -1,20 +1,35 @@
 {{define "content"}}{{$v := .}}{{$d := .Data}}
-{{template "header" (dict "Title" .Title "Desc" (.T "config.upstreamDescription"))}}
+<div class="ol-page-header">
+  <div class="ol-page-heading">
+    <div class="ol-title-row"><h1 class="ol-page-title">{{.Title}}</h1>{{if not $d.New}}{{template "badge" (dict "Text" (.T (print "config.source." $d.Source)) "Square" true)}}{{with $d.Override}}{{template "ovState" (dict "S" .State "V" $v)}}{{end}}{{end}}</div>
+    <p class="ol-page-description">{{.T "config.upstreamDescription"}}</p>
+  </div>
+  {{if not $d.New}}<div class="ol-page-actions"><a class="ol-btn ol-btn-secondary" href="/admin/upstreams#upstream-{{$d.Name}}">{{icon "activity"}}{{.T "upstreams.viewStatus"}}</a></div>{{end}}
+</div>
 {{template "notices" .}}
 {{if $d.Credentials}}<div class="ol-notices">{{template "alert" (dict "Tone" "info" "Text" (.T "config.upstreamCredentials"))}}</div>{{end}}
 {{with $d.Override}}{{if not (or (eq .State "active") (eq .State "drift"))}}<div class="ol-notices">{{template "alert" (dict "Tone" "warning" "Text" ($v.T "config.upstreamNotApplied" "error" (or ($v.Err .Cause) "admin.config_edit: false")))}}</div>{{end}}{{end}}
 
-<section class="ol-section">
-  {{if not $d.New}}<p class="ol-section-description">{{.T (print "config.source." $d.Source)}}{{with $d.Override}} {{template "ovState" (dict "S" .State "V" $v)}}{{end}}</p>{{end}}
-  {{if $d.Editable}}<form method="post" action="/admin/config/upstream/save" class="ol-form">
-    {{template "csrf" .}}
-    {{if $d.New}}<input type="hidden" name="new" value="1">
-    <div class="ol-field"><label class="ol-label" for="upstream">{{.T "upstreams.name"}} <span class="ol-required">*</span></label><input class="ol-input ol-input-mono" id="upstream" name="upstream" value="{{$d.Name}}" required maxlength="253" placeholder="registry.example.com" autocomplete="off" spellcheck="false" aria-describedby="upstream-hint"><p class="ol-hint" id="upstream-hint">{{.T "config.upstreamNameHint"}}</p></div>
-    {{else}}<input type="hidden" name="upstream" value="{{$d.Name}}">{{end}}
-    <div class="ol-grid ol-grid-2">{{range $d.Fields}}{{template "cfgField" (dict "F" . "V" $v "ID" .Name)}}{{end}}</div>
-    <div class="ol-form-actions"><button type="submit" class="ol-btn ol-btn-primary">{{icon "check" "sm"}}{{.T "action.save"}}</button><a class="ol-btn ol-btn-ghost" href="/admin/config#upstreams">{{.T "action.cancel"}}</a></div>
-  </form>
-  {{with $d.Override}}<div class="admin-after">{{if eq $d.Source "console"}}{{template "resetButton" (dict "V" $v "Key" .Key "Label" ($v.T "config.upstreamRemove"))}}{{else}}{{template "resetButton" (dict "V" $v "Key" .Key)}}{{end}}</div>{{end}}
-  {{else}}<dl class="ol-dl">{{range $d.Fields}}<dt>{{.Label}}</dt><dd class="ol-mono admin-wrap">{{if .Value}}{{.Value}}{{else}}—{{end}}{{if .Changed}} <span class="ol-muted">{{$v.T "config.fileValue" "v" (or .File "—")}}</span>{{end}}</dd>{{end}}</dl>{{end}}
-</section>
+{{if $d.Editable}}<form method="post" action="/admin/upstreams/save">
+  {{template "csrf" .}}
+  {{if $d.New}}<input type="hidden" name="new" value="1">
+  <section class="ol-form-section" aria-labelledby="g-name">
+    <div class="ol-form-section-header"><h2 class="ol-form-section-title" id="g-name">{{.T "upstreams.name"}}</h2><p class="ol-form-section-description">{{.T "config.upstreamNameHint"}}</p></div>
+    <div class="ol-form-section-body"><div class="ol-field"><label class="ol-label" for="upstream">{{.T "upstreams.name"}} <span class="ol-required">*</span></label><input class="ol-input ol-input-mono" id="upstream" name="upstream" value="{{$d.Name}}" required maxlength="253" placeholder="registry.example.com" autocomplete="off" spellcheck="false"></div></div>
+  </section>
+  {{else}}<input type="hidden" name="upstream" value="{{$d.Name}}">{{end}}
+  {{range $d.Groups}}<section class="ol-form-section" aria-labelledby="g-{{.Key}}">
+    <div class="ol-form-section-header"><h2 class="ol-form-section-title" id="g-{{.Key}}">{{.Title}}</h2><p class="ol-form-section-description">{{.Help}}</p></div>
+    <div class="ol-form-section-body">{{range .Fields}}{{template "cfgField" (dict "F" . "V" $v "ID" .Name)}}{{end}}</div>
+  </section>{{end}}
+  <section class="ol-form-section">
+    <div></div>
+    <div class="ol-form-section-body"><div class="ol-form-actions"><button type="submit" class="ol-btn ol-btn-primary">{{icon "check" "sm"}}{{if $d.New}}{{.T "config.upstreamCreate"}}{{else}}{{.T "config.upstreamSave"}}{{end}}</button><a class="ol-btn ol-btn-ghost" href="/admin/upstreams">{{.T "action.cancel"}}</a></div></div>
+  </section>
+</form>
+{{with $d.Override}}<div class="ol-section ol-cluster">{{if eq $d.Source "console"}}{{template "resetButton" (dict "V" $v "Key" .Key "Back" "/admin/upstreams" "Label" ($v.T "config.upstreamRemove"))}}{{else}}{{template "resetButton" (dict "V" $v "Key" .Key "Back" (print "/admin/upstreams/edit?name=" $d.Name))}}{{end}}</div>{{end}}
+{{else}}{{range $d.Groups}}<section class="ol-form-section" aria-labelledby="g-{{.Key}}">
+  <div class="ol-form-section-header"><h2 class="ol-form-section-title" id="g-{{.Key}}">{{.Title}}</h2><p class="ol-form-section-description">{{.Help}}</p></div>
+  <div class="ol-form-section-body"><dl class="ol-dl ol-dl-stack">{{range .Fields}}<dt>{{.Label}}</dt><dd class="ol-mono ol-break">{{if .Value}}{{.Value}}{{else}}—{{end}}{{if .Changed}} <span class="ol-muted">{{$v.T "config.fileValue" "v" (or .File "—")}}</span>{{end}}</dd>{{end}}</dl></div>
+</section>{{end}}{{end}}
 {{end}}

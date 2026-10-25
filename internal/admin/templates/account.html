@@ -1,17 +1,32 @@
-{{define "content"}}
-{{template "header" (dict "Title" (.T "nav.account") "Desc" (.T "account.description" "name" .Sess.Admin "role" (.T (print "role." .Sess.Role))))}}
+{{define "content"}}{{$v := .}}
+<div class="ol-page-header">
+  <div class="ol-page-heading">
+    <div class="ol-title-row"><span class="ol-entity"><span class="ol-avatar ol-avatar-lg {{avatarTone .Sess.Admin}}">{{initials .Sess.Admin}}</span><span class="ol-entity-text"><h1 class="ol-page-title">{{.Sess.Admin}}</h1><span class="ol-entity-sub">{{.T (print "role." .Sess.Role)}}</span></span></span></div>
+    <p class="ol-page-description">{{.T "account.descriptionShort"}}</p>
+  </div>
+</div>
 {{template "notices" .}}
 {{if .Sess.MustChange}}<div class="ol-notices">{{template "alert" (dict "Tone" "warning" "Title" (.T "account.mustChangeTitle") "Text" (.T "account.mustChange"))}}</div>{{end}}
 {{if and .Data (eq .Data.Source "store") .Writable}}
-<section class="ol-section">
-  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "account.password"}}</h2><p class="ol-section-description">{{.T "account.passwordHelp"}}</p></div>
-  <form method="post" action="/admin/account/password" class="ol-form">
-    {{template "csrf" .}}
-    <input type="text" name="username" value="{{.Sess.Admin}}" autocomplete="username" hidden>
-    <div class="ol-field"><label class="ol-label" for="password">{{.T "user.newPassword"}}</label><input class="ol-input" id="password" type="password" name="password" required minlength="12" maxlength="72" autocomplete="new-password"></div>
-    <div class="ol-field"><label class="ol-label" for="confirm">{{.T "account.confirm"}}</label><input class="ol-input" id="confirm" type="password" name="confirm" required minlength="12" maxlength="72" autocomplete="new-password"></div>
-    <div class="ol-form-actions"><button type="submit" class="ol-btn ol-btn-primary">{{icon "check" "sm"}}{{.T "account.change"}}</button></div>
-  </form>
-</section>
+<form method="post" action="/admin/account/password">
+  {{template "csrf" .}}
+  <input type="text" name="username" value="{{.Sess.Admin}}" autocomplete="username" hidden>
+  <section class="ol-form-section" aria-labelledby="p-title">
+    <div class="ol-form-section-header"><h2 class="ol-form-section-title" id="p-title">{{.T "account.password"}}</h2><p class="ol-form-section-description">{{.T "account.passwordHelp"}}</p></div>
+    <div class="ol-form-section-body">
+      <div class="ol-field"><label class="ol-label" for="password">{{.T "user.newPassword"}}</label><input class="ol-input" id="password" type="password" name="password" required minlength="12" maxlength="72" autocomplete="new-password" aria-describedby="password-hint"><p class="ol-hint" id="password-hint">{{.T "account.passwordHint"}}</p></div>
+      <div class="ol-field"><label class="ol-label" for="confirm">{{.T "account.confirm"}}</label><input class="ol-input" id="confirm" type="password" name="confirm" required minlength="12" maxlength="72" autocomplete="new-password"></div>
+      <div class="ol-form-actions"><button type="submit" class="ol-btn ol-btn-primary">{{icon "key-round" "sm"}}{{.T "account.change"}}</button></div>
+    </div>
+  </section>
+</form>
 {{else}}{{template "alert" (dict "Tone" "info" "Text" (.T "account.fromConfig"))}}{{end}}
+<hr>
+<section class="ol-form-section" aria-labelledby="prefs-title">
+  <div class="ol-form-section-header"><h2 class="ol-form-section-title" id="prefs-title">{{.T "account.prefs"}}</h2><p class="ol-form-section-description">{{.T "account.prefsHelp"}}</p></div>
+  <div class="ol-form-section-body">
+    <div class="ol-field"><span class="ol-label">{{.T "prefs.language"}}</span><div class="ol-cluster">{{range .Langs}}<form method="post" action="/admin/prefs"><input type="hidden" name="lang" value="{{.Code}}"><input type="hidden" name="next" value="{{$v.Here}}"><button type="submit" class="ol-btn ol-btn-sm {{if .Current}}ol-btn-soft{{else}}ol-btn-secondary{{end}}" lang="{{.HTML}}"{{if .Current}} aria-pressed="true"{{else}} aria-pressed="false"{{end}}>{{if .Current}}{{icon "check" "sm"}}{{end}}{{.Name}}</button></form>{{end}}</div></div>
+    <div class="ol-field"><span class="ol-label">{{.T "prefs.theme"}}</span><div>{{template "themeForm" (dict "V" . "Inline" true)}}</div></div>
+  </div>
+</section>
 {{end}}

@@ -2,58 +2,66 @@
 {{template "header" (dict "Title" (.T "nav.admins") "Desc" (.T "admins.description"))}}
 {{template "notices" .}}
 
-<section class="ol-section">
-  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "admins.admins"}}</h2><p class="ol-section-description">{{.T "admins.adminsHelp"}}</p></div>
-  {{if $d.Admins}}<div class="ol-table-wrap"><table class="ol-table">
-    <thead><tr><th>{{.T "auth.username"}}</th><th>{{.T "admins.role"}}</th><th>{{.T "users.status"}}</th><th>{{.T "users.created"}}</th><th></th></tr></thead>
-    <tbody>{{range $d.Admins}}<tr>
-      <td><span class="ol-cell-title">{{.Name}}</span>{{if eq .Name $v.Sess.Admin}}<span class="ol-cell-sub">{{$v.T "admins.you"}}</span>{{end}}</td>
-      <td>{{if eq .Role "admin"}}{{template "badge" (dict "Text" ($v.T "role.admin") "Tone" "accent")}}{{else}}{{template "badge" (dict "Text" ($v.T "role.viewer"))}}{{end}}</td>
-      <td><span class="ol-cluster">{{if .Disabled}}{{template "badge" (dict "Text" ($v.T "users.disabled") "Tone" "warning" "Dot" true)}}{{else}}{{template "badge" (dict "Text" ($v.T "users.active") "Tone" "success" "Dot" true)}}{{end}}{{if .MustChange}}{{template "badge" (dict "Text" ($v.T "admins.mustChange") "Tone" "info")}}{{end}}{{template "source" (dict "Source" .Source "V" $v)}}</span></td>
-      <td class="ol-nowrap">{{time .Created}}</td>
-      <td>{{if and $v.CanWrite (eq .Source "store") (ne .Name $v.Sess.Admin)}}<span class="ol-cluster"><a class="ol-btn ol-btn-secondary ol-btn-xs" href="/admin/admins/edit?name={{.Name}}">{{icon "pencil" "sm"}}{{$v.T "action.edit"}}</a>{{template "deleteButton" (dict "V" $v "Action" "/admin/admins/delete" "Fields" (dict "name" .Name) "Confirm" ($v.T "admins.deleteConfirm" "name" .Name))}}</span>{{else if eq .Name $v.Sess.Admin}}<a class="ol-btn ol-btn-secondary ol-btn-xs" href="/admin/account">{{icon "key-round" "sm"}}{{$v.T "admins.changeOwn"}}</a>{{end}}</td>
-    </tr>{{end}}</tbody>
-  </table></div>{{end}}
-  {{if .CanWrite}}<form method="post" action="/admin/admins/create" class="ol-toolbar admin-after">
-    {{template "csrf" .}}
-    <div class="ol-field"><label class="ol-label" for="admin-name">{{.T "auth.username"}}</label><input class="ol-input ol-input-sm ol-input-mono" id="admin-name" name="name" value="{{.F "name"}}" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}" autocomplete="off" spellcheck="false"></div>
-    <div class="ol-field"><label class="ol-label" for="admin-password">{{.T "auth.password"}}</label><input class="ol-input ol-input-sm" id="admin-password" type="password" name="password" required minlength="12" maxlength="72" autocomplete="new-password"></div>
-    <div class="ol-field"><label class="ol-label" for="admin-role">{{.T "admins.role"}}</label><select class="ol-select ol-input-sm" id="admin-role" name="role"><option value="viewer">{{.T "role.viewer"}}</option><option value="admin">{{.T "role.admin"}}</option></select></div>
-    <button type="submit" class="ol-btn ol-btn-secondary ol-btn-sm">{{icon "plus" "sm"}}{{.T "admins.create"}}</button>
-  </form>
-  <p class="ol-hint admin-after">{{.T "admins.freshHint"}}</p>{{end}}
+<section class="ol-section" aria-labelledby="admins-title">
+  <div class="ol-section-header"><h2 class="ol-section-title" id="admins-title">{{.T "admins.admins"}}</h2><p class="ol-section-description">{{.T "admins.adminsHelp"}}</p></div>
+  <div class="ol-stack">
+    {{if $d.Admins}}<div class="ol-table-wrap"><table class="ol-table">
+      <thead><tr><th scope="col">{{.T "auth.username"}}</th><th scope="col">{{.T "admins.role"}}</th><th scope="col">{{.T "users.status"}}</th><th scope="col">{{.T "users.created"}}</th><th scope="col" class="ol-actions"><span class="ol-sr-only">{{.T "action.actions"}}</span></th></tr></thead>
+      <tbody>{{range $d.Admins}}<tr>
+        <td><span class="ol-entity"><span class="ol-avatar ol-avatar-sm {{avatarTone .Name}}">{{initials .Name}}</span><span class="ol-entity-text">{{if and $v.CanWrite (eq .Source "store") (ne .Name $v.Sess.Admin)}}<a class="ol-entity-title ol-row-link" href="/admin/admins/edit?name={{.Name}}">{{.Name}}</a>{{else if eq .Name $v.Sess.Admin}}<a class="ol-entity-title ol-row-link" href="/admin/account">{{.Name}}</a>{{else}}<span class="ol-entity-title">{{.Name}}</span>{{end}}{{if eq .Name $v.Sess.Admin}}<span class="ol-entity-sub">{{$v.T "admins.you"}}</span>{{end}}</span></span></td>
+        <td>{{if eq .Role "admin"}}{{template "badge" (dict "Text" ($v.T "role.admin") "Tone" "accent")}}{{else}}{{template "badge" (dict "Text" ($v.T "role.viewer"))}}{{end}}</td>
+        <td><span class="ol-cluster">{{if .Disabled}}{{template "badge" (dict "Text" ($v.T "users.disabled") "Tone" "warning" "Dot" true)}}{{else}}{{template "badge" (dict "Text" ($v.T "users.active") "Tone" "success" "Dot" true)}}{{end}}{{if .MustChange}}{{template "badge" (dict "Text" ($v.T "admins.mustChange") "Tone" "info")}}{{end}}{{if eq .Source "config"}}{{template "source" (dict "Source" .Source "V" $v)}}{{end}}</span></td>
+        <td class="ol-nowrap">{{time .Created}}</td>
+        <td class="ol-actions">{{if and $v.CanWrite (eq .Source "store") (ne .Name $v.Sess.Admin)}}{{template "deleteButton" (dict "V" $v "Action" "/admin/admins/delete" "Fields" (dict "name" .Name) "Confirm" ($v.T "admins.deleteConfirm" "name" .Name))}}{{end}}</td>
+      </tr>{{end}}</tbody>
+    </table></div>{{end}}
+    {{if .CanWrite}}<form method="post" action="/admin/admins/create" class="ol-panel">
+      {{template "csrf" .}}
+      <div class="ol-panel-body ol-toolbar">
+        <div class="ol-field"><label class="ol-label" for="admin-name">{{.T "auth.username"}}</label><input class="ol-input ol-input-sm ol-input-mono" id="admin-name" name="name" value="{{.F "name"}}" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}" autocomplete="off" spellcheck="false"></div>
+        <div class="ol-field ol-grow"><label class="ol-label" for="admin-password">{{.T "auth.password"}}</label><input class="ol-input ol-input-sm" id="admin-password" type="password" name="password" required minlength="12" maxlength="72" autocomplete="new-password"></div>
+        <div class="ol-field"><label class="ol-label" for="admin-role">{{.T "admins.role"}}</label><select class="ol-select ol-input-sm" id="admin-role" name="role"><option value="viewer">{{.T "role.viewer"}}</option><option value="admin">{{.T "role.admin"}}</option></select></div>
+        <button type="submit" class="ol-btn ol-btn-secondary ol-btn-sm">{{icon "user-plus" "sm"}}{{.T "admins.create"}}</button>
+      </div>
+      <div class="ol-panel-footer">{{icon "lock" "sm"}}<span>{{.T "admins.freshHint"}}</span></div>
+    </form>{{end}}
+  </div>
 </section>
 
-<section class="ol-section">
-  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "admins.tokens"}}</h2><p class="ol-section-description">{{.T "admins.tokensHelp"}}</p></div>
-  {{if $d.Tokens}}<div class="ol-table-wrap"><table class="ol-table">
-    <thead><tr><th>{{.T "admins.tokenName"}}</th><th>{{.T "admins.role"}}</th><th>{{.T "rules.source"}}</th><th>{{.T "users.created"}}</th><th></th></tr></thead>
-    <tbody>{{range $d.Tokens}}<tr>
-      <td class="ol-mono">{{.Name}}{{with .CreatedBy}}<span class="ol-cell-sub">{{.}}</span>{{end}}</td>
-      <td>{{if eq .Role "admin"}}{{template "badge" (dict "Text" ($v.T "role.admin") "Tone" "accent")}}{{else}}{{template "badge" (dict "Text" ($v.T "role.viewer"))}}{{end}}</td>
-      <td>{{template "source" (dict "Source" .Source "V" $v)}}</td>
-      <td class="ol-nowrap">{{time .Created}}</td>
-      <td>{{if and $v.CanWrite (eq .Source "store")}}{{template "deleteButton" (dict "V" $v "Action" "/admin/tokens/delete" "Fields" (dict "name" .Name) "Confirm" ($v.T "admins.revokeConfirm" "name" .Name) "Label" ($v.T "admins.revoke"))}}{{end}}</td>
-    </tr>{{end}}</tbody>
-  </table></div>{{else}}<p class="ol-muted">{{.T "admins.noTokens"}}</p>{{end}}
-  {{if .CanWrite}}<form method="post" action="/admin/tokens/create" class="ol-toolbar admin-after">
-    {{template "csrf" .}}
-    <div class="ol-field"><label class="ol-label" for="token-name">{{.T "admins.tokenName"}}</label><input class="ol-input ol-input-sm ol-input-mono" id="token-name" name="name" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}" placeholder="grafana" autocomplete="off" spellcheck="false"></div>
-    <div class="ol-field"><label class="ol-label" for="token-role">{{.T "admins.role"}}</label><select class="ol-select ol-input-sm" id="token-role" name="role"><option value="viewer">{{.T "role.viewer"}}</option><option value="admin">{{.T "role.admin"}}</option></select></div>
-    <button type="submit" class="ol-btn ol-btn-secondary ol-btn-sm">{{icon "plus" "sm"}}{{.T "admins.createToken"}}</button>
-  </form>{{end}}
+<section class="ol-section" aria-labelledby="tokens-title">
+  <div class="ol-section-header"><h2 class="ol-section-title" id="tokens-title">{{.T "admins.tokens"}}</h2><p class="ol-section-description">{{.T "admins.tokensHelp"}}</p></div>
+  <div class="ol-stack">
+    {{if $d.Tokens}}<div class="ol-table-wrap"><table class="ol-table">
+      <thead><tr><th scope="col">{{.T "admins.tokenName"}}</th><th scope="col">{{.T "admins.role"}}</th><th scope="col">{{.T "rules.source"}}</th><th scope="col">{{.T "users.created"}}</th><th scope="col" class="ol-actions"><span class="ol-sr-only">{{.T "action.actions"}}</span></th></tr></thead>
+      <tbody>{{range $d.Tokens}}<tr>
+        <td><span class="ol-entity"><span class="ol-avatar ol-avatar-sm">{{icon "key-round" "sm"}}</span><span class="ol-entity-text"><span class="ol-entity-title ol-mono">{{.Name}}</span>{{with .CreatedBy}}<span class="ol-entity-sub">{{$v.T "user.createdBy" "by" (who .)}}</span>{{end}}</span></span></td>
+        <td>{{if eq .Role "admin"}}{{template "badge" (dict "Text" ($v.T "role.admin") "Tone" "accent")}}{{else}}{{template "badge" (dict "Text" ($v.T "role.viewer"))}}{{end}}</td>
+        <td>{{template "source" (dict "Source" .Source "V" $v)}}</td>
+        <td class="ol-nowrap">{{time .Created}}</td>
+        <td class="ol-actions">{{if and $v.CanWrite (eq .Source "store")}}{{template "deleteButton" (dict "V" $v "Action" "/admin/tokens/delete" "Fields" (dict "name" .Name) "Confirm" ($v.T "admins.revokeConfirm" "name" .Name) "Label" ($v.T "admins.revoke"))}}{{end}}</td>
+      </tr>{{end}}</tbody>
+    </table></div>{{else}}<p class="ol-muted ol-text-sm">{{.T "admins.noTokens"}}</p>{{end}}
+    {{if .CanWrite}}<form method="post" action="/admin/tokens/create" class="ol-panel">
+      {{template "csrf" .}}
+      <div class="ol-panel-body ol-toolbar">
+        <div class="ol-field ol-grow"><label class="ol-label" for="token-name">{{.T "admins.tokenName"}}</label><input class="ol-input ol-input-sm ol-input-mono" id="token-name" name="name" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}" placeholder="grafana" autocomplete="off" spellcheck="false"></div>
+        <div class="ol-field"><label class="ol-label" for="token-role">{{.T "admins.role"}}</label><select class="ol-select ol-input-sm" id="token-role" name="role"><option value="viewer">{{.T "role.viewer"}}</option><option value="admin">{{.T "role.admin"}}</option></select></div>
+        <button type="submit" class="ol-btn ol-btn-secondary ol-btn-sm">{{icon "plus" "sm"}}{{.T "admins.createToken"}}</button>
+      </div>
+    </form>{{end}}
+  </div>
 </section>
 
-<section class="ol-section">
-  <div class="ol-section-header"><h2 class="ol-section-title">{{.T "admins.sessions"}}</h2><p class="ol-section-description">{{.T "admins.sessionsHelp"}}</p></div>
+<section class="ol-section" aria-labelledby="sessions-title">
+  <div class="ol-section-header"><h2 class="ol-section-title" id="sessions-title">{{.T "admins.sessions"}}</h2><p class="ol-section-description">{{.T "admins.sessionsHelp"}}</p></div>
   <div class="ol-table-wrap"><table class="ol-table ol-table-compact">
-    <thead><tr><th>{{.T "auth.username"}}</th><th>{{.T "admins.client"}}</th><th>{{.T "admins.signedIn"}}</th><th>{{.T "admins.lastActive"}}</th><th></th></tr></thead>
+    <thead><tr><th scope="col">{{.T "auth.username"}}</th><th scope="col">{{.T "admins.client"}}</th><th scope="col">{{.T "admins.signedIn"}}</th><th scope="col">{{.T "admins.lastActive"}}</th><th scope="col" class="ol-actions"><span class="ol-sr-only">{{.T "action.actions"}}</span></th></tr></thead>
     <tbody>{{range $d.Sessions}}<tr>
-      <td>{{.Admin}}{{if eq .Handle $d.Current}}<span class="ol-cell-sub">{{$v.T "admins.thisSession"}}</span>{{end}}</td>
-      <td class="admin-wrap"><span class="ol-mono">{{.IP}}</span><span class="ol-cell-sub">{{.Agent}}</span></td>
+      <td>{{.Admin}}{{if eq .Handle $d.Current}} {{template "badge" (dict "Text" ($v.T "admins.thisSession") "Tone" "accent")}}{{end}}</td>
+      <td class="ol-break"><span class="ol-mono">{{.IP}}</span><span class="ol-cell-sub">{{.Agent}}</span></td>
       <td class="ol-nowrap">{{time .Created}}</td>
       <td class="ol-nowrap">{{time .LastSeen}}</td>
-      <td>{{if and $v.IsAdmin (ne .Handle $d.Current)}}{{template "deleteButton" (dict "V" $v "Action" "/admin/sessions/revoke" "Fields" (dict "handle" .Handle) "Confirm" ($v.T "admins.endConfirm" "name" .Admin) "Label" ($v.T "admins.end"))}}{{end}}</td>
+      <td class="ol-actions">{{if and $v.IsAdmin (ne .Handle $d.Current)}}{{template "deleteButton" (dict "V" $v "Action" "/admin/sessions/revoke" "Fields" (dict "handle" .Handle) "Confirm" ($v.T "admins.endConfirm" "name" .Admin) "Label" ($v.T "admins.end"))}}{{end}}</td>
     </tr>{{end}}</tbody>
   </table></div>
 </section>
