@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -15,6 +14,8 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 )
 
 // Override is one console override of the configuration. Key names the section it changes, Value is that
@@ -88,40 +89,40 @@ func splitKey(key string) (section, name string, ok bool) {
 func overrideNode(o Override) (*yaml.Node, error) {
 	section, _, ok := splitKey(o.Key)
 	if !ok {
-		return nil, fmt.Errorf("后台不能改 %q：能改的是 %s、upstreams/<上游名>、entrances", o.Key, strings.Join(OverrideSections, "、"))
+		return nil, i18n.Errorf("%q cannot be changed in the console; these can: %s, upstreams/<name> and entrances", o.Key, strings.Join(OverrideSections, ", "))
 	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal([]byte(o.Value), &doc); err != nil {
-		return nil, fmt.Errorf("不是合法的 YAML：%w", err)
+		return nil, i18n.Errorf("not valid YAML: %w", err)
 	}
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) != 1 {
-		return nil, errors.New("内容是空的")
+		return nil, i18n.Errorf("the value is empty")
 	}
 	n := doc.Content[0]
 	allowed := overrideFields[section]
-	checkFields := func(m *yaml.Node, where string) error {
+	checkFields := func(m *yaml.Node, where i18n.Message) error {
 		if m.Kind != yaml.MappingNode {
-			return fmt.Errorf("%s应该是键值对", where)
+			return i18n.Errorf("%s must be a mapping", where)
 		}
 		for i := 0; i+1 < len(m.Content); i += 2 {
 			if k := m.Content[i].Value; !slices.Contains(allowed, k) {
-				return fmt.Errorf("%s的 %s 只能在配置文件里改；后台能改的是 %s", where, k, strings.Join(allowed, "、"))
+				return i18n.Errorf("%s: %s can be changed only in the configuration file; the console can change %s", where, k, strings.Join(allowed, ", "))
 			}
 		}
 		return nil
 	}
 	if section == "entrances" {
 		if n.Kind != yaml.SequenceNode {
-			return nil, errors.New("entrances 应该是列表")
+			return nil, i18n.Errorf("entrances must be a list")
 		}
 		for i, e := range n.Content {
-			if err := checkFields(e, fmt.Sprintf("第 %d 个入口", i+1)); err != nil {
+			if err := checkFields(e, i18n.M("entrance %d", i+1)); err != nil {
 				return nil, err
 			}
 		}
 		return n, nil
 	}
-	if err := checkFields(n, ""); err != nil {
+	if err := checkFields(n, i18n.M("the value")); err != nil {
 		return nil, err
 	}
 	return n, nil
@@ -162,7 +163,7 @@ func CheckOverride(o Override) error {
 func applyOverrides(top *yaml.Node, ovs []Override) error {
 	for _, o := range ovs {
 		if err := applyOverride(top, o); err != nil {
-			return fmt.Errorf("后台修改的 %s：%w", o.Key, err)
+			return i18n.Errorf("console override %s: %w", o.Key, err)
 		}
 	}
 	return nil
@@ -189,7 +190,8 @@ func applyOverride(top *yaml.Node, o Override) error {
 		if c := mapGet(dst, "credentials"); c != nil && c.Tag != "!!null" {
 			for i := 0; i+1 < len(n.Content); i += 2 {
 				if CredentialLocked(n.Content[i].Value) {
-					return fmt.Errorf("上游 %s 配了账号，%s 只能在配置文件里改（免得把账号发到别的主机）", name, n.Content[i].Value)
+					return i18n.Errorf("upstream %s has credentials, so %s can be changed only in the configuration file "+
+						"(so that the account is never sent to another host)", name, n.Content[i].Value)
 				}
 			}
 		}
@@ -237,7 +239,7 @@ func childMap(m *yaml.Node, key string, fold bool) (*yaml.Node, error) {
 			m.Content[i+1] = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 			return m.Content[i+1], nil
 		}
-		return nil, fmt.Errorf("配置文件里的 %s 不是键值对", k)
+		return nil, i18n.Errorf("%s in the configuration file is not a mapping", k)
 	}
 	v := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	mapSet(m, key, v)
@@ -475,21 +477,21 @@ func fieldsNode(key string, names []string, values map[string]string) (*yaml.Nod
 		case "bool":
 			b, err := strconv.ParseBool(cmp.Or(text, "false"))
 			if err != nil {
-				return nil, fmt.Errorf("%s 只能是 true 或 false", name)
+				return nil, i18n.Errorf("%s must be true or false", name)
 			}
 			v = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: strconv.FormatBool(b)}
 		case "int":
 			if _, err := strconv.ParseInt(text, 10, 64); err != nil {
-				return nil, fmt.Errorf("%s 要填整数", name)
+				return nil, i18n.Errorf("%s must be a whole number", name)
 			}
 			v = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: text}
 		case "float":
 			if _, err := strconv.ParseFloat(text, 64); err != nil {
-				return nil, fmt.Errorf("%s 要填数字", name)
+				return nil, i18n.Errorf("%s must be a number", name)
 			}
 			v = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!float", Value: text}
 		case "":
-			return nil, fmt.Errorf("不认识的字段 %s", name)
+			return nil, i18n.Errorf("unknown field %s", name)
 		default:
 			v = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: text}
 		}
@@ -529,7 +531,7 @@ func splitList(text string) []string {
 func FormOverride(key string, values map[string]string) (Override, error) {
 	names := OverrideFields(key)
 	if names == nil || key == "entrances" {
-		return Override{}, fmt.Errorf("后台不能改 %q", key)
+		return Override{}, i18n.Errorf("%q cannot be changed in the console", key)
 	}
 	n, err := fieldsNode(key, names, values)
 	if err != nil {
@@ -587,7 +589,7 @@ func ExportMerged(file []byte, ovs []Override) ([]byte, error) {
 	var root yaml.Node
 	if len(bytes.TrimSpace(file)) > 0 {
 		if err := yaml.Unmarshal(file, &root); err != nil {
-			return nil, fmt.Errorf("配置不是合法的 YAML：%w", err)
+			return nil, i18n.Errorf("the configuration is not valid YAML: %w", err)
 		}
 	}
 	if root.Kind != yaml.DocumentNode || len(root.Content) != 1 {
@@ -595,7 +597,7 @@ func ExportMerged(file []byte, ovs []Override) ([]byte, error) {
 	}
 	top := root.Content[0]
 	if top.Kind != yaml.MappingNode {
-		return nil, errors.New("配置的最外层应该是键值对")
+		return nil, i18n.Errorf("the top level of the configuration must be a mapping")
 	}
 	if err := applyOverrides(top, ovs); err != nil {
 		return nil, err
@@ -620,7 +622,7 @@ func redactSecrets(n *yaml.Node) {
 			if (k == "password" || k == "token") && v.Kind == yaml.MappingNode {
 				for j := 0; j+1 < len(v.Content); j += 2 {
 					if v.Content[j].Value == "value" {
-						v.Content[j+1] = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "", LineComment: "# 导出时隐去了，请填回原来的值"}
+						v.Content[j+1] = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "", LineComment: "# hidden in the export: fill in the original value"}
 					}
 				}
 				continue

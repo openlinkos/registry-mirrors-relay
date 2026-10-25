@@ -6,7 +6,6 @@ package ops
 import (
 	"crypto/rand"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"net/netip"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/app"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 	"github.com/openlinkos/registry-mirrors-relay/internal/store"
 )
 
@@ -27,21 +27,45 @@ type Actor struct {
 
 func (a Actor) String() string { return a.Kind + ":" + a.Name }
 
-// Error is an error that can be shown to the operator, with a suggested HTTP status code. The
-// messages are in messages.go; Error() returns the Chinese one.
+// Error is an error that can be shown to the operator, with a suggested HTTP status code. Key is a
+// stable code for API clients; the messages are in messages.go. Error() is English; the console and the
+// API render it in the reader's language with i18n.Localize.
 type Error struct {
 	Status int
 	Key    string
-	Arg    string // the {v} in the message
-	Detail string // the original error appended to the message (for example, what is wrong in the configuration file)
+	Msg    i18n.Message
+	Cause  error // appended to the message, for example what is wrong in the configuration file
 }
 
-func (e *Error) Error() string { return e.Message("zh") }
+// NewError makes an *Error with the message for key; args fill in its verbs.
+func NewError(status int, key string, args ...any) *Error {
+	m, ok := messages[key]
+	if !ok {
+		m = i18n.M("unknown error %s", key)
+		args = nil
+	}
+	if len(args) > 0 {
+		m = m.With(args...)
+	}
+	return &Error{Status: status, Key: key, Msg: m}
+}
 
-func bad(key string) error       { return &Error{Status: http.StatusBadRequest, Key: key} }
-func notFound(key string) error  { return &Error{Status: http.StatusNotFound, Key: key} }
-func conflict(key string) error  { return &Error{Status: http.StatusConflict, Key: key} }
-func forbidden(key string) error { return &Error{Status: http.StatusForbidden, Key: key} }
+func (e *Error) Error() string { return e.In(i18n.EN) }
+func (e *Error) Code() string  { return e.Key }
+func (e *Error) Unwrap() error { return e.Cause }
+
+// In renders the error in l.
+func (e *Error) In(l i18n.Lang) string {
+	if e.Cause == nil {
+		return e.Msg.In(l)
+	}
+	return i18n.T(l, "%s: %v", e.Msg, e.Cause)
+}
+
+func bad(key string) error       { return NewError(http.StatusBadRequest, key) }
+func notFound(key string) error  { return NewError(http.StatusNotFound, key) }
+func conflict(key string) error  { return NewError(http.StatusConflict, key) }
+func forbidden(key string) error { return NewError(http.StatusForbidden, key) }
 
 // Status returns the HTTP status code for an error: an *Error uses its own, anything else is 500.
 func Status(err error) int {
@@ -86,7 +110,7 @@ func (o *Ops) change(who Actor, action, target, detail string, fn func(*store.Da
 	}
 	o.Audit(who, action, target, detail)
 	if err := o.app.Rebuild(); err != nil {
-		return fmt.Errorf("已保存，但应用时出错：%w", err)
+		return i18n.Errorf("saved, but applying the change failed: %w", err)
 	}
 	return nil
 }

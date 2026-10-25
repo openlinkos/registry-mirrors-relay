@@ -23,6 +23,7 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/api"
 	"github.com/openlinkos/registry-mirrors-relay/internal/app"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 	"github.com/openlinkos/registry-mirrors-relay/internal/ops"
 	"github.com/openlinkos/registry-mirrors-relay/internal/store"
 )
@@ -237,8 +238,8 @@ func TestSecurityHeaders(t *testing.T) {
 	if r := e.get("/admin/"); r.StatusCode != 303 || r.Header.Get("Location") != "/admin/login?next=%2Fadmin%2F" {
 		t.Errorf("not logged in should redirect to the login page: %d %s", r.StatusCode, r.Header.Get("Location"))
 	}
-	if r := e.do("PUT", "/admin/", nil, nil, nil); r.StatusCode != 405 || r.Header.Get("Allow") != "GET, POST" {
-		t.Errorf("only GET and POST are allowed: %d %s", r.StatusCode, r.Header.Get("Allow"))
+	if r := e.do("PUT", "/admin/", nil, nil, nil); r.StatusCode != 405 || r.Header.Get("Allow") != "GET, HEAD, POST" {
+		t.Errorf("only GET, HEAD and POST are allowed: %d %s", r.StatusCode, r.Header.Get("Allow"))
 	}
 	if r := e.get("/admin/nope"); r.StatusCode != 404 {
 		t.Errorf("page that does not exist: %d", r.StatusCode)
@@ -298,7 +299,7 @@ func TestHostCheck(t *testing.T) {
 func TestLoginAndCookieFlags(t *testing.T) {
 	e := newEnv(t, envOpts{})
 	r := e.do("POST", "/admin/login", url.Values{"username": {"alice"}, "password": {"wrong-password-1"}}, nil, nil)
-	if r.StatusCode != 401 || !strings.Contains(r.body, tr("zh", "auth.bad")) || len(r.Cookies()) != 0 {
+	if r.StatusCode != 401 || !strings.Contains(r.body, tr(i18n.EN, "auth.bad")) || len(r.Cookies()) != 0 {
 		t.Fatalf("wrong password: %d", r.StatusCode)
 	}
 	r = e.do("POST", "/admin/login", url.Values{"username": {"nobody"}, "password": {"whatever-123456"}}, nil, nil)
@@ -405,7 +406,7 @@ func TestPostChecks(t *testing.T) {
 	if r.StatusCode != 303 || r.Header.Get("Location") != "/admin/rules?ok=ban.added&v=198.51.100.7%2F32" {
 		t.Fatalf("ban: %d %s", r.StatusCode, r.Header.Get("Location"))
 	}
-	if page := e.get(r.Header.Get("Location"), s.cookie); !strings.Contains(page.body, "已封禁 198.51.100.7/32。") {
+	if page := e.get(r.Header.Get("Location"), s.cookie); !strings.Contains(page.body, "Banned 198.51.100.7/32.") {
 		t.Fatal("the success notice should show after the redirect")
 	}
 	// Read-only role
@@ -419,7 +420,7 @@ func TestPostChecks(t *testing.T) {
 	}
 	// Form errors: re-rendered with the explanation
 	r = e.post(s, "/admin/bans/add", url.Values{"cidr": {"0.0.0.0/0"}, "duration": {"1h"}})
-	if r.StatusCode != 400 || !strings.Contains(r.body, "不能整段放开或封掉所有地址") || !strings.Contains(r.body, `value="0.0.0.0/0"`) {
+	if r.StatusCode != 400 || !strings.Contains(r.body, "A rule cannot cover every address.") || !strings.Contains(r.body, `value="0.0.0.0/0"`) {
 		t.Fatalf("an error should re-render and keep the filled-in values: %d", r.StatusCode)
 	}
 }
@@ -773,11 +774,28 @@ func TestPrefs(t *testing.T) {
 	if r := e.do("POST", "/admin/prefs", url.Values{"lang": {"en"}}, nil, map[string]string{"Origin": "http://evil.example"}); r.StatusCode != 403 {
 		t.Fatalf("prefs must check the origin too: %d", r.StatusCode)
 	}
-	if got := negotiateLang("", "en-US,en;q=0.9,zh;q=0.8"); got != "en" {
-		t.Fatalf("Accept-Language: %s", got)
+	for _, c := range []struct {
+		cookie, accept string
+		want           i18n.Lang
+	}{
+		{"", "en-US,en;q=0.9,zh;q=0.8", i18n.EN},
+		{"", "fr, zh-CN;q=0.5", i18n.ZH},
+		{"", "fr", i18n.EN},
+		{langCookie + "=zh", "en", i18n.ZH},
+		{oldLangCookie + "=zh", "en", i18n.ZH},
+		{langCookie + "=en; " + oldLangCookie + "=zh", "zh", i18n.EN},
+	} {
+		r := httptest.NewRequest("GET", "/admin/", nil)
+		r.Header.Set("Accept-Language", c.accept)
+		if c.cookie != "" {
+			r.Header.Set("Cookie", c.cookie)
+		}
+		if got := Lang(r); got != c.want {
+			t.Errorf("Lang(cookie %q, Accept-Language %q) = %s, want %s", c.cookie, c.accept, got, c.want)
+		}
 	}
-	if got := negotiateLang("", "fr, zh-CN;q=0.5"); got != "zh" {
-		t.Fatalf("Accept-Language: %s", got)
+	if c := r.cookie(langCookie); c.Path != "/" || c.HttpOnly {
+		t.Errorf("the language cookie must be readable by the usage page: %+v", c)
 	}
 }
 
@@ -897,38 +915,39 @@ func TestReadOnlyStoreWithConfigAdmin(t *testing.T) {
 	e := newEnv(t, envOpts{store: store.NewReadOnly(), yaml: "admin:\n  store: {driver: none}\n  initial_admin: {username: root, password: {env: T_ADMIN_PW}}\n"})
 	s := e.login("root", "config-admin-password")
 	page := e.get("/admin/users", s.cookie)
-	if !strings.Contains(page.body, tr("zh", "readonly.banner")) || strings.Contains(page.body, `action="/admin/users/create"`) {
+	if !strings.Contains(page.body, tr(i18n.EN, "readonly.banner")) || strings.Contains(page.body, `action="/admin/users/create"`) {
 		t.Fatal("read-only shows the notice and no forms")
 	}
-	if r := e.post(s, "/admin/bans/add", url.Values{"cidr": {"198.51.100.7"}, "duration": {"1h"}}); r.StatusCode != 409 || !strings.Contains(r.body, "只读") {
+	if r := e.post(s, "/admin/bans/add", url.Values{"cidr": {"198.51.100.7"}, "duration": {"1h"}}); r.StatusCode != 409 || !strings.Contains(r.body, "read-only") {
 		t.Fatalf("changes return 409 when read-only: %d", r.StatusCode)
 	}
-	if r := e.get("/admin/account", s.cookie); !strings.Contains(r.body, tr("zh", "account.fromConfig")) {
+	if r := e.get("/admin/account", s.cookie); !strings.Contains(r.body, tr(i18n.EN, "account.fromConfig")) {
 		t.Fatal("an administrator from the configuration file changes the password in the configuration")
 	}
 }
 
 func TestNoAdmins(t *testing.T) {
 	e := newEnv(t, envOpts{noAdm: true})
-	if r := e.get("/admin/login"); !strings.Contains(r.body, tr("zh", "auth.noAdminsTitle")) {
+	if r := e.get("/admin/login"); !strings.Contains(r.body, tr(i18n.EN, "auth.noAdminsTitle")) {
 		t.Fatal("with no administrators the login page should explain how to create one")
 	}
 }
 
 func TestFmtDur(t *testing.T) {
 	for d, want := range map[time.Duration]string{
-		0:                             "0 秒",
-		45 * time.Second:              "45 秒",
-		time.Hour:                     "1 小时",
-		6*time.Hour + 5*time.Minute:   "6 小时 5 分钟",
-		50*time.Hour + 30*time.Minute: "2 天 2 小时",
+		0:                             "0 s",
+		45 * time.Second:              "45 s",
+		time.Hour:                     "1 h",
+		6*time.Hour + 5*time.Minute:   "6 h 5 min",
+		50*time.Hour + 30*time.Minute: "2 d 2 h",
 	} {
-		if got := fmtDur("zh", d); got != want {
+		if got := fmtDur(i18n.EN, d); got != want {
 			t.Errorf("fmtDur(%s) = %q, want %q", d, got, want)
 		}
 	}
-	if got := fmtDur("en", 90*time.Minute); got != "1 h 30 min" {
-		t.Errorf("English: %q", got)
+	// Chinese uses the Chinese units
+	if got, want := fmtDur(i18n.ZH, 90*time.Minute), tr(i18n.ZH, "dur.hours", "n", 1)+" "+tr(i18n.ZH, "dur.minutes", "n", 30); got != want {
+		t.Errorf("Chinese: %q, want %q", got, want)
 	}
 }
 
@@ -949,7 +968,7 @@ func TestInitialAdminMustChangePassword(t *testing.T) {
 		}
 	}
 	page := e.get("/admin/account", c)
-	if page.StatusCode != 200 || !strings.Contains(page.body, tr("zh", "account.mustChangeTitle")) {
+	if page.StatusCode != 200 || !strings.Contains(page.body, tr(i18n.EN, "account.mustChangeTitle")) {
 		t.Fatalf("the My account page should explain why: %d", page.StatusCode)
 	}
 	s := testSession{cookie: c, csrf: csrfRe.FindStringSubmatch(page.body)[1]}
@@ -960,7 +979,7 @@ func TestInitialAdminMustChangePassword(t *testing.T) {
 		t.Fatalf("the API cannot be used with the session either: %d", r.StatusCode)
 	}
 	// Setting the same password again is not allowed
-	if r := e.post(s, "/admin/account/password", url.Values{"password": {"initial-admin-password"}, "confirm": {"initial-admin-password"}}); r.StatusCode != 400 || !strings.Contains(r.body, "新口令不能和原来的一样") {
+	if r := e.post(s, "/admin/account/password", url.Values{"password": {"initial-admin-password"}, "confirm": {"initial-admin-password"}}); r.StatusCode != 400 || !strings.Contains(r.body, "The new password must differ from the current one.") {
 		t.Fatalf("cannot keep the old password: %d", r.StatusCode)
 	}
 	r = e.post(s, "/admin/account/password", url.Values{"password": {"root-own-password-1"}, "confirm": {"root-own-password-1"}})
@@ -989,7 +1008,7 @@ func TestPasswordsSetByOthersMustChange(t *testing.T) {
 	if r := e.post(s, "/admin/admins/create", url.Values{"name": {"carol"}, "password": {"carol-temp-password"}, "role": {"viewer"}}); r.StatusCode != 303 {
 		t.Fatalf("create administrator: %d %s", r.StatusCode, r.body)
 	}
-	if r := e.get("/admin/admins", s.cookie); !strings.Contains(r.body, tr("zh", "admins.mustChange")) {
+	if r := e.get("/admin/admins", s.cookie); !strings.Contains(r.body, tr(i18n.EN, "admins.mustChange")) {
 		t.Fatal("the list should mark the pending password change")
 	}
 	r := e.do("POST", "/admin/login", url.Values{"username": {"carol"}, "password": {"carol-temp-password"}}, nil, nil)
@@ -1118,5 +1137,36 @@ func TestConfigPages(t *testing.T) {
 	e.advance(11 * time.Minute)
 	if r := e.post(s, "/admin/config/save", form); r.StatusCode != 303 || !strings.HasPrefix(r.Header.Get("Location"), "/admin/reauth") {
 		t.Fatalf("configuration changes require a recently entered password: %d %s", r.StatusCode, r.Header.Get("Location"))
+	}
+}
+
+// Configuration errors are shown in the interface language, including the part that comes from validating
+// the configuration.
+func TestLocalizedConfigErrors(t *testing.T) {
+	e := newEnv(t, envOpts{})
+	s := e.login("alice", alicePW)
+	ent := url.Values{"_csrf": {s.csrf}, "rows": {"1"}, "name_0": {"x"}, "hosts_0": {"x.test"}, "upstream_0": {"nope.example.com"},
+		"auth_0": {"none"}, "page_0": {"public"}}
+	for _, lang := range []i18n.Lang{i18n.EN, i18n.ZH} {
+		r := e.do("POST", "/admin/config/entrances/save", ent, []string{s.cookie, langCookie + "=" + string(lang)}, nil)
+		if r.StatusCode != 422 || !strings.Contains(r.body, i18n.T(lang, "The configuration was not saved")) {
+			t.Fatalf("%s: %d", lang, r.StatusCode)
+		}
+		if english := strings.Contains(r.body, "is not a configured upstream"); english != (lang == i18n.EN) {
+			t.Errorf("%s: the validation error is not in the interface language", lang)
+		}
+	}
+}
+
+func TestHead(t *testing.T) {
+	e := newEnv(t, envOpts{})
+	if r := e.do("HEAD", "/admin/login", nil, nil, nil); r.StatusCode != 200 || r.body != "" {
+		t.Fatalf("HEAD /admin/login: %d %q", r.StatusCode, r.body)
+	}
+	if r := e.do("HEAD", "/admin/users", nil, nil, nil); r.StatusCode != 303 {
+		t.Fatalf("HEAD of a page that needs a session redirects like GET: %d", r.StatusCode)
+	}
+	if r := e.do("PUT", "/admin/login", nil, nil, nil); r.StatusCode != 405 || r.Header.Get("Allow") != "GET, HEAD, POST" {
+		t.Fatalf("PUT: %d %s", r.StatusCode, r.Header.Get("Allow"))
 	}
 }

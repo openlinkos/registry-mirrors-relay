@@ -13,6 +13,7 @@
 package api
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/json"
 	"io"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/app"
 	"github.com/openlinkos/registry-mirrors-relay/internal/clientip"
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 	"github.com/openlinkos/registry-mirrors-relay/internal/ops"
 	"github.com/openlinkos/registry-mirrors-relay/internal/stats"
 	"github.com/openlinkos/registry-mirrors-relay/internal/version"
@@ -42,6 +44,8 @@ type Session func(r *http.Request) (who ops.Actor, role string, ok bool, err err
 // Options are optional settings.
 type Options struct {
 	Session Session
+	// Lang picks the language of error messages (the console's, so both agree); nil means Accept-Language.
+	Lang func(*http.Request) i18n.Lang
 }
 
 // API handles requests under /admin/api/v1/.
@@ -63,7 +67,7 @@ func New(a *app.App, o *ops.Ops, opt Options) *API {
 				return
 			}
 			if role == "admin" && whoRole != "admin" {
-				writeErr(w, http.StatusForbidden, "只读身份不能修改")
+				writeErr(w, http.StatusForbidden, "auth.viewer", i18n.M("A viewer cannot make changes."))
 				return
 			}
 			h(w, r, who)
@@ -115,8 +119,9 @@ func (x *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+	w = &langWriter{ResponseWriter: w, lang: x.lang(r)}
 	if !ops.HostAllowed(x.app.Runtime().Config.Admin, r) {
-		writeErr(w, http.StatusMisdirectedRequest, "请用 admin.public_url、localhost 或 IP 访问管理后台")
+		writeErr(w, http.StatusMisdirectedRequest, "host.misdirected", i18n.M("Use admin.public_url, localhost or an IP address to reach the console."))
 		return
 	}
 	if r.Body != nil {
@@ -138,7 +143,7 @@ func (x *API) authenticate(w http.ResponseWriter, r *http.Request) (ops.Actor, s
 	ip := x.clientAddr(r)
 	if ok, wait := x.app.Limiter.AuthAllowed(ip); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds()+0.999)))
-		writeErr(w, http.StatusTooManyRequests, "认证失败次数太多，稍后再试")
+		writeErr(w, http.StatusTooManyRequests, "auth.too_many", i18n.M("Too many failed attempts. Try again later."))
 		return ops.Actor{}, "", false
 	}
 	if auth := r.Header.Get("Authorization"); auth != "" {
@@ -151,7 +156,7 @@ func (x *API) authenticate(w http.ResponseWriter, r *http.Request) (ops.Actor, s
 	} else if x.opt.Session != nil {
 		who, role, ok, err := x.opt.Session(r)
 		if err != nil {
-			writeErr(w, http.StatusForbidden, err.Error())
+			writeJSON(w, http.StatusForbidden, apiError{Error: i18n.Localize(err, langOf(w)), Code: i18n.Code(err)})
 			return ops.Actor{}, "", false
 		}
 		if ok {
@@ -159,7 +164,7 @@ func (x *API) authenticate(w http.ResponseWriter, r *http.Request) (ops.Actor, s
 		}
 	}
 	w.Header().Set("Www-Authenticate", `Bearer realm="registry-mirrors-relay admin"`)
-	writeErr(w, http.StatusUnauthorized, "需要有效的 API 令牌")
+	writeErr(w, http.StatusUnauthorized, "auth.required", i18n.M("A valid API token is required."))
 	return ops.Actor{}, "", false
 }
 
@@ -171,25 +176,55 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = enc.Encode(v)
 }
 
-func writeErr(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+// apiError is the body of every error response. Code is stable; Error is in the request's language.
+type apiError struct {
+	Error string `json:"error"`
+	Code  string `json:"code"`
+}
+
+func writeErr(w http.ResponseWriter, status int, code string, msg i18n.Message) {
+	writeJSON(w, status, apiError{Error: msg.In(langOf(w)), Code: code})
+}
+
+// langWriter carries the request's language to the error writers.
+type langWriter struct {
+	http.ResponseWriter
+	lang i18n.Lang
+}
+
+func (w *langWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func langOf(w http.ResponseWriter) i18n.Lang {
+	if lw, ok := w.(*langWriter); ok {
+		return lw.lang
+	}
+	return i18n.EN
+}
+
+// lang is the language of error messages: the console's language cookie, then Accept-Language, then
+// English.
+func (x *API) lang(r *http.Request) i18n.Lang {
+	if x.opt.Lang != nil {
+		return x.opt.Lang(r)
+	}
+	return i18n.Negotiate("", r.Header.Get("Accept-Language"))
 }
 
 // writeOpsErr writes an error returned by ops: an *ops.Error carries its own status code, other errors
 // are 500.
 func writeOpsErr(w http.ResponseWriter, err error) {
-	writeErr(w, ops.Status(err), err.Error())
+	writeJSON(w, ops.Status(err), apiError{Error: i18n.Localize(err, langOf(w)), Code: cmp.Or(i18n.Code(err), "internal")})
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
-		writeErr(w, http.StatusUnsupportedMediaType, "请求体要用 application/json")
+		writeErr(w, http.StatusUnsupportedMediaType, "request.media_type", i18n.M("The request body must be application/json."))
 		return false
 	}
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
-		writeErr(w, http.StatusBadRequest, "请求体不对："+err.Error())
+		writeErr(w, http.StatusBadRequest, "request.json", i18n.M("The request body is invalid: %v", err))
 		return false
 	}
 	return true
@@ -408,7 +443,7 @@ func (x *API) createToken(w http.ResponseWriter, r *http.Request, who ops.Actor)
 	}
 	tok, err := x.ops.CreateToken(who, b.Name, b.Role)
 	done(w, err, http.StatusCreated, map[string]string{"name": b.Name, "role": b.Role, "token": tok,
-		"note": "令牌只显示这一次，请妥善保存"})
+		"note": i18n.T(langOf(w), "The token is shown only this once; keep it somewhere safe.")})
 }
 
 func (x *API) deleteToken(w http.ResponseWriter, r *http.Request, who ops.Actor) {
@@ -489,12 +524,12 @@ func (x *API) listOverrides(w http.ResponseWriter, _ *http.Request, _ ops.Actor)
 // upstreams/<name> are objects, entrances is an array.
 func (x *API) setOverride(w http.ResponseWriter, r *http.Request, who ops.Actor) {
 	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
-		writeErr(w, http.StatusUnsupportedMediaType, "请求体要用 application/json")
+		writeErr(w, http.StatusUnsupportedMediaType, "request.media_type", i18n.M("The request body must be application/json."))
 		return
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil || !json.Valid(body) {
-		writeErr(w, http.StatusBadRequest, "请求体不是合法的 JSON")
+		writeErr(w, http.StatusBadRequest, "request.json", i18n.M("The request body is not valid JSON."))
 		return
 	}
 	key := r.PathValue("key")
@@ -510,7 +545,7 @@ func (x *API) setOverride(w http.ResponseWriter, r *http.Request, who ops.Actor)
 			cur = &o
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"override": cur, "warnings": append([]string{}, warnings...)})
+	writeJSON(w, http.StatusOK, map[string]any{"override": cur, "warnings": warningTexts(langOf(w), warnings)})
 }
 
 func (x *API) resetOverride(w http.ResponseWriter, r *http.Request, who ops.Actor) {
@@ -527,4 +562,12 @@ func (x *API) exportConfig(w http.ResponseWriter, r *http.Request, _ ops.Actor) 
 func (x *API) reload(w http.ResponseWriter, _ *http.Request, who ops.Actor) {
 	st, err := x.ops.Reload(who)
 	done(w, err, http.StatusOK, st)
+}
+
+func warningTexts(lang i18n.Lang, ws []i18n.Message) []string {
+	out := []string{}
+	for _, m := range ws {
+		out = append(out, m.In(lang))
+	}
+	return out
 }

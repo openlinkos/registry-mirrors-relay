@@ -2,66 +2,21 @@ package admin
 
 import (
 	"fmt"
-	"sort"
-	"strconv"
 	"strings"
+
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 )
 
-// Interface language: an explicit choice (cookie) comes first, then the browser's Accept-Language;
-// when neither gives one, Chinese is used.
-func negotiateLang(cookieValue, acceptLanguage string) string {
-	if cookieValue == "zh" || cookieValue == "en" {
-		return cookieValue
-	}
-	type pref struct {
-		tag   string
-		q     float64
-		index int
-	}
-	var prefs []pref
-	for i, part := range strings.Split(acceptLanguage, ",") {
-		tag, params, _ := strings.Cut(strings.TrimSpace(part), ";")
-		q := 1.0
-		if v, ok := strings.CutPrefix(strings.TrimSpace(params), "q="); ok {
-			f, err := strconv.ParseFloat(v, 64)
-			if err != nil {
-				continue
-			}
-			q = f
-		}
-		tag = strings.ToLower(strings.TrimSpace(tag))
-		if tag != "" && q > 0 {
-			prefs = append(prefs, pref{tag, q, i})
+// tr translates interface text. Arguments come in pairs, a name and a value, and replace {name} in the
+// text. English is the source: a key missing from the Chinese catalogue falls back to English, and a key
+// missing from both shows as the key itself (TestMessagesComplete catches both).
+func tr(lang i18n.Lang, key string, args ...any) string {
+	text, ok := messagesEN[key]
+	if lang == i18n.ZH {
+		if t, found := messagesZH[key]; found {
+			text, ok = t, true
 		}
 	}
-	sort.SliceStable(prefs, func(i, j int) bool { return prefs[i].q > prefs[j].q })
-	for _, p := range prefs {
-		base, _, _ := strings.Cut(p.tag, "-")
-		switch base {
-		case "zh":
-			return "zh"
-		case "en":
-			return "en"
-		}
-	}
-	return "zh"
-}
-
-func htmlLang(lang string) string {
-	if lang == "en" {
-		return "en"
-	}
-	return "zh-CN"
-}
-
-// tr translates interface text. Arguments come in pairs, name and value, and replace {name} in the text.
-// A missing key is shown as the key itself (the tests catch this).
-func tr(lang, key string, args ...any) string {
-	m := messagesZH
-	if lang == "en" {
-		m = messagesEN
-	}
-	text, ok := m[key]
 	if !ok {
 		return key
 	}
@@ -70,4 +25,13 @@ func tr(lang, key string, args ...any) string {
 		text = strings.ReplaceAll(text, "{"+name+"}", fmt.Sprint(args[i+1]))
 	}
 	return text
+}
+
+// localize renders messages in lang.
+func localize(lang i18n.Lang, ms []i18n.Message) []string {
+	out := make([]string, len(ms))
+	for i, m := range ms {
+		out[i] = m.In(lang)
+	}
+	return out
 }

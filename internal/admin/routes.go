@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 )
 
 // routeTable is every route of the console: only GET and POST, and every write is a POST. This table is
@@ -166,8 +168,11 @@ func (h *Handler) prefs(c *ctx) error {
 		http.SetCookie(c.w, &http.Cookie{Name: name, Value: value, Path: "/admin", MaxAge: year, HttpOnly: true, //nolint:gosec // see above
 			Secure: c.secure, SameSite: http.SameSiteLaxMode})
 	}
-	if l := c.form.Get("lang"); l == "zh" || l == "en" {
-		set(langCookie, l)
+	if l, ok := i18n.Parse(c.form.Get("lang")); ok {
+		// The usage page reads this cookie too, so it lives at / and is not HttpOnly: it is only a preference.
+		http.SetCookie(c.w, &http.Cookie{Name: langCookie, Value: string(l), Path: "/", MaxAge: year, //nolint:gosec // see above: a preference, not HttpOnly
+			Secure: c.secure, SameSite: http.SameSiteLaxMode})
+		http.SetCookie(c.w, &http.Cookie{Name: oldLangCookie, Path: "/admin", MaxAge: -1, HttpOnly: true, Secure: c.secure, SameSite: http.SameSiteLaxMode}) //nolint:gosec // deletes the old cookie; Secure as above
 	}
 	if t := c.form.Get("theme"); t == "auto" || t == "light" || t == "dark" {
 		set(themeCookie, t)
@@ -197,7 +202,7 @@ func (c *ctx) notice() string {
 }
 
 // fmtDur writes a duration as "2 d 3 h" or "45 min", taking only the two largest units.
-func fmtDur(lang string, d time.Duration) string {
+func fmtDur(lang i18n.Lang, d time.Duration) string {
 	d = max(d, 0)
 	days, hours, mins := int(d/(24*time.Hour)), int(d%(24*time.Hour)/time.Hour), int(d%time.Hour/time.Minute)
 	part := func(key string, n int) string { return tr(lang, key, "n", n) }
@@ -217,7 +222,7 @@ func fmtDur(lang string, d time.Duration) string {
 }
 
 // ago is how long ago t was, for things like "last used".
-func ago(lang string, now, t time.Time) string {
+func ago(lang i18n.Lang, now, t time.Time) string {
 	if t.IsZero() {
 		return "—"
 	}

@@ -1,7 +1,7 @@
 {{define "content"}}{{$d := .Data}}
 {{template "header" (dict "Title" (.T "nav.system") "Desc" (.T "system.description"))}}
 {{template "notices" .}}
-{{with $d.Reload}}{{if .Err}}<div class="ol-notices">{{template "alert" (dict "Tone" "danger" "Title" ($.T "system.reloadFailed") "Text" .Err)}}</div>{{end}}{{if .Restart}}<div class="ol-notices">{{template "alert" (dict "Tone" "warning" "Text" ($.T "overview.restartNeeded" "fields" (join .Restart ", ")))}}</div>{{end}}{{end}}
+{{with $d.Reload}}{{if .Err}}<div class="ol-notices">{{template "alert" (dict "Tone" "danger" "Title" ($.T "system.reloadFailed") "Text" ($.Err .Cause))}}</div>{{end}}{{if .Restart}}<div class="ol-notices">{{template "alert" (dict "Tone" "warning" "Text" ($.T "overview.restartNeeded" "fields" (join .Restart ", ")))}}</div>{{end}}{{end}}
 <div class="ol-grid ol-grid-2">
   <section class="ol-panel">
     <div class="ol-panel-header"><h2 class="ol-panel-title">{{icon "cpu"}}{{.T "system.process"}}</h2></div>

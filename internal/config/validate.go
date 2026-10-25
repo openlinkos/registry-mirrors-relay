@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"net"
 	"net/netip"
 	"net/url"
@@ -10,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 )
 
 // CompileHostPatterns joins the host name patterns into one anchored, case-insensitive expression.
@@ -21,7 +22,7 @@ func CompileHostPatterns(patterns []string) (*regexp.Regexp, error) {
 	parts := make([]string, len(patterns))
 	for i, p := range patterns {
 		if _, err := regexp.Compile(p); err != nil {
-			return nil, fmt.Errorf("正则 %q：%w", p, err)
+			return nil, i18n.Errorf("pattern %q: %w", p, err)
 		}
 		parts[i] = "(?:" + p + ")"
 	}
@@ -49,7 +50,7 @@ func ParsePrefixes(items []string) ([]netip.Prefix, error) {
 		}
 		a, err := netip.ParseAddr(s)
 		if err != nil {
-			return nil, fmt.Errorf("%q 不是 IP 或 CIDR", raw)
+			return nil, i18n.Errorf("%q is not an IP address or CIDR range", raw)
 		}
 		out = append(out, netip.PrefixFrom(a, a.BitLen()))
 	}
@@ -70,8 +71,8 @@ var (
 
 func validate(c *Config, res *Result) []error {
 	var errs []error
-	bad := func(format string, a ...any) { errs = append(errs, fmt.Errorf(format, a...)) }
-	warn := func(format string, a ...any) { res.Warnings = append(res.Warnings, fmt.Sprintf(format, a...)) }
+	bad := func(format string, a ...any) { errs = append(errs, i18n.Errorf(format, a...)) }
+	warn := func(format string, a ...any) { res.Warnings = append(res.Warnings, i18n.M(format, a...)) }
 
 	// Listen addresses
 	for name, addr := range map[string]string{
@@ -81,63 +82,63 @@ func validate(c *Config, res *Result) []error {
 			continue
 		}
 		if _, _, err := net.SplitHostPort(addr); err != nil {
-			bad("%s %q 写法不对，应写成 :8080 或 127.0.0.1:9090", name, addr)
+			bad("%s %q is not a valid address; write it like :8080 or 127.0.0.1:9090", name, addr)
 		}
 	}
 	if c.Listen.HTTP == "" && c.Listen.HTTPS == "" {
-		bad("listen.http 和 listen.https 都没开，客户端无处可连")
+		bad("neither listen.http nor listen.https is set, so clients have nowhere to connect")
 	}
 	if c.Listen.Admin != "" && (c.Listen.Admin == c.Listen.HTTP || c.Listen.Admin == c.Listen.HTTPS) {
-		bad("listen.admin 和拉取入口用了同一个地址：要和拉取共用端口，把 listen.admin 留空即可")
+		bad("listen.admin uses the same address as the pull entrance; to share the pull port, leave listen.admin empty")
 	}
 
 	// TLS
 	switch c.TLS.Mode {
 	case "off":
 		if c.Listen.HTTPS != "" {
-			bad("listen.https 已设置，但 tls.mode 是 off")
+			bad("listen.https is set but tls.mode is off")
 		}
 	case "files":
 		if c.TLS.CertFile == "" || c.TLS.KeyFile == "" {
-			bad("tls.mode 是 files 时要写 tls.cert_file 和 tls.key_file")
+			bad("tls.mode files needs tls.cert_file and tls.key_file")
 		}
 		if c.Listen.HTTPS == "" {
-			bad("tls.mode 是 files 时要设置 listen.https")
+			bad("tls.mode files needs listen.https")
 		}
 	case "acme":
 		if c.Listen.HTTPS == "" {
-			bad("tls.mode 是 acme 时要设置 listen.https（通常是 :443）")
+			bad("tls.mode acme needs listen.https (usually :443)")
 		}
 		if len(c.TLS.ACME.Hosts) == 0 {
-			bad("tls.mode 是 acme 时要有明确的域名：在入口的 hosts 里写域名，或写 tls.acme.hosts")
+			bad("tls.mode acme needs explicit host names: name them in the entrances' hosts or in tls.acme.hosts")
 		}
 		if len(c.TLS.ACME.Hosts) > MaxACMEHosts {
-			bad("tls.mode 是 acme 时最多为 %d 个域名申请证书，现在有 %d 个", MaxACMEHosts, len(c.TLS.ACME.Hosts))
+			bad("tls.mode acme requests certificates for at most %d host names, but there are %d", MaxACMEHosts, len(c.TLS.ACME.Hosts))
 		}
 		for _, h := range c.TLS.ACME.Hosts {
 			if h == "*" || !hostRe.MatchString(h) {
-				bad("tls.acme.hosts 里的 %q 不是可以申请证书的域名", h)
+				bad("%q in tls.acme.hosts is not a host name a certificate can be issued for", h)
 			}
 		}
 		if c.Listen.HTTP == "" {
-			warn("tls.mode 是 acme 但 listen.http 没开：只能用 TLS-ALPN-01 验证，需要 listen.https 在公网 443 端口")
+			warn("tls.mode is acme but listen.http is off: only the TLS-ALPN-01 challenge works, which needs listen.https on public port 443")
 		}
 	default:
-		bad("tls.mode 只能是 off、files、acme，现在是 %q", c.TLS.Mode)
+		bad("tls.mode must be off, files or acme, not %q", c.TLS.Mode)
 	}
 
 	// Client IP
 	trusted, err := ParsePrefixes(c.ClientIP.TrustedProxies)
 	if err != nil {
-		bad("client_ip.trusted_proxies：%v", err)
+		bad("client_ip.trusted_proxies: %v", err)
 	}
 	for _, p := range trusted {
 		if p.Bits() == 0 {
-			bad("client_ip.trusted_proxies 里的 %s 信任了所有地址，客户端 IP 可以随意伪造", p)
+			bad("%s in client_ip.trusted_proxies trusts every address, so client IPs can be forged at will", p)
 		}
 	}
 	if len(c.ClientIP.TrustedProxies) == 0 && c.Listen.HTTP != "" {
-		warn("client_ip.trusted_proxies 为空：客户端 IP 取 TCP 来源地址。放在 CDN 或反向代理之后时，请写上它们的回源地址段")
+		warn("client_ip.trusted_proxies is empty: the client IP is the TCP peer address. Behind a CDN or reverse proxy, list the address ranges it connects from")
 	}
 
 	// Upstreams
@@ -150,73 +151,73 @@ func validate(c *Config, res *Result) []error {
 	for _, n := range names {
 		u := c.Upstreams[n]
 		if !upstreamNameRe.MatchString(n) {
-			bad("上游名 %q 应该是镜像地址里的 registry 写法，如 docker.io、ghcr.io（小写，至少有一个点）", n)
+			bad("upstream name %q must be written as the registry in image names, such as docker.io or ghcr.io (lowercase, with at least one dot)", n)
 		}
 		if u.Registry == "" {
-			bad("上游 %s 没有写 registry", n)
+			bad("upstream %s has no registry", n)
 		} else if !upstreamNameRe.MatchString(u.Registry) && !hostRe.MatchString(u.Registry) {
-			bad("上游 %s 的 registry %q 应该是主机名，不带 https:// 和路径", n, u.Registry)
+			bad("upstream %s: registry %q must be a host name, without https:// or a path", n, u.Registry)
 		}
 		for _, a := range append([]string{n}, u.Aliases...) {
 			if other, ok := aliasOwner[a]; ok && other != n {
-				bad("名字 %q 同时属于上游 %s 和 %s", a, other, n)
+				bad("name %q belongs to both upstream %s and %s", a, other, n)
 			}
 			aliasOwner[a] = n
 		}
 		if _, err := CompileHostPatterns(append(append([]string{}, u.RedirectHosts...), u.ExtraRedirectHosts...)); err != nil {
-			bad("上游 %s 的重定向白名单：%v", n, err)
+			bad("upstream %s: redirect allowlist: %v", n, err)
 		}
 		if _, err := CompileHostPatterns(u.TokenRealmHosts); err != nil {
-			bad("上游 %s 的 token_realm_hosts：%v", n, err)
+			bad("upstream %s: token_realm_hosts: %v", n, err)
 		}
 		if len(u.TokenRealmHosts) == 0 {
-			warn("上游 %s 没有写 token_realm_hosts：它要求令牌时会拉取失败", n)
+			warn("upstream %s has no token_realm_hosts: pulls fail when it asks for a token", n)
 		}
 		if u.UnlistedRedirect != "pass" && u.UnlistedRedirect != "deny" {
-			bad("上游 %s 的 unlisted_redirect 只能是 pass 或 deny", n)
+			bad("upstream %s: unlisted_redirect must be pass or deny", n)
 		}
 		if u.AllowPrivateNetwork {
-			warn("上游 %s 允许连接内网地址：只在代理内网 registry 或测试时这样配置", n)
+			warn("upstream %s may connect to private addresses: do this only for a private registry or for testing", n)
 		}
 		if u.TLSCAFile != "" {
 			if _, err := os.Stat(u.TLSCAFile); err != nil {
-				bad("上游 %s 的 tls_ca_file：%v", n, err)
+				bad("upstream %s: tls_ca_file: %v", n, err)
 			}
 		}
 		if cr := u.Credentials; cr != nil && !u.Disabled {
 			if cr.Username == "" || !cr.Password.IsSet() {
-				bad("上游 %s 的 credentials 要写 username 和 password", n)
+				bad("upstream %s: credentials need a username and a password", n)
 			}
 			if cr.RealmHost == "" {
-				bad("上游 %s 的 credentials 要写 realm_host：只把账号发给这个令牌服务", n)
+				bad("upstream %s: credentials need a realm_host, the only token service the account is sent to", n)
 			}
 			if !cr.PublicOnly {
-				bad("上游 %s 配了账号：这个账号能读的私有仓库也会被所有客户端拉到。确认它只能读公开仓库后，写 public_only: true", n)
+				bad("upstream %s has credentials: every client could pull the private repositories this account can read. Once you are sure it can read only public repositories, set public_only: true", n)
 			} else {
-				warn("上游 %s 配了账号：请确认它是只能读公开仓库的令牌（例如 Docker Hub 的 Public Repo Read-only），并且不属于任何组织", n)
+				warn("upstream %s has credentials: make sure it is a token that can read only public repositories (such as Docker Hub's Public Repo Read-only) and belongs to no organisation", n)
 			}
 			if cr.Password.Value != "" {
-				warn("上游 %s 的口令直接写在配置里，建议改用 env 或 file", n)
+				warn("upstream %s: the password is written in the configuration; use env or file instead", n)
 			}
 		}
 	}
 
 	// Entrances
-	seen := map[string]string{}
+	seen := map[string]i18n.Message{}
 	if len(c.Entrances) == 0 {
-		bad("至少要有一个入口（entrances）")
+		bad("at least one entrance is needed (entrances)")
 	}
 	for _, e := range c.Entrances {
-		where := fmt.Sprintf("入口 %s", e.Name)
+		where := i18n.M("entrance %s", e.Name)
 		if len(e.Hosts) == 0 {
-			bad(`%s 要写 hosts（"*" 表示任意域名）`, where)
+			bad(`%s needs hosts ("*" means any host name)`, where)
 		}
 		for _, h := range e.Hosts {
 			if h != "*" && !hostRe.MatchString(h) {
-				bad("%s 的 host %q 不是合法的域名（不要带端口和协议）", where, h)
+				bad("%s: host %q is not a valid host name (leave out the port and scheme)", where, h)
 			}
 			if other, ok := seen[h]; ok {
-				bad("%s 和 %s 都匹配 %q", other, where, h)
+				bad("%s and %s both match %q", other, where, h)
 			}
 			seen[h] = where
 		}
@@ -227,59 +228,59 @@ func validate(c *Config, res *Result) []error {
 			u, ok := c.Upstreams[ref.name]
 			switch {
 			case !ok:
-				bad("%s 的 %s %q 不是已配置的上游", where, ref.field, ref.name)
+				bad("%s: %s %q is not a configured upstream", where, ref.field, ref.name)
 			case u.Disabled:
-				bad("%s 的 %s %q 已停用", where, ref.field, ref.name)
+				bad("%s: %s %q is disabled", where, ref.field, ref.name)
 			}
 		}
 		if e.Upstream != "" && e.DefaultUpstream != "" {
-			bad("%s 同时写了 upstream 和 default_upstream：固定上游的入口不需要默认上游", where)
+			bad("%s sets both upstream and default_upstream; an entrance with a fixed upstream needs no default upstream", where)
 		}
 		switch e.Auth {
 		case "none":
 		case "basic":
 			if c.Access.UsersFile == "" && c.Admin.Store.Driver == "none" {
-				warn("%s 要求登录，但没有 access.users_file，运营数据也是只读的：没有账号能登录", where)
+				warn("%s requires sign-in, but there is no access.users_file and the operational data is read-only: no account can sign in", where)
 			}
 		default:
-			bad("%s 的 auth 只能是 none 或 basic", where)
+			bad("%s: auth must be none or basic", where)
 		}
 		switch e.Page {
 		case "public", "off":
 		case "login":
 			if e.Auth != "basic" {
-				bad("%s 的 page: login 要和 auth: basic 一起用：没有账号就没有人能看到用法页", where)
+				bad("%s: page: login needs auth: basic; without accounts nobody could see the usage page", where)
 			}
 		default:
-			bad("%s 的 page 只能是 public、login 或 off", where)
+			bad("%s: page must be public, login or off", where)
 		}
 	}
 
 	// Access control
 	if _, err := ParsePrefixes(c.Access.IPAllow); err != nil {
-		bad("access.ip_allow：%v", err)
+		bad("access.ip_allow: %v", err)
 	}
 	if _, err := ParsePrefixes(c.Access.IPDeny); err != nil {
-		bad("access.ip_deny：%v", err)
+		bad("access.ip_deny: %v", err)
 	}
 	if _, err := ParsePrefixes(c.Limits.ExemptCIDRs); err != nil {
-		bad("limits.exempt_cidrs：%v", err)
+		bad("limits.exempt_cidrs: %v", err)
 	}
 	for _, p := range c.Access.Images.Allow {
 		if err := checkImagePattern(p, c); err != nil {
-			bad("access.images.allow：%v", err)
+			bad("access.images.allow: %v", err)
 		}
 	}
 	for i := range c.Access.Images.Deny {
 		r := &c.Access.Images.Deny[i]
 		if err := checkImagePattern(r.Pattern, c); err != nil {
-			bad("access.images.deny：%v", err)
+			bad("access.images.deny: %v", err)
 		}
 		if r.Status == 0 {
 			r.Status = 403
 		}
 		if r.Status != 403 && r.Status != 451 {
-			bad("access.images.deny 里 %q 的 status 只能是 403 或 451", r.Pattern)
+			bad("access.images.deny: the status of %q must be 403 or 451", r.Pattern)
 		}
 	}
 
@@ -293,43 +294,43 @@ func validate(c *Config, res *Result) []error {
 		"limits.auth_failures_per_min": float64(l.AuthFailuresPerMin),
 	} {
 		if v < 0 {
-			bad("%s 不能是负数", name)
+			bad("%s cannot be negative", name)
 		}
 	}
 	if l.ManifestRate > 0 && l.ManifestBurst < 1 {
-		bad("limits.manifest_rate 大于 0 时，limits.manifest_burst 至少为 1")
+		bad("limits.manifest_burst must be at least 1 when limits.manifest_rate is above 0")
 	}
 	if l.TrackedClients == 0 {
-		bad("limits.tracked_clients 至少为 1")
+		bad("limits.tracked_clients must be at least 1")
 	}
 	if c.Cache.MaxBytes > 0 && c.Cache.TagTTL > c.Cache.DigestTTL {
-		bad("cache.tag_ttl 不能比 cache.digest_ttl 长")
+		bad("cache.tag_ttl cannot be longer than cache.digest_ttl")
 	}
 	if c.Proxy.BreakerFailures < 0 || (c.Proxy.BreakerFailures > 0 && c.Proxy.BreakerCooldown.D() <= 0) {
-		bad("proxy.breaker_failures 不能是负数；大于 0 时 proxy.breaker_cooldown 也要大于 0")
+		bad("proxy.breaker_failures cannot be negative, and when it is above 0, proxy.breaker_cooldown must be too")
 	}
 	if c.Proxy.MaxRedirects < 0 || c.Proxy.MaxRedirects > 10 {
-		bad("proxy.max_redirects 应在 0 到 10 之间")
+		bad("proxy.max_redirects must be between 0 and 10")
 	}
 	if c.Proxy.BufferSize < 4<<10 || c.Proxy.BufferSize > 1<<20 {
-		bad("proxy.buffer_size 应在 4KiB 到 1MiB 之间")
+		bad("proxy.buffer_size must be between 4KiB and 1MiB")
 	}
 	if c.Timeouts.WriteIdle.D() <= 0 || c.Timeouts.UpstreamReadIdle.D() <= 0 || c.Timeouts.ReadHeader.D() <= 0 {
-		bad("timeouts.write_idle、upstream_read_idle、read_header 都要大于 0")
+		bad("timeouts.write_idle, upstream_read_idle and read_header must all be above 0")
 	}
 
 	// Admin console
 	switch c.Admin.Store.Driver {
 	case "bolt", "none":
 	default:
-		bad("admin.store.driver 只能是 bolt 或 none")
+		bad("admin.store.driver must be bolt or none")
 	}
 	if c.Admin.PublicURL != "" {
 		u, err := url.Parse(c.Admin.PublicURL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || (u.Path != "" && u.Path != "/") {
-			bad("admin.public_url 应写成 https://admin.example.com 这样，不带路径")
+			bad("admin.public_url must look like https://admin.example.com, without a path")
 		} else if u.Scheme == "http" && !isLoopbackListen(net.JoinHostPort(u.Hostname(), "80")) {
-			warn("admin.public_url 用的是 http：后台的口令和会话会明文经过网络，建议放在 https 反向代理之后")
+			warn("admin.public_url uses http: console passwords and sessions would cross the network in clear text; put it behind an https reverse proxy")
 		}
 	}
 	// Who may reach the management entrance (console, API, metrics)
@@ -339,80 +340,81 @@ func validate(c *Config, res *Result) []error {
 	}{{"admin.allow", c.Admin.Allow}, {"admin.proxied_allow", c.Admin.ProxiedAllow}} {
 		ps, err := ParsePrefixes(l.list)
 		if err != nil {
-			bad("%s：%v", l.name, err)
+			bad("%s: %v", l.name, err)
 		}
 		for _, p := range ps {
 			if p.Bits() == 0 {
-				warn("%s 里的 %s 放行了所有地址：管理后台只靠口令保护", l.name, p)
+				warn("%s: %s allows every address, so only passwords protect the console", l.name, p)
 			}
 		}
 	}
 	if len(c.Admin.Allow) == 0 && len(c.Admin.ProxiedAllow) == 0 {
 		if c.Admin.Public {
-			warn("admin.allow 为空：指标和 pprof 谁也打不开")
+			warn("admin.allow is empty: nobody can reach metrics and pprof")
 		} else {
-			warn("admin.allow 为空：管理后台、管理 API 和指标都关掉了，谁也打不开")
+			warn("admin.allow is empty: the console, the admin API and metrics are closed to everyone")
 		}
 	}
 	if c.Admin.Public && c.TLS.Mode == "off" && len(trusted) == 0 && !strings.HasPrefix(c.Admin.PublicURL, "https://") {
-		warn("管理后台对所有地址开放（admin.public），但服务本身没有 HTTPS，也没写反向代理（client_ip.trusted_proxies）：" +
-			"口令会明文经过网络。请放在 HTTPS 之后，或者写 admin.public: false 只让本机和内网打开")
+		warn("the console is open to every address (admin.public), but the service has no HTTPS and no reverse proxy is configured " +
+			"(client_ip.trusted_proxies): passwords would cross the network in clear text. Put it behind HTTPS, or set " +
+			"admin.public: false to keep it to the local machine and the LAN")
 	}
 	if len(c.Admin.ProxiedAllow) > 0 {
 		if c.Admin.PublicURL == "" {
-			bad("admin.proxied_allow 要和 admin.public_url 一起用：经代理访问时，只认 public_url 的域名")
+			bad("admin.proxied_allow needs admin.public_url: proxied access is accepted only on that host name")
 		}
 		if len(trusted) == 0 {
-			bad("admin.proxied_allow 要求写 client_ip.trusted_proxies：只有受信任的代理传来的客户端地址才可信")
+			bad("admin.proxied_allow needs client_ip.trusted_proxies: only client addresses passed on by a trusted proxy can be believed")
 		}
 	}
 	if c.Metrics.Pprof && !c.Metrics.Enabled {
-		warn("metrics.pprof 要先开 metrics.enabled 才有效")
+		warn("metrics.pprof has no effect unless metrics.enabled is on")
 	}
 	seenTok := map[string]bool{}
 	for i := range c.Admin.APITokens {
 		tk := &c.Admin.APITokens[i]
 		if tk.Name == "" || seenTok[tk.Name] {
-			bad("admin.api_tokens 第 %d 个：name 不能为空，也不能重复", i+1)
+			bad("admin.api_tokens item %d: the name must be set and unique", i+1)
 		}
 		seenTok[tk.Name] = true
 		if tk.Role == "" {
 			tk.Role = "viewer"
 		}
 		if tk.Role != "admin" && tk.Role != "viewer" {
-			bad("admin.api_tokens 里 %s 的 role 只能是 admin 或 viewer", tk.Name)
+			bad("admin.api_tokens: the role of %s must be admin or viewer", tk.Name)
 		}
 		if !tk.Token.IsSet() {
-			bad("admin.api_tokens 里 %s 没有写 token", tk.Name)
+			bad("admin.api_tokens: %s has no token", tk.Name)
 		}
 	}
 	if c.Admin.InitialAdmin.Username != "" && !c.Admin.InitialAdmin.Password.IsSet() {
-		bad("admin.initial_admin 写了 username，也要写 password")
+		bad("admin.initial_admin has a username but no password")
 	}
 	if c.Admin.InitialAdmin.Password.Value != "" {
-		warn("admin.initial_admin 的口令直接写在配置里：配置文件常被复制、提交或打印，建议改用 file（Docker、k8s 的 secret）。第一次登录后会要求改口令，之后请把 initial_admin 删掉")
+		warn("the admin.initial_admin password is written in the configuration: configuration files are often copied, committed or printed, so use file (a Docker or Kubernetes secret) instead. The password must be changed at the first sign-in; remove initial_admin afterwards")
 	}
 	if c.Admin.InitialAdmin.Username != "" && !accountRe.MatchString(c.Admin.InitialAdmin.Username) {
-		bad("admin.initial_admin.username 只能用字母、数字和 . _ -，最长 64 个字符")
+		bad("admin.initial_admin.username may contain only letters, digits, dots, underscores and hyphens, up to 64 characters")
 	}
 
 	// Logs
 	switch c.Log.Level {
 	case "debug", "info", "warn", "error":
 	default:
-		bad("log.level 只能是 debug、info、warn、error")
+		bad("log.level must be debug, info, warn or error")
 	}
 	switch c.Log.Access.Output {
 	case "stdout", "off":
 	case "file":
 		if c.Log.Access.Path == "" {
-			bad("log.access.output 是 file 时要写 log.access.path")
+			bad("log.access.output file needs log.access.path")
 		}
 		if c.Log.Access.MaxSize < 1<<20 {
-			bad("log.access.max_size 至少 1MiB")
+			bad("log.access.max_size must be at least 1MiB")
 		}
 	default:
-		bad("log.access.output 只能是 stdout、file、off")
+		bad("log.access.output must be stdout, file or off")
 	}
 	return errs
 }
@@ -434,19 +436,19 @@ func isLoopbackListen(addr string) bool {
 func checkImagePattern(p string, c *Config) error {
 	reg, rest, ok := strings.Cut(p, "/")
 	if !ok || rest == "" {
-		return fmt.Errorf("%q 要写全上游，如 docker.io/library/nginx、ghcr.io/owner/**", p)
+		return i18n.Errorf("%q must start with the upstream, such as docker.io/library/nginx or ghcr.io/owner/**", p)
 	}
 	if reg != "*" {
 		if _, ok := c.Upstreams[strings.ToLower(reg)]; !ok {
-			return fmt.Errorf("%q 的上游 %s 没有配置", p, reg)
+			return i18n.Errorf("%q: upstream %s is not configured", p, reg)
 		}
 	}
 	for _, seg := range strings.Split(rest, "/") {
 		if seg == "" {
-			return fmt.Errorf("%q 里有空的段", p)
+			return i18n.Errorf("%q has an empty segment", p)
 		}
 		if strings.Contains(seg, "**") && seg != "**" {
-			return fmt.Errorf("%q：** 要单独作为一段", p)
+			return i18n.Errorf("%q: ** must be a segment of its own", p)
 		}
 	}
 	return nil
@@ -461,3 +463,6 @@ func Port(addr string) int {
 	n, _ := strconv.Atoi(p)
 	return n
 }
+
+// ValidAccountName reports whether s is a valid name for a client account, administrator or token.
+func ValidAccountName(s string) bool { return accountRe.MatchString(s) }

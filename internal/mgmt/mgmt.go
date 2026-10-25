@@ -37,6 +37,7 @@ import (
 // Handler serves every path of the management entrance.
 type Handler struct {
 	app *app.App
+	ops *ops.Ops
 	mux *http.ServeMux
 }
 
@@ -48,8 +49,8 @@ func New(a *app.App, log *slog.Logger) (*Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := &Handler{app: a, mux: http.NewServeMux()}
-	h.mux.Handle(api.Prefix+"/", api.New(a, o, api.Options{Session: web.Session}))
+	h := &Handler{app: a, ops: o, mux: http.NewServeMux()}
+	h.mux.Handle(api.Prefix+"/", api.New(a, o, api.Options{Session: web.Session, Lang: admin.Lang}))
 	h.mux.Handle("/admin/", web)
 	h.mux.Handle("/admin", web)
 	h.mux.Handle("/metrics", a.Metrics)
@@ -170,3 +171,7 @@ func (h *Handler) Standalone(log *slog.Logger) http.Handler {
 		h.mux.ServeHTTP(w, r)
 	})
 }
+
+// Ops returns the operations the console and the API share. The local admin socket uses the same
+// instance, so that a password set from the command line signs out that administrator's console sessions.
+func (h *Handler) Ops() *ops.Ops { return h.ops }

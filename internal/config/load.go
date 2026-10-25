@@ -3,7 +3,6 @@ package config
 import (
 	"bytes"
 	"cmp"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,13 +10,15 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 )
 
 // Result is the outcome of loading: the effective configuration, and things that do not prevent startup but
 // deserve a warning.
 type Result struct {
 	Config   *Config
-	Warnings []string
+	Warnings []i18n.Message
 }
 
 // Load reads the configuration file, merges it on top of the defaults and the built-in upstreams, validates it
@@ -42,16 +43,16 @@ func Parse(b []byte) (*Result, error) { return ParseWithOverrides(b, nil) }
 func ParseWithOverrides(b []byte, ovs []Override) (*Result, error) {
 	cfg := Defaults()
 	userUpstreams := map[string][]byte{}
-	var warnings []string
+	var warnings []i18n.Message
 
 	top := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	if len(bytes.TrimSpace(b)) > 0 {
 		var root yaml.Node
 		if err := yaml.Unmarshal(b, &root); err != nil {
-			return nil, fmt.Errorf("配置不是合法的 YAML：%w", err)
+			return nil, i18n.Errorf("the configuration is not valid YAML: %w", err)
 		}
 		if root.Kind != yaml.DocumentNode || len(root.Content) != 1 || root.Content[0].Kind != yaml.MappingNode {
-			return nil, errors.New("配置的最外层应该是键值对")
+			return nil, i18n.Errorf("the top level of the configuration must be a mapping")
 		}
 		top = root.Content[0]
 		removedWarn, err := checkRemoved(top)
@@ -80,7 +81,7 @@ func ParseWithOverrides(b []byte, ovs []Override) (*Result, error) {
 					userUpstreams[strings.ToLower(ups.Content[j].Value)] = raw
 				}
 			} else if ups.Tag != "!!null" {
-				return nil, fmt.Errorf("第 %d 行：upstreams 应该是键值对", ups.Line)
+				return nil, i18n.Errorf("line %d: upstreams must be a mapping", ups.Line)
 			}
 			top.Content = append(top.Content[:i], top.Content[i+2:]...)
 			break
@@ -103,7 +104,7 @@ func ParseWithOverrides(b []byte, ovs []Override) (*Result, error) {
 	envWarn := applyEnv(cfg)
 	normalize(cfg)
 	res := &Result{Config: cfg, Warnings: warnings}
-	if envWarn != "" {
+	if !envWarn.IsZero() {
 		res.Warnings = append(res.Warnings, envWarn)
 	}
 	if errs := validate(cfg, res); len(errs) > 0 {
@@ -124,22 +125,23 @@ func ParseWithOverrides(b []byte, ovs []Override) (*Result, error) {
 // The password file is used only once, to create the first administrator, and should be deleted afterwards; so a
 // missing file only gives a warning, not an error, so that the service still starts after the file is deleted
 // while the environment variable remains.
-func applyEnv(c *Config) (warning string) {
+func applyEnv(c *Config) (warning i18n.Message) {
 	f := os.Getenv("RELAY_ADMIN_PASSWORD_FILE")
 	if f == "" || c.Admin.InitialAdmin.Username != "" {
-		return ""
+		return i18n.Message{}
 	}
 	if _, err := os.Stat(f); err != nil { //nolint:gosec // the path is set by the operator in an environment variable
-		return "RELAY_ADMIN_PASSWORD_FILE 指向的 " + f + " 读不到，忽略（第一个管理员建好后可以把这个环境变量也删掉）"
+		return i18n.M("RELAY_ADMIN_PASSWORD_FILE points to %s, which cannot be read; ignored "+
+			"(once the first administrator exists, the variable can go too)", f)
 	}
 	c.Admin.InitialAdmin = InitialAdmin{Username: cmp.Or(os.Getenv("RELAY_ADMIN_USERNAME"), "admin"), Password: Secret{File: f}, FromEnv: true}
-	return ""
+	return i18n.Message{}
 }
 
 // checkRemoved handles the keys removed in v0.2.0: a value is an error that explains what to write instead; an
 // empty value (which meant off anyway) only gives a warning and is deleted from the node tree, so that strict
 // decoding does not report it as an unknown field.
-func checkRemoved(top *yaml.Node) (warnings []string, err error) {
+func checkRemoved(top *yaml.Node) (warnings []i18n.Message, err error) {
 	var errs []error
 	for i := 0; i+1 < len(top.Content); i += 2 {
 		k, v := top.Content[i], top.Content[i+1]
@@ -150,10 +152,10 @@ func checkRemoved(top *yaml.Node) (warnings []string, err error) {
 					continue
 				}
 				if val := v.Content[j+1]; val.Kind == yaml.ScalarNode && val.Value == "" {
-					warnings = append(warnings, fmt.Sprintf("第 %d 行：listen.metrics 已经去掉，可以删掉这一行", val.Line))
+					warnings = append(warnings, i18n.M("line %d: listen.metrics was removed; delete this line", val.Line))
 				} else {
-					errs = append(errs, fmt.Errorf("第 %d 行：listen.metrics 已经去掉（v0.2.0）：指标和管理后台在同一个入口（listen.admin，留空时是拉取端口），"+
-						"要指标请写 metrics.enabled: true，Prometheus 改抓那个地址的 /metrics", val.Line))
+					errs = append(errs, i18n.Errorf("line %d: listen.metrics was removed in v0.2.0: metrics are served on the management "+
+						"entrance (listen.admin, or the pull port when empty); set metrics.enabled: true and point Prometheus at /metrics there", val.Line))
 				}
 				v.Content = append(v.Content[:j], v.Content[j+2:]...)
 				break
@@ -168,10 +170,10 @@ func checkRemoved(top *yaml.Node) (warnings []string, err error) {
 						continue
 					}
 					if val := e.Content[j+1]; val.Kind == yaml.ScalarNode && val.Value == "" {
-						warnings = append(warnings, fmt.Sprintf("第 %d 行：入口的 listen 已经去掉，可以删掉这一行", val.Line))
+						warnings = append(warnings, i18n.M("line %d: the listen key of entrances was removed; delete this line", val.Line))
 					} else {
-						errs = append(errs, fmt.Errorf("第 %d 行：按端口区分的入口（entrances[].listen）已经去掉（v0.2.0）：改用 hosts 加 upstream（每个上游一个域名），"+
-							"或者单域名入口的 /v2/<上游>/ 前缀", val.Line))
+						errs = append(errs, i18n.Errorf("line %d: entrances by port (entrances[].listen) were removed in v0.2.0: use hosts "+
+							"with upstream (one host name per upstream), or the /v2/<upstream>/ prefix on a single-host entrance", val.Line))
 					}
 					e.Content = append(e.Content[:j], e.Content[j+2:]...)
 					break
@@ -190,7 +192,7 @@ func strictDecode(b []byte, out any) error {
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	dec.KnownFields(true)
 	if err := dec.Decode(out); err != nil {
-		return fmt.Errorf("配置有误：%w", err)
+		return i18n.Errorf("invalid configuration: %w", err)
 	}
 	return nil
 }
@@ -208,7 +210,7 @@ func mergeUpstreams(user map[string][]byte) (map[string]*Upstream, error) {
 			base = &Upstream{}
 		}
 		if err := strictDecode(user[name], base); err != nil {
-			return nil, fmt.Errorf("上游 %s：%w", name, err)
+			return nil, i18n.Errorf("upstream %s: %w", name, err)
 		}
 		ups[name] = base
 	}
@@ -308,38 +310,47 @@ func resolveSecrets(c *Config) []error {
 			continue
 		}
 		if err := u.Credentials.Password.resolve(); err != nil {
-			errs = append(errs, fmt.Errorf("上游 %s 的账号口令：%w", n, err))
+			errs = append(errs, i18n.Errorf("upstream %s: credentials password: %w", n, err))
 		}
 	}
 	for i := range c.Admin.APITokens {
 		tk := &c.Admin.APITokens[i]
 		if err := tk.Token.resolve(); err != nil {
-			errs = append(errs, fmt.Errorf("admin.api_tokens 里 %s 的 token：%w", tk.Name, err))
+			errs = append(errs, i18n.Errorf("admin.api_tokens: the token of %s: %w", tk.Name, err))
 		} else if len(tk.Token.Reveal()) < 32 {
-			errs = append(errs, fmt.Errorf("admin.api_tokens 里 %s 的 token 太短：至少 32 个字符（可以用 openssl rand -hex 32 生成）", tk.Name))
+			errs = append(errs, i18n.Errorf("admin.api_tokens: the token of %s is too short: use at least 32 characters "+
+				"(openssl rand -hex 32 makes one)", tk.Name))
 		}
 	}
 	if c.Admin.InitialAdmin.Password.IsSet() {
 		if err := c.Admin.InitialAdmin.Password.resolve(); err != nil {
-			errs = append(errs, fmt.Errorf("admin.initial_admin.password：%w", err))
+			errs = append(errs, i18n.Errorf("admin.initial_admin.password: %w", err))
 		} else if pw := c.Admin.InitialAdmin.Password.Reveal(); len(pw) < 12 || len(pw) > 72 {
-			errs = append(errs, errors.New("admin.initial_admin.password 要 12 到 72 个字节"))
+			errs = append(errs, i18n.Errorf("admin.initial_admin.password must be 12 to 72 bytes long"))
 		} else if strings.EqualFold(pw, c.Admin.InitialAdmin.Username) {
-			errs = append(errs, errors.New("admin.initial_admin.password 不能和用户名相同"))
+			errs = append(errs, i18n.Errorf("admin.initial_admin.password must not be the username"))
 		}
 	}
 	return errs
 }
 
-func joinErrors(errs []error) error {
+func joinErrors(errs []error) error { return Errors(errs) }
+
+// Errors are the problems found in a configuration, reported together.
+type Errors []error
+
+func (e Errors) Error() string   { return e.In(i18n.EN) }
+func (e Errors) Unwrap() []error { return e }
+
+// In lists the problems in l.
+func (e Errors) In(l i18n.Lang) string {
 	var sb strings.Builder
-	sb.WriteString("配置有 ")
-	fmt.Fprintf(&sb, "%d 处错误：", len(errs))
-	for _, e := range errs {
+	sb.WriteString(i18n.T(l, "configuration errors (%d):", len(e)))
+	for _, err := range e {
 		sb.WriteString("\n  - ")
-		sb.WriteString(e.Error())
+		sb.WriteString(i18n.Localize(err, l))
 	}
-	return errors.New(sb.String())
+	return sb.String()
 }
 
 // Print outputs the effective configuration (YAML), showing only the source of each secret.

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 	"github.com/openlinkos/registry-mirrors-relay/internal/status"
 	"github.com/openlinkos/registry-mirrors-relay/internal/version"
 )
@@ -37,17 +39,21 @@ type crumb struct{ Label, Href string }
 // T translates interface text. Arguments come in pairs, name and value, and replace {name} in the text.
 func (v *view) T(key string, args ...any) string { return tr(v.c.lang, key, args...) }
 
-func (v *view) Lang() string     { return v.c.lang }
-func (v *view) HTMLLang() string { return htmlLang(v.c.lang) }
-func (v *view) OtherLang() string {
-	if v.c.lang == "zh" {
-		return "en"
+func (v *view) Lang() string     { return string(v.c.lang) }
+func (v *view) HTMLLang() string { return v.c.lang.HTML() }
+
+// OtherLang is the language the switch offers.
+func (v *view) OtherLang() i18n.Lang {
+	if v.c.lang == i18n.ZH {
+		return i18n.EN
 	}
-	return "zh"
+	return i18n.ZH
 }
-func (v *view) OtherHTMLLang() string { return htmlLang(v.OtherLang()) }
-func (v *view) Theme() string         { return v.c.theme }
-func (v *view) Sess() *session        { return v.c.sess }
+
+// Err renders an error in the interface language; nil is "".
+func (v *view) Err(err error) string { return i18n.Localize(err, v.c.lang) }
+func (v *view) Theme() string        { return v.c.theme }
+func (v *view) Sess() *session       { return v.c.sess }
 func (v *view) CSRF() string {
 	if v.c.sess == nil {
 		return ""
@@ -183,10 +189,10 @@ func parseTemplates() (*template.Template, error) {
 		}
 		text := strings.Replace(string(b), `{{define "content"}}`, `{{define "page/`+name+`"}}`, 1)
 		if _, err := t.New(f).Parse(text); err != nil {
-			return nil, fmt.Errorf("%s：%w", f, err)
+			return nil, fmt.Errorf("%s: %w", f, err)
 		}
 		if t.Lookup("page/"+name) == nil {
-			return nil, fmt.Errorf("%s 里没有 {{define \"content\"}}", f)
+			return nil, fmt.Errorf("%s has no {{define \"content\"}}", f)
 		}
 	}
 	return t, nil
@@ -194,13 +200,13 @@ func parseTemplates() (*template.Template, error) {
 
 func dict(kv ...any) (map[string]any, error) {
 	if len(kv)%2 != 0 {
-		return nil, fmt.Errorf("dict 要成对的参数")
+		return nil, errors.New("dict needs arguments in pairs")
 	}
 	m := make(map[string]any, len(kv)/2)
 	for i := 0; i < len(kv); i += 2 {
 		k, ok := kv[i].(string)
 		if !ok {
-			return nil, fmt.Errorf("dict 的键要是字符串")
+			return nil, errors.New("dict keys must be strings")
 		}
 		m[k] = kv[i+1]
 	}

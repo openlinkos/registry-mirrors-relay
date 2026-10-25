@@ -55,20 +55,20 @@ func TestOverrideRejected(t *testing.T) {
 		o    Override
 		want string
 	}{
-		{Override{"listen", "http: :80"}, "后台不能改"},
-		{Override{"admin", "allow: [0.0.0.0/0]"}, "后台不能改"},
-		{Override{"upstreams", "x: {}"}, "后台不能改"},
-		{Override{"upstreams/NotAName", "registry: a.example.com"}, "后台不能改"},
-		{Override{"limits", "tracked_clients: 10"}, "只能在配置文件里改"},
-		{Override{"proxy", "buffer_size: 1MiB"}, "只能在配置文件里改"},
-		{Override{"upstreams/docker.io", "allow_private_network: true"}, "只能在配置文件里改"},
-		{Override{"upstreams/docker.io", "credentials: {username: x}"}, "只能在配置文件里改"},
-		{Override{"entrances", "- {hosts: [a.example.com], listen: ':5000'}"}, "只能在配置文件里改"},
-		{Override{"entrances", "hosts: [a.example.com]"}, "应该是列表"},
-		{Override{"limits", "- 1"}, "应该是键值对"},
+		{Override{"listen", "http: :80"}, "cannot be changed in the console"},
+		{Override{"admin", "allow: [0.0.0.0/0]"}, "cannot be changed in the console"},
+		{Override{"upstreams", "x: {}"}, "cannot be changed in the console"},
+		{Override{"upstreams/NotAName", "registry: a.example.com"}, "cannot be changed in the console"},
+		{Override{"limits", "tracked_clients: 10"}, "only in the configuration file"},
+		{Override{"proxy", "buffer_size: 1MiB"}, "only in the configuration file"},
+		{Override{"upstreams/docker.io", "allow_private_network: true"}, "only in the configuration file"},
+		{Override{"upstreams/docker.io", "credentials: {username: x}"}, "only in the configuration file"},
+		{Override{"entrances", "- {hosts: [a.example.com], listen: ':5000'}"}, "only in the configuration file"},
+		{Override{"entrances", "hosts: [a.example.com]"}, "must be a list"},
+		{Override{"limits", "- 1"}, "must be a mapping"},
 		{Override{"limits", "manifest_rate: abc"}, "abc"},
 		{Override{"cache", "tag_ttl: forever"}, "forever"},
-		{Override{"limits", ""}, "空的"},
+		{Override{"limits", ""}, "empty"},
 		{Override{"limits", "{"}, "YAML"},
 	} {
 		if err := CheckOverride(c.o); err == nil || !strings.Contains(err.Error(), c.want) {
@@ -117,7 +117,7 @@ upstreams:
       public_only: true
 `
 	for _, v := range []string{"registry: evil.example.com", "token_realm_hosts: [evil.example.com]"} {
-		if msg := parseOvErr(t, file, Override{"upstreams/docker.io", v}); !strings.Contains(msg, "配了账号") {
+		if msg := parseOvErr(t, file, Override{"upstreams/docker.io", v}); !strings.Contains(msg, "has credentials") {
 			t.Fatalf("an upstream with an account must not allow changing %s: %s", v, msg)
 		}
 	}
@@ -240,7 +240,7 @@ admin:
 		t.Fatal(err)
 	}
 	s := string(b)
-	if strings.Contains(s, "plain-text-password-1") || strings.Contains(s, "0123456789abcdef") || !strings.Contains(s, "请填回") {
+	if strings.Contains(s, "plain-text-password-1") || strings.Contains(s, "0123456789abcdef") || !strings.Contains(s, "fill in the original value") {
 		t.Fatalf("inline secrets should be redacted:\n%s", s)
 	}
 	if !strings.Contains(s, "# Site") || !strings.Contains(s, "max_inflight: 7") || !strings.Contains(s, "disabled: true") {

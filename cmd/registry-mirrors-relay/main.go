@@ -4,7 +4,7 @@
 //	registry-mirrors-relay [serve] [-config file]   start the service (the default subcommand)
 //	registry-mirrors-relay check [-config file] [-print]
 //	registry-mirrors-relay hash-password [-user name] [-cost 12]
-//	registry-mirrors-relay admin create|password|list [-config file] [-name name] [-role admin|viewer]
+//	registry-mirrors-relay admin list | create name [-role admin|viewer] | password [name] [--generate]
 //	registry-mirrors-relay probe [-url http://127.0.0.1:8080/healthz] [-wait 60s]
 //	registry-mirrors-relay version
 package main
@@ -25,6 +25,7 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -34,6 +35,7 @@ import (
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/app"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/ctl"
 	"github.com/openlinkos/registry-mirrors-relay/internal/mgmt"
 	"github.com/openlinkos/registry-mirrors-relay/internal/ops"
 	"github.com/openlinkos/registry-mirrors-relay/internal/relay"
@@ -83,11 +85,15 @@ func usage(w io.Writer) {
   registry-mirrors-relay [serve] [-config file]         Start the service (default)
   registry-mirrors-relay check [-config file] [-print]  Validate the configuration; -print prints the effective configuration (secrets hidden)
   registry-mirrors-relay hash-password [-user name]     Read a password from standard input and print its bcrypt hash (htpasswd format)
-  registry-mirrors-relay admin create -name name [-role admin|viewer]   Create a console administrator (password read from standard input)
-  registry-mirrors-relay admin password -name name      Reset a console administrator's password (and enable the account)
   registry-mirrors-relay admin list                     List the console administrators
-                                                        The admin subcommands need the service stopped first:
-                                                        only one process can open the operational database at a time
+  registry-mirrors-relay admin password [name]          Set an administrator's password (asked twice on a terminal,
+                                                        or one line on standard input) and enable the account; without
+                                                        a name, the only administrator, or a new one called admin
+  registry-mirrors-relay admin create name [-role admin|viewer]
+                                                        Create a console administrator
+                                                        --generate makes a random password and prints it once.
+                                                        They work while the service runs (through its local admin
+                                                        socket), e.g. docker exec -it relay registry-mirrors-relay admin password
   registry-mirrors-relay probe [-config file] [-url address] [-wait duration]
                                                         Health check for the container's HEALTHCHECK; uses the configured port by default
   registry-mirrors-relay version
@@ -142,7 +148,7 @@ func cmdServe(args []string, stderr io.Writer) int {
 		log.Info("configuration loaded", "path", path)
 	}
 	for _, w := range res.Warnings {
-		log.Warn(w)
+		log.Warn(w.String())
 	}
 	log.Info("starting", "version", version.Version)
 	server.SetMemoryLimit(log)
@@ -151,7 +157,7 @@ func cmdServe(args []string, stderr io.Writer) int {
 	if path != "" {
 		raw, _ = os.ReadFile(path) //nolint:gosec // the configuration file path is set by the operator
 	}
-	a, err := app.New(res, raw, app.Options{ConfigPath: path, Log: log})
+	a, err := app.New(res, raw, app.Options{ConfigPath: path, Log: log, GenerateAdmin: true})
 	if err != nil {
 		log.Error("failed to start", "err", err)
 		return 1
@@ -180,6 +186,17 @@ func cmdServe(args []string, stderr io.Writer) int {
 	}
 	log.Info("management entrance", "listen", cmp.Or(cfg.Listen.Admin, "shared with the pull entrance"), "public", cfg.Admin.Public, "allow", cfg.Admin.Allow,
 		"proxied_allow", cfg.Admin.ProxiedAllow, "metrics", cfg.Metrics.Enabled)
+	// The local admin socket lets `registry-mirrors-relay admin …` work while the service runs
+	if a.Store.Writable() {
+		sock := ctl.Path(cfg.Admin.Store.Path)
+		switch ln, err := ctl.Listen(sock); {
+		case errors.Is(err, errors.ErrUnsupported):
+		case err != nil:
+			log.Warn("admin socket unavailable; the admin subcommands need the service stopped", "path", sock, "err", err)
+		default:
+			extras = append(extras, server.Listener{Name: "admin socket", Listener: ln, Handler: ctl.Handler(m.Ops())})
+		}
+	}
 	srv := server.New(cfg, log, pull, extras...)
 	srv.ACMEHosts(func() []string { return a.Runtime().Config.TLS.ACME.Hosts })
 	if err := srv.Run(ctx); err != nil {
@@ -281,15 +298,17 @@ func readPassword(stdin io.Reader, stderr io.Writer) (string, error) {
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", err
 	}
-	return checkPassword(strings.TrimRight(line, "\r\n"))
+	line = strings.TrimRight(line, "\r\n")
+	if line == "" {
+		return "", errors.New("no password on standard input: pipe it in as one line, run the command in a terminal " +
+			"(docker exec -it, kubectl exec -it), or use --generate")
+	}
+	return checkPassword(line)
 }
 
 func checkPassword(pw string) (string, error) {
-	switch {
-	case len(pw) < 12:
-		return "", errors.New("the password must be at least 12 characters long")
-	case len(pw) > 72:
-		return "", errors.New("the password must be at most 72 bytes long (the bcrypt limit)")
+	if err := ops.CheckPassword(pw); err != nil {
+		return "", err
 	}
 	return pw, nil
 }
@@ -314,22 +333,45 @@ func probeURL(l config.Listen) (url string, insecure bool, err error) {
 	return scheme + "://" + net.JoinHostPort(host, port) + "/healthz", insecure, nil
 }
 
-// cmdAdmin manages the console administrators while the service is stopped: create, password, list. It
-// opens the operational database directly (bbolt can be opened by only one process at a time, so with the
-// service running it fails after 2 seconds). Operations are written to the audit log with the actor
-// cli:<system user>.
+// cmdAdmin manages the console administrators: list, create, password. While the service runs it makes
+// the change through the service's local admin socket, so the change applies at once and the
+// administrator's console sessions are signed out; while the service is stopped it opens the
+// operational database itself. Changes are written to the audit log with the actor cli:<system user>.
 func cmdAdmin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	const help = "Usage: registry-mirrors-relay admin list | create NAME [-role admin|viewer] [--generate] | password [NAME] [--generate] [-config file]"
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		fmt.Fprintln(stderr, "Usage: registry-mirrors-relay admin create|password|list [-config file] [-name name] [-role admin|viewer]")
+		fmt.Fprintln(stderr, help)
 		return 2
 	}
 	sub, args := args[0], args[1:]
+	switch sub {
+	case "list", "create", "password":
+	default:
+		fmt.Fprintf(stderr, "Unknown admin subcommand %q.\n%s\n", sub, help)
+		return 2
+	}
 	fl := flag.NewFlagSet("admin "+sub, flag.ContinueOnError)
 	fl.SetOutput(stderr)
 	cfgPath := fl.String("config", "", "configuration file")
-	name := fl.String("name", "", "the administrator's username")
-	role := fl.String("role", "admin", "role: admin (can make changes) or viewer (read-only)")
+	name := fl.String("name", "", "the administrator's username (or give it as the first argument)")
+	role := fl.String("role", "admin", "role for create: admin (can make changes) or viewer (read-only)")
+	generate := fl.Bool("generate", false, "generate a random password and print it once, instead of reading one")
 	if err := fl.Parse(args); err != nil {
+		return 2
+	}
+	// The name may come before or after the flags
+	if fl.NArg() > 0 {
+		*name = fl.Arg(0)
+		if err := fl.Parse(fl.Args()[1:]); err != nil {
+			return 2
+		}
+		if fl.NArg() > 0 {
+			fmt.Fprintln(stderr, help)
+			return 2
+		}
+	}
+	if *role != "admin" && *role != "viewer" {
+		fmt.Fprintln(stderr, "-role must be admin or viewer.")
 		return 2
 	}
 	res, _, err := loadConfig(*cfgPath)
@@ -339,84 +381,165 @@ func cmdAdmin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	cfg := res.Config
 	if cfg.Admin.Store.Driver != "bolt" {
-		fmt.Fprintln(stderr, "Operational data is read-only (admin.store.driver: none): the administrator comes from admin.initial_admin in the configuration.")
+		fmt.Fprintln(stderr, "The operational data is read-only (admin.store.driver: none), so the administrator comes from the configuration:")
+		fmt.Fprintln(stderr, "admin.initial_admin, the file named by RELAY_ADMIN_PASSWORD_FILE, or the Helm value admin.existingSecret.")
+		fmt.Fprintln(stderr, "Change the password there, then restart the service (or the pods).")
 		return 1
 	}
-	if sub != "list" && !ops.ValidName(*name) {
-		fmt.Fprintln(stderr, "Give the username with -name: letters, digits, dots, underscores and hyphens, starting with a letter or digit, at most 64 characters.")
-		return 2
-	}
-	st, err := store.OpenBolt(cfg.Admin.Store.Path)
+	ctx := context.Background()
+	b, closeFn, err := openAdmins(ctx, cfg, sub == "list" || (sub == "password" && *name != ""))
 	if err != nil {
 		fmt.Fprintln(stderr, err)
-		fmt.Fprintln(stderr, "If the service is running, stop it first, or make the change in the web console.")
 		return 1
 	}
-	defer func() { _ = st.Close() }()
-	actor := "cli:" + cmp.Or(os.Getenv("USER"), os.Getenv("USERNAME"), "unknown")
+	defer closeFn()
 
-	switch sub {
-	case "list":
-		for _, a := range st.Data().Admins {
+	admins, err := b.Admins(ctx)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if sub == "list" {
+		for _, a := range admins {
 			status := "active"
-			if a.Disabled {
+			switch {
+			case a.Disabled:
 				status = "disabled"
+			case a.MustChange:
+				status = "must-change-password"
 			}
 			fmt.Fprintln(stdout, strings.Join([]string{a.Name, a.Role, status, a.Created.Format(time.RFC3339)}, "  "))
 		}
+		if len(admins) == 0 {
+			fmt.Fprintln(stderr, "There are no administrators yet. Create one with: registry-mirrors-relay admin password")
+		}
 		return 0
-	case "create", "password":
-	default:
-		fmt.Fprintf(stderr, "Unknown admin subcommand %q (create, password, list).\n", sub)
+	}
+
+	// Without a name, password means the only administrator, or a new one called admin when there is none
+	if *name == "" && sub == "password" {
+		switch len(admins) {
+		case 0:
+			*name, sub = "admin", "create"
+		case 1:
+			*name = admins[0].Name
+		default:
+			names := make([]string, len(admins))
+			for i, a := range admins {
+				names[i] = a.Name
+			}
+			fmt.Fprintf(stderr, "There are several administrators (%s); name the one to change.\n", strings.Join(names, ", "))
+			return 2
+		}
+	}
+	if !ops.ValidName(*name) {
+		fmt.Fprintln(stderr, "Give the administrator's username: letters, digits, dots, underscores and hyphens, starting with a letter or digit, at most 64 characters.")
 		return 2
 	}
-	if *role != "admin" && *role != "viewer" {
-		fmt.Fprintln(stderr, "-role must be admin or viewer.")
-		return 2
+	exists := slices.ContainsFunc(admins, func(a ctl.Admin) bool { return a.Name == *name })
+	switch {
+	case sub == "create" && exists:
+		fmt.Fprintf(stderr, "The administrator %s already exists; set its password with: registry-mirrors-relay admin password %s\n", *name, *name)
+		return 1
+	case sub == "password" && !exists:
+		fmt.Fprintf(stderr, "There is no administrator %s; create it with: registry-mirrors-relay admin create %s\n", *name, *name)
+		return 1
 	}
-	pw, err := readPassword(stdin, stderr)
-	if err != nil {
+
+	var pw string
+	if *generate {
+		pw = ops.GeneratePassword()
+	} else if pw, err = readPassword(stdin, stderr); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	hash, err := ops.HashPassword(pw)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	err = st.Update(func(d *store.Data) error {
-		for i := range d.Admins {
-			if d.Admins[i].Name != *name {
-				continue
-			}
-			if sub == "create" {
-				return fmt.Errorf("administrator %s already exists; use admin password to reset the password", *name)
-			}
-			d.Admins[i].Hash, d.Admins[i].Disabled, d.Admins[i].MustChange = hash, false, false
-			return nil
-		}
-		if sub == "password" {
-			return fmt.Errorf("there is no administrator %s; use admin create to create one", *name)
-		}
-		d.Admins = append(d.Admins, store.Admin{Name: *name, Hash: hash, Role: *role, Created: time.Now().UTC()})
-		return nil
-	})
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	action := "admin.create"
-	if sub == "password" {
-		action = "admin.update"
-	}
-	_ = st.Audit(store.AuditEntry{Actor: actor, Action: action, Target: *name, Detail: "cli"})
 	if sub == "create" {
-		fmt.Fprintf(stdout, "Created the administrator %s (%s).\n", *name, *role)
+		err = b.CreateAdmin(ctx, *name, pw, *role)
 	} else {
-		fmt.Fprintf(stdout, "Reset the password of %s.\n", *name)
+		err = b.SetPassword(ctx, *name, pw)
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if *generate {
+		// Only the password goes to standard output, so scripts can capture it
+		fmt.Fprintf(stderr, "The new password of %s, shown only this once (keep it in a password manager):\n", *name)
+		fmt.Fprintln(stdout, pw)
+	}
+	switch {
+	case sub == "create":
+		fmt.Fprintf(stderr, "Created the administrator %s (%s).\n", *name, *role)
+	case b.Running():
+		fmt.Fprintf(stderr, "Set the password of %s and signed out its console sessions.\n", *name)
+	default:
+		fmt.Fprintf(stderr, "Set the password of %s.\n", *name)
 	}
 	return 0
 }
+
+// admins is where the admin subcommands make their changes: the running service, or the operational
+// database while the service is stopped.
+type admins interface {
+	Admins(ctx context.Context) ([]ctl.Admin, error)
+	CreateAdmin(ctx context.Context, name, password, role string) error
+	SetPassword(ctx context.Context, name, password string) error
+	Running() bool
+}
+
+// openAdmins connects to the running service, or opens the operational database when the service is
+// stopped. With mustExist, a missing database is an error rather than a new empty one, so that a wrong
+// -config does not go unnoticed; creating the first administrator before the first start makes one.
+func openAdmins(ctx context.Context, cfg *config.Config, mustExist bool) (admins, func(), error) {
+	sock := ctl.Path(cfg.Admin.Store.Path)
+	c, _, err := ctl.Dial(ctx, sock)
+	if err == nil {
+		return running{c}, func() {}, nil
+	}
+	if !errors.Is(err, ctl.ErrNotRunning) {
+		return nil, nil, err
+	}
+	path := cfg.Admin.Store.Path
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) && mustExist {
+		return nil, nil, fmt.Errorf("there is no operational database at %s; check -config or RELAY_CONFIG", path)
+	}
+	st, err := store.OpenBolt(path)
+	if errors.Is(err, store.ErrLocked) {
+		return nil, nil, fmt.Errorf("the service seems to be running, but its admin socket %s is not available "+
+			"(see the service log; versions before v0.5.0 have none): change the password in the web console, "+
+			"or stop the service and run the command again", sock)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	return stopped{ops.Offline{Store: st}}, func() { _ = st.Close() }, nil
+}
+
+type running struct{ *ctl.Client }
+
+func (running) Running() bool { return true }
+
+type stopped struct{ o ops.Offline }
+
+func (stopped) Running() bool { return false }
+
+func (s stopped) Admins(context.Context) ([]ctl.Admin, error) {
+	var out []ctl.Admin
+	for _, a := range s.o.Admins() {
+		out = append(out, ctl.Admin{Name: a.Name, Role: a.Role, Disabled: a.Disabled, MustChange: a.MustChange, Created: a.Created})
+	}
+	return out, nil
+}
+
+func (s stopped) CreateAdmin(_ context.Context, name, password, role string) error {
+	return s.o.CreateAdmin(cliActor(), name, password, role)
+}
+
+func (s stopped) SetPassword(_ context.Context, name, password string) error {
+	return s.o.SetPassword(cliActor(), name, password)
+}
+
+func cliActor() ops.Actor { return ops.Actor{Kind: "cli", Name: ctl.CurrentUser()} }
 
 // cmdProbe is the container's HEALTHCHECK: it requests /healthz from the local pull entrance. Without -url
 // it builds the address from listen.http in the configuration (or listen.https when that is off, without

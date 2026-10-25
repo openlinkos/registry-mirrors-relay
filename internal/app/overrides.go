@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 	"github.com/openlinkos/registry-mirrors-relay/internal/metrics"
 	"github.com/openlinkos/registry-mirrors-relay/internal/store"
 )
@@ -35,7 +36,8 @@ type OverrideState struct {
 	Key string
 	store.ConfigOverride
 	State string
-	Error string // why it is suspended
+	Error string // why it is suspended, in English
+	Cause error  // the same, for showing it in the reader's language
 }
 
 // Applied reports whether the override is in effect.
@@ -100,7 +102,7 @@ func layer(raw []byte, file *config.Result, saved map[string]store.ConfigOverrid
 	// retry the ones set aside (they may depend on ones added later)
 	best = file
 	var applied []string
-	errs := map[string]string{}
+	errs := map[string]error{}
 	pending := keys
 	for progress := true; progress && len(pending) > 0; {
 		progress = false
@@ -109,7 +111,7 @@ func layer(raw []byte, file *config.Result, saved map[string]store.ConfigOverrid
 			try := append(slices.Clone(applied), k)
 			res, err := parseLayers(raw, saved, try)
 			if err != nil {
-				errs[k] = err.Error()
+				errs[k] = err
 				rest = append(rest, k)
 				continue
 			}
@@ -124,7 +126,7 @@ func layer(raw []byte, file *config.Result, saved map[string]store.ConfigOverrid
 // overrideStates lists the state of each override in overrideOrder: those in applied are in effect (drift
 // when the configuration file has changed), the rest are other (suspended when other is empty, with the
 // reason in errs).
-func overrideStates(file *config.Config, saved map[string]store.ConfigOverride, applied []string, errs map[string]string, other string) []OverrideState {
+func overrideStates(file *config.Config, saved map[string]store.ConfigOverride, applied []string, errs map[string]error, other string) []OverrideState {
 	var out []OverrideState
 	for _, k := range overrideOrder(saved) {
 		st := OverrideState{Key: k, ConfigOverride: saved[k], State: OverrideActive}
@@ -136,7 +138,10 @@ func overrideStates(file *config.Config, saved map[string]store.ConfigOverride, 
 		case other != "":
 			st.State = other
 		default:
-			st.State, st.Error = OverrideSuspended, errs[k]
+			st.State, st.Cause = OverrideSuspended, errs[k]
+			if st.Cause != nil {
+				st.Error = st.Cause.Error()
+			}
 		}
 		out = append(out, st)
 	}
@@ -153,7 +158,8 @@ func (a *App) assemble(raw []byte, file *config.Result, prev *Runtime) (*Runtime
 	if err != nil && eff != file {
 		for i := range states {
 			if states[i].Applied() {
-				states[i].State, states[i].Error = OverrideSuspended, "生效时出错："+err.Error()
+				cause := i18n.Errorf("applying it failed: %w", err)
+				states[i].State, states[i].Error, states[i].Cause = OverrideSuspended, cause.Error(), cause
 			}
 		}
 		eff = file
@@ -203,7 +209,7 @@ func truncate(s string, n int) string {
 // generated from it and the other active overrides, and only if that succeeds is it written to the
 // operational database, so nothing changes on failure. It returns the new warnings this change brings
 // (for example, an upstream without token_realm_hosts).
-func (a *App) SetOverride(key string, value *string, by string) (warnings []string, err error) {
+func (a *App) SetOverride(key string, value *string, by string) (warnings []i18n.Message, err error) {
 	if !a.Store.Writable() {
 		return nil, store.ErrReadOnly
 	}
@@ -279,14 +285,14 @@ func (a *App) SetOverride(key string, value *string, by string) (warnings []stri
 	states := overrideStates(file, next, applied, nil, "")
 	for i, s := range states {
 		if !s.Applied() {
-			states[i].State, states[i].Error = was[s.Key].State, was[s.Key].Error
+			states[i].State, states[i].Error, states[i].Cause = was[s.Key].State, was[s.Key].Error, was[s.Key].Cause
 		}
 	}
 	rt.FileConfig, rt.Overrides, rt.Data = file, states, a.Store.Data()
 	a.noteOverrides(prev.Overrides, states)
 	a.commit(rt, prev)
 	for _, w := range res.Warnings {
-		if !slices.Contains(a.warnings, w) {
+		if !hasMessage(a.warnings, w) {
 			warnings = append(warnings, w)
 		}
 	}

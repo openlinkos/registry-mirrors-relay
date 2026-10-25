@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"cmp"
 	"encoding/json"
 	"html/template"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/app"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 	"github.com/openlinkos/registry-mirrors-relay/internal/ops"
 	"github.com/openlinkos/registry-mirrors-relay/internal/stats"
 	"github.com/openlinkos/registry-mirrors-relay/internal/status"
@@ -33,7 +35,7 @@ type overviewData struct {
 }
 
 // liveValues are the numbers on the overview page that refresh automatically (already formatted).
-func (h *Handler) liveValues(lang string) map[string]string {
+func (h *Handler) liveValues(lang i18n.Lang) map[string]string {
 	now := h.now()
 	series := h.app.Stats.Series(now.Add(-59 * time.Minute))
 	var hour, last5 stats.Minute
@@ -120,7 +122,7 @@ func (h *Handler) overviewPage(c *ctx) error {
 	// Things that need attention
 	if st := h.app.LastReload(); st != nil {
 		if st.Err != "" {
-			d.Warnings = append(d.Warnings, tr(c.lang, "overview.reloadFailed", "error", st.Err))
+			d.Warnings = append(d.Warnings, tr(c.lang, "overview.reloadFailed", "error", cmp.Or(i18n.Localize(st.Cause, c.lang), st.Err)))
 		}
 		if len(st.Restart) > 0 {
 			d.Warnings = append(d.Warnings, tr(c.lang, "overview.restartNeeded", "fields", strings.Join(st.Restart, ", ")))

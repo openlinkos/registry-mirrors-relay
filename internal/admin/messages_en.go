@@ -1,7 +1,7 @@
 package admin
 
-// messagesEN 是界面文案（英文）。键和 messagesZH 一一对应。
-var messagesEN = map[string]string{ //nolint:gosec // 界面文案，里面的 password 不是凭据
+// messagesEN is the interface text in English, the source catalogue. messagesZH has the same keys.
+var messagesEN = map[string]string{ //nolint:gosec // interface text: the passwords here are not credentials
 	"app.admin": "Admin",
 	"app.docs":  "Docs",
 
@@ -28,11 +28,10 @@ var messagesEN = map[string]string{ //nolint:gosec // 界面文案，里面的 p
 	"nav.account":        "My account",
 	"nav.backToOverview": "Back to the overview",
 
-	"prefs.switchLanguage": "中文",
-	"prefs.theme":          "Theme",
-	"theme.auto":           "System",
-	"theme.light":          "Light",
-	"theme.dark":           "Dark",
+	"prefs.theme": "Theme",
+	"theme.auto":  "System",
+	"theme.light": "Light",
+	"theme.dark":  "Dark",
 
 	"search.quick": "Search requests: IP, image, account…",
 	"search.label": "Search recent requests",

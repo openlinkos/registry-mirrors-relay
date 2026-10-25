@@ -15,6 +15,7 @@ import (
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/app"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 	"github.com/openlinkos/registry-mirrors-relay/internal/ops"
 	"github.com/openlinkos/registry-mirrors-relay/internal/store"
 )
@@ -243,7 +244,7 @@ func TestTokensAndRedirectHosts(t *testing.T) {
 
 func TestReadOnlyStoreAndMisc(t *testing.T) {
 	e := newEnv(t, store.NewReadOnly())
-	if code, m, _ := e.call(t, "POST", "/bans", adminTok, map[string]string{"cidr": "198.51.100.7", "duration": "1h"}); code != 409 || !strings.Contains(m["error"].(string), "只读") {
+	if code, m, _ := e.call(t, "POST", "/bans", adminTok, map[string]string{"cidr": "198.51.100.7", "duration": "1h"}); code != 409 || m["code"] != "store.readonly" || !strings.Contains(m["error"].(string), "read-only") {
 		t.Fatalf("a read-only store should return 409: %d %v", code, m)
 	}
 	if code, _, _ := e.call(t, "POST", "/reload", adminTok, map[string]string{}); code != 422 {
@@ -279,7 +280,7 @@ func TestAdminsAndSite(t *testing.T) {
 	if code, _, _ := e.call(t, "POST", "/admins", adminTok, map[string]string{"name": "bob", "password": "short", "role": "admin"}); code != 400 {
 		t.Fatal("a password that is too short should return 400")
 	}
-	if code, m, _ := e.call(t, "PATCH", "/admins/alice", adminTok, map[string]any{"role": "viewer"}); code != 409 || !strings.Contains(m["error"].(string), "至少要留一个") {
+	if code, m, _ := e.call(t, "PATCH", "/admins/alice", adminTok, map[string]any{"role": "viewer"}); code != 409 || m["code"] != "admin.last" || !strings.Contains(m["error"].(string), "At least one") {
 		t.Fatalf("cannot remove the last admin: %d %v", code, m)
 	}
 	_, _, raw := e.call(t, "GET", "/admins", viewerTok, nil)
@@ -335,7 +336,7 @@ func TestConfigOverrides(t *testing.T) {
 		{"/config/overrides/limits", map[string]any{"tracked_clients": 1}, 422},
 		{"/config/overrides/entrances", []map[string]any{{"hosts": []string{"x.example.com"}, "upstream": "nope.example.com"}}, 422},
 	} {
-		if code, m, _ := e.call(t, "PUT", c.path, adminTok, c.body); code != c.code || !strings.Contains(m["error"].(string), "没有保存") {
+		if code, m, _ := e.call(t, "PUT", c.path, adminTok, c.body); code != c.code || m["code"] != "config.invalid" || !strings.Contains(m["error"].(string), "not saved") {
 			t.Errorf("%s: %d %v", c.path, code, m)
 		}
 	}
@@ -379,5 +380,45 @@ func TestConfigOverrides(t *testing.T) {
 	ro := newEnv(t, store.NewReadOnly())
 	if code, _, _ := ro.call(t, "PUT", "/config/overrides/limits", adminTok, map[string]any{"max_inflight": 5}); code != 409 {
 		t.Fatalf("read-only store: %d", code)
+	}
+}
+
+func TestErrorLanguage(t *testing.T) {
+	e := newEnv(t, store.NewReadOnly())
+	get := func(accept string) (int, map[string]any) {
+		t.Helper()
+		req, _ := http.NewRequest("GET", e.srv.URL+Prefix+"/status", nil)
+		if accept != "" {
+			req.Header.Set("Accept-Language", accept)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var m map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&m)
+		return resp.StatusCode, m
+	}
+	for accept, lang := range map[string]i18n.Lang{"": i18n.EN, "fr": i18n.EN, "zh-CN,zh;q=0.9": i18n.ZH} {
+		code, m := get(accept)
+		if code != 401 || m["code"] != "auth.required" || m["error"] != i18n.T(lang, "A valid API token is required.") {
+			t.Errorf("Accept-Language %q: %d %v", accept, code, m)
+		}
+	}
+
+	req, _ := http.NewRequest("POST", e.srv.URL+Prefix+"/bans", strings.NewReader(`{"cidr": "198.51.100.7", "duration": "1h"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminTok)
+	req.Header.Set("Accept-Language", "zh")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var m map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&m)
+	if want := ops.NewError(409, "store.readonly").In(i18n.ZH); resp.StatusCode != 409 || m["code"] != "store.readonly" || m["error"] != want {
+		t.Errorf("ops errors in Chinese: %d %v, want %q", resp.StatusCode, m, want)
 	}
 }

@@ -24,7 +24,7 @@
 {{define "langForm"}}<form method="post" action="/admin/prefs">
   <input type="hidden" name="lang" value="{{.V.OtherLang}}">
   <input type="hidden" name="next" value="{{.V.Here}}">
-  <button type="submit" class="{{.Class}}" lang="{{.V.OtherHTMLLang}}">{{icon "languages" "sm"}}{{.V.T "prefs.switchLanguage"}}</button>
+  <button type="submit" class="{{.Class}}" lang="{{.V.OtherLang.HTML}}">{{icon "languages" "sm"}}{{.V.OtherLang.Name}}</button>
 </form>{{end}}
 
 {{define "themeForm"}}<form method="post" action="/admin/prefs">

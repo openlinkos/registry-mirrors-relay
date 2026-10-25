@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 	"github.com/openlinkos/registry-mirrors-relay/internal/ops"
 )
 
@@ -73,7 +74,7 @@ func overrideOf(list []ops.OverrideView, key string) *ops.OverrideView {
 
 // fields lists the editable fields of section key: eff is the effective configuration, file the
 // configuration file's. When form is not nil (a form error is being redisplayed) the filled-in values are used.
-func fields(lang string, eff, file *config.Config, key string, form url.Values) []cfgField {
+func fields(lang i18n.Lang, eff, file *config.Config, key string, form url.Values) []cfgField {
 	sec, _, _ := strings.Cut(key, "/")
 	locked, inFile := false, true
 	if sec == "upstreams" {
@@ -162,12 +163,14 @@ func (h *Handler) saveConfig(c *ctx, key, value, back string, page func(*ctx) er
 	if len(warnings) == 0 {
 		return c.done(back, "config.saved", key)
 	}
-	c.form, c.warnings, c.flash = nil, warnings, tr(c.lang, "notice.config.saved", "v", key)
+	c.form, c.warnings, c.flash = nil, localize(c.lang, warnings), tr(c.lang, "notice.config.saved", "v", key)
 	return page(c)
 }
 
 func badConfig(err error) error {
-	return &ops.Error{Status: http.StatusBadRequest, Key: "config.invalid", Detail: err.Error()}
+	e := ops.NewError(http.StatusBadRequest, "config.invalid")
+	e.Cause = err
+	return e
 }
 
 // formValues takes the fields of section key from the form. Browsers do not send an unticked switch, so
@@ -381,11 +384,11 @@ func (h *Handler) upstreamSave(c *ctx) error {
 	name := strings.ToLower(strings.TrimSpace(c.form.Get("upstream")))
 	key := config.UpstreamKey(name)
 	if config.OverrideFields(key) == nil {
-		return c.retry(&ops.Error{Status: http.StatusBadRequest, Key: "config.upstreamName"}, h.upstreamEditPage)
+		return c.retry(ops.NewError(http.StatusBadRequest, "config.upstreamName"), h.upstreamEditPage)
 	}
 	isNew := c.form.Get("new") != ""
 	if isNew && rt.Config.Upstreams[name] != nil {
-		return c.retry(&ops.Error{Status: http.StatusConflict, Key: "config.upstreamExists", Arg: name}, h.upstreamEditPage)
+		return c.retry(ops.NewError(http.StatusConflict, "config.upstreamExists", name), h.upstreamEditPage)
 	}
 	locked := func(f string) bool {
 		u := rt.FileConfig.Upstreams[name]

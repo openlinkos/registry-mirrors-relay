@@ -3,6 +3,7 @@ package app
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -205,5 +206,82 @@ func TestRestartNeededFields(t *testing.T) {
 	cur.Admin.Allow = []string{"loopback"}
 	if got := restartNeeded(old, cur); len(got) != 0 {
 		t.Fatalf("the metrics switches and admin.allow can be hot reloaded: %v", got)
+	}
+}
+
+// TestGenerateAdmin: serve creates the first administrator with a generated password, logged once.
+func TestGenerateAdmin(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	yaml := "data_dir: " + filepath.ToSlash(dir) + "\nlog: {access: {output: \"off\"}}\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	start := func(generate bool) (*App, string) {
+		t.Helper()
+		res, err := config.Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var logs strings.Builder
+		a, err := New(res, []byte(yaml), Options{ConfigPath: path, GenerateAdmin: generate, Log: slog.New(slog.NewJSONHandler(&logs, nil))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a, logs.String()
+	}
+
+	a, logs := start(false)
+	if n := len(a.Store.Data().Admins); n != 0 || strings.Contains(logs, `"password"`) {
+		t.Fatalf("without GenerateAdmin nothing is created: %d admins", n)
+	}
+	a.Close()
+
+	a, logs = start(true)
+	admins := a.Store.Data().Admins
+	if len(admins) != 1 || admins[0].Name != "admin" || !admins[0].MustChange || admins[0].Role != "admin" {
+		t.Fatalf("generated administrator: %+v", admins)
+	}
+	var line struct {
+		Username, Password string
+	}
+	for l := range strings.SplitSeq(logs, "\n") {
+		if strings.Contains(l, `"password"`) {
+			_ = json.Unmarshal([]byte(l), &line)
+		}
+	}
+	if line.Username != "admin" || bcrypt.CompareHashAndPassword([]byte(admins[0].Hash), []byte(line.Password)) != nil {
+		t.Fatalf("the logged password should sign in: %q", logs)
+	}
+	a.Close()
+
+	a, logs = start(true)
+	defer a.Close()
+	if len(a.Store.Data().Admins) != 1 || strings.Contains(logs, `"password"`) {
+		t.Fatal("a restart must not create or log another password")
+	}
+}
+
+func TestGenerateAdminSkipped(t *testing.T) {
+	t.Setenv("RELAY_ADMIN_PW", "initial-admin-password")
+	for name, yaml := range map[string]string{
+		"initial_admin": "admin: {initial_admin: {username: root, password: {env: RELAY_ADMIN_PW}}}\n",
+		"read-only":     "admin: {store: {driver: none}}\n",
+	} {
+		dir := t.TempDir()
+		res, err := config.Parse([]byte("data_dir: " + filepath.ToSlash(dir) + "\nlog: {access: {output: \"off\"}}\n" + yaml))
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, err := New(res, nil, Options{GenerateAdmin: true, Log: slog.New(slog.DiscardHandler)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ad := range a.Store.Data().Admins {
+			if ad.Name == "admin" {
+				t.Errorf("%s: an administrator was generated", name)
+			}
+		}
+		a.Close()
 	}
 }

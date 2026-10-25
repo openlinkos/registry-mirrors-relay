@@ -15,6 +15,9 @@ import (
 // ErrReadOnly means the operational data is read-only.
 var ErrReadOnly = errors.New("operational data is read-only (admin.store.driver: none), edit the configuration file instead")
 
+// ErrLocked means another process (usually the running service) has the operational database open.
+var ErrLocked = errors.New("another process has the operational database open")
+
 // ClientUser is a client account (the one used with docker login for pulls).
 type ClientUser struct {
 	Name         string    `json:"name"`

@@ -12,10 +12,10 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -34,6 +34,7 @@ import (
 	"github.com/openlinkos/registry-mirrors-relay/internal/accesslog"
 	"github.com/openlinkos/registry-mirrors-relay/internal/clientip"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 	"github.com/openlinkos/registry-mirrors-relay/internal/limit"
 	"github.com/openlinkos/registry-mirrors-relay/internal/manifest"
 	"github.com/openlinkos/registry-mirrors-relay/internal/metrics"
@@ -95,6 +96,9 @@ type Options struct {
 	Store      store.Store // opened as configured when nil
 	// Hook is called as each access log entry is written (tests use it to check the entries)
 	Hook func(*accesslog.Entry)
+	// GenerateAdmin creates an administrator with a generated password, logged once, when the writable
+	// operational database has none and the configuration names no initial_admin (serve sets it).
+	GenerateAdmin bool
 }
 
 // App holds the state that survives reloads.
@@ -115,7 +119,7 @@ type App struct {
 	fileRaw []byte // the content of the configuration file, which console overrides are layered on
 	// warnings are the warnings for the effective configuration; saving an override in the console
 	// reports only the new ones
-	warnings []string
+	warnings []i18n.Message
 	reload   atomic.Pointer[ReloadStatus]
 
 	healthMu sync.Mutex
@@ -126,7 +130,8 @@ type App struct {
 // ReloadStatus is the result of the last reload.
 type ReloadStatus struct {
 	Time    time.Time
-	Err     string
+	Err     string // English; Cause is the error itself, for showing it in the reader's language
+	Cause   error
 	Restart []string // changes that take effect only after a restart
 }
 
@@ -170,8 +175,8 @@ func New(res *config.Result, raw []byte, opt Options) (*App, error) {
 		return nil, err
 	}
 	for _, w := range eff.Warnings {
-		if !slices.Contains(res.Warnings, w) {
-			a.log.Warn(w)
+		if !hasMessage(res.Warnings, w) {
+			a.log.Warn(w.String())
 		}
 	}
 	a.noteOverrides(nil, rt.Overrides)
@@ -216,8 +221,11 @@ func (a *App) AccessLogDropped() uint64 { return a.accessLog.Dropped() }
 // yet and the configuration sets initial_admin.
 func (a *App) bootstrapAdmin(cfg *config.Config) error {
 	ia := cfg.Admin.InitialAdmin
-	if ia.Username == "" || !a.Store.Writable() {
+	if !a.Store.Writable() {
 		return nil
+	}
+	if ia.Username == "" {
+		return a.generateAdmin()
 	}
 	if len(a.Store.Data().Admins) > 0 {
 		if ia.FromEnv {
@@ -284,12 +292,12 @@ func (a *App) build(cfg *config.Config, prev *Runtime) (_ *Runtime, err error) {
 	if cfg.Access.UsersFile != "" {
 		f, err := os.Open(cfg.Access.UsersFile) //nolint:gosec // the path is set by the operator in the configuration
 		if err != nil {
-			return nil, fmt.Errorf("access.users_file：%w", err)
+			return nil, i18n.Errorf("access.users_file: %w", err)
 		}
 		users, err := access.ParseHtpasswd(f)
 		_ = f.Close()
 		if err != nil {
-			return nil, fmt.Errorf("access.users_file：%w", err)
+			return nil, i18n.Errorf("access.users_file: %w", err)
 		}
 		for i := range users {
 			rt.Users[users[i].Name] = &users[i]
@@ -472,7 +480,7 @@ func (a *App) Rebuild() error {
 }
 
 // ErrNoConfigFile means there is no configuration file to reload.
-var ErrNoConfigFile = errors.New("没有配置文件，只在用默认值")
+var ErrNoConfigFile = i18n.Errorf("there is no configuration file; only the defaults are in use")
 
 // ReloadConfig rereads the configuration file and replaces the Runtime. When the configuration has errors
 // it keeps the previous settings and returns the error. The console overrides are layered on again, and
@@ -484,30 +492,30 @@ func (a *App) ReloadConfig() error {
 	st := &ReloadStatus{Time: time.Now()}
 	defer a.reload.Store(st)
 	if a.opt.ConfigPath == "" {
-		st.Err = ErrNoConfigFile.Error()
+		st.Err, st.Cause = ErrNoConfigFile.Error(), ErrNoConfigFile
 		return ErrNoConfigFile
 	}
 	raw, err := os.ReadFile(a.opt.ConfigPath)
 	if err != nil {
-		st.Err = err.Error()
+		st.Err, st.Cause = err.Error(), err
 		return err
 	}
 	res, err := config.Parse(raw)
 	if err != nil {
-		st.Err = err.Error()
+		st.Err, st.Cause = err.Error(), err
 		a.log.Error("configuration is invalid; keeping the previous settings", "err", err)
 		return err
 	}
 	prev := a.rt.Load()
 	rt, eff, err := a.assemble(raw, res, prev)
 	if err != nil {
-		st.Err = err.Error()
+		st.Err, st.Cause = err.Error(), err
 		a.log.Error("new configuration cannot be applied; keeping the previous settings", "err", err)
 		return err
 	}
 	st.Restart = restartNeeded(prev.Config, eff.Config)
 	for _, w := range eff.Warnings {
-		a.log.Warn(w)
+		a.log.Warn(w.String())
 	}
 	if len(st.Restart) > 0 {
 		a.log.Warn("these changes take effect only after a restart", "fields", strings.Join(st.Restart, ", "))
@@ -755,4 +763,40 @@ func (a *App) registerMetrics() {
 	m.Register("relay_accesslog_dropped_total", "Access log entries dropped because the queue was full", "counter", func() []metrics.Sample {
 		return []metrics.Sample{{Value: float64(a.accessLog.Dropped())}}
 	})
+}
+
+// hasMessage reports whether list has a message that reads the same as m.
+func hasMessage(list []i18n.Message, m i18n.Message) bool {
+	return slices.ContainsFunc(list, func(x i18n.Message) bool { return x.String() == m.String() })
+}
+
+// generateAdmin creates the first administrator with a random password and logs the password once
+// (Options.GenerateAdmin). The password must be changed at the first sign-in.
+func (a *App) generateAdmin() error {
+	if !a.opt.GenerateAdmin || len(a.Store.Data().Admins) > 0 {
+		return nil
+	}
+	name := os.Getenv("RELAY_ADMIN_USERNAME")
+	if !config.ValidAccountName(name) {
+		name = "admin"
+	}
+	pw := rand.Text()
+	h, err := bcrypt.GenerateFromPassword([]byte(pw), 12)
+	if err != nil {
+		return err
+	}
+	if err := a.Store.Update(func(d *store.Data) error {
+		if len(d.Admins) > 0 {
+			return nil
+		}
+		d.Admins = append(d.Admins, store.Admin{Name: name, Hash: string(h), Role: "admin", MustChange: true, Created: time.Now().UTC()})
+		return nil
+	}); err != nil {
+		return err
+	}
+	a.log.Warn("no administrator yet, so one was created with this generated password, shown only this once; "+
+		"sign in with it and choose your own, or set one with: registry-mirrors-relay admin password",
+		"username", name, "password", pw)
+	_ = a.Store.Audit(store.AuditEntry{Actor: "system", Action: "admin.bootstrap", Target: name, Detail: "generated"})
+	return nil
 }

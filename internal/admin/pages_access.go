@@ -24,12 +24,12 @@ func limitsFrom(c *ctx) (rate *float64, streams *int, err error) {
 	r, s := 0.0, 0
 	if v := strings.TrimSpace(c.form.Get("manifest_rate")); v != "" {
 		if r, err = strconv.ParseFloat(v, 64); err != nil {
-			return nil, nil, &ops.Error{Status: http.StatusBadRequest, Key: "limit.manifest_rate"}
+			return nil, nil, ops.NewError(http.StatusBadRequest, "limit.manifest_rate")
 		}
 	}
 	if v := strings.TrimSpace(c.form.Get("blob_streams")); v != "" {
 		if s, err = strconv.Atoi(v); err != nil {
-			return nil, nil, &ops.Error{Status: http.StatusBadRequest, Key: "limit.blob_streams"}
+			return nil, nil, ops.NewError(http.StatusBadRequest, "limit.blob_streams")
 		}
 	}
 	return &r, &s, nil

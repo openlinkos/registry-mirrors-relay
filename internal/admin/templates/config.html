@@ -8,7 +8,7 @@
   {{if $d.Overrides}}<div class="ol-table-wrap"><table class="ol-table">
     <thead><tr><th>{{.T "config.key"}}</th><th>{{.T "config.state"}}</th><th>{{.T "config.updated"}}</th><th></th></tr></thead>
     <tbody>{{range $d.Overrides}}<tr>
-      <td class="ol-mono">{{.Key}}<details class="ol-details"><summary>{{$v.T "config.value"}}</summary><div class="ol-code ol-code-wrap"><pre><code>{{.Value}}</code></pre></div></details>{{with .Error}}<p class="ol-hint ol-tone-danger admin-wrap">{{.}}</p>{{end}}</td>
+      <td class="ol-mono">{{.Key}}<details class="ol-details"><summary>{{$v.T "config.value"}}</summary><div class="ol-code ol-code-wrap"><pre><code>{{.Value}}</code></pre></div></details>{{with .Cause}}<p class="ol-hint ol-tone-danger admin-wrap">{{$v.Err .}}</p>{{end}}</td>
       <td>{{template "ovState" (dict "S" .State "V" $v)}}</td>
       <td class="ol-nowrap">{{time .Updated}}{{with .UpdatedBy}}<div class="ol-cell-sub">{{.}}</div>{{end}}</td>
       <td>{{if $v.CanWrite}}{{template "resetButton" (dict "V" $v "Key" .Key)}}{{end}}</td>

@@ -22,6 +22,8 @@ type Listener struct {
 	Name    string
 	Addr    string
 	Handler http.Handler
+	// Listener is used instead of listening on Addr when set (the local admin socket). Run closes it.
+	Listener net.Listener
 }
 
 // Server manages the pull entrance and the other listeners.
@@ -43,7 +45,7 @@ type Server struct {
 func New(cfg *config.Config, log *slog.Logger, handler http.Handler, extras ...Listener) *Server {
 	s := &Server{cfg: cfg, log: log, handler: handler}
 	for _, l := range extras {
-		if l.Addr != "" {
+		if l.Addr != "" || l.Listener != nil {
 			s.extras = append(s.extras, l)
 		}
 	}
@@ -112,6 +114,7 @@ func (s *Server) Run(ctx context.Context) error {
 		name, addr string
 		h          http.Handler
 		tls        bool
+		ln         net.Listener
 	}
 	var plans []plan
 	for _, addr := range s.Addrs() {
@@ -125,14 +128,22 @@ func (s *Server) Run(ctx context.Context) error {
 		plans = append(plans, p)
 	}
 	for _, l := range s.extras {
-		plans = append(plans, plan{name: l.Name, addr: l.Addr, h: l.Handler})
+		plans = append(plans, plan{name: l.Name, addr: l.Addr, h: l.Handler, ln: l.Listener})
 	}
-	for _, pl := range plans {
+	for i, pl := range plans {
 		addr := pl.addr
-		ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
+		ln, err := pl.ln, error(nil)
+		if ln == nil {
+			ln, err = (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
+		}
 		if err != nil {
 			for _, l := range listeners {
 				_ = l.Close()
+			}
+			for _, later := range plans[i+1:] {
+				if later.ln != nil {
+					_ = later.ln.Close()
+				}
 			}
 			return fmt.Errorf("listen on %s: %w", addr, err)
 		}

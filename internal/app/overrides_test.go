@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http/httptest"
 	"os"
@@ -128,7 +129,7 @@ func TestSetOverrideRejectedChangesNothing(t *testing.T) {
 	}
 	// New warnings
 	w, err := a.SetOverride("upstreams/cr.example.com", ptr("registry: registry.example.com"), "admin:alice")
-	if err != nil || !strings.Contains(strings.Join(w, "\n"), "token_realm_hosts") {
+	if err != nil || !strings.Contains(fmt.Sprint(w), "token_realm_hosts") {
 		t.Fatalf("should return the warnings this change brings: %v %v", w, err)
 	}
 }

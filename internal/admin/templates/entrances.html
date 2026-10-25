@@ -1,7 +1,7 @@
 {{define "content"}}{{$v := .}}{{$d := .Data}}
 {{template "header" (dict "Title" (.T "config.entrancesTitle") "Desc" (.T "config.entrancesDescription"))}}
 {{template "notices" .}}
-{{with $d.Override}}<div class="ol-notices">{{if or (eq .State "active") (eq .State "drift")}}{{template "alert" (dict "Tone" "info" "Text" ($v.T "config.entrancesOverridden"))}}{{else}}{{template "alert" (dict "Tone" "warning" "Text" ($v.T "config.entrancesNotApplied" "error" (or .Error "admin.config_edit: false")))}}{{end}}</div>{{end}}
+{{with $d.Override}}<div class="ol-notices">{{if or (eq .State "active") (eq .State "drift")}}{{template "alert" (dict "Tone" "info" "Text" ($v.T "config.entrancesOverridden"))}}{{else}}{{template "alert" (dict "Tone" "warning" "Text" ($v.T "config.entrancesNotApplied" "error" (or ($v.Err .Cause) "admin.config_edit: false")))}}{{end}}</div>{{end}}
 
 <section class="ol-section">
   {{if $d.Editable}}<form method="post" action="/admin/config/entrances/save" class="ol-stack">

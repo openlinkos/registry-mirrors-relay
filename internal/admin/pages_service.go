@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 )
 
 // ---- Upstreams
@@ -103,7 +104,7 @@ func (h *Handler) usagePage(c *ctx) error {
 // snippets generates the configuration that points each kind of client at a single-domain entrance.
 // containerd adds ?ns=<upstream> to its requests, Podman's mirror location is written as <domain>/<upstream>
 // (a path prefix), and Docker's registry-mirrors only applies to Docker Hub (the root path).
-func snippets(lang string, names []string, cfg *config.Config, scheme, host string) []snippetView {
+func snippets(lang i18n.Lang, names []string, cfg *config.Config, scheme, host string) []snippetView {
 	base := scheme + "://" + host
 	var out []snippetView
 

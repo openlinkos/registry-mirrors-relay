@@ -8,6 +8,7 @@ import (
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/app"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 	"github.com/openlinkos/registry-mirrors-relay/internal/store"
 )
 
@@ -19,6 +20,7 @@ type OverrideView struct {
 	Value     string    `json:"value"` // the YAML of this section, only the fields that differ from the configuration file
 	State     string    `json:"state"` // active | drift | suspended | ignored
 	Error     string    `json:"error,omitempty"`
+	Cause     error     `json:"-"` // Error itself, for showing it in the reader's language
 	Updated   time.Time `json:"updated"`
 	UpdatedBy string    `json:"updated_by,omitempty"`
 }
@@ -27,7 +29,7 @@ type OverrideView struct {
 func (o *Ops) Overrides() []OverrideView {
 	out := []OverrideView{}
 	for _, s := range o.app.Runtime().Overrides {
-		out = append(out, OverrideView{Key: s.Key, Value: s.Value, State: s.State, Error: s.Error, Updated: s.Updated, UpdatedBy: s.UpdatedBy})
+		out = append(out, OverrideView{Key: s.Key, Value: s.Value, State: s.State, Error: s.Error, Cause: s.Cause, Updated: s.Updated, UpdatedBy: s.UpdatedBy})
 	}
 	return out
 }
@@ -41,7 +43,7 @@ func (o *Ops) ConfigEditable() bool {
 // SetConfig saves one console override and applies it immediately. value is the YAML (or JSON) of
 // this section; only the fields that differ from the configuration file are stored. It returns the new
 // warnings this change brings.
-func (o *Ops) SetConfig(who Actor, key, value string) ([]string, error) {
+func (o *Ops) SetConfig(who Actor, key, value string) ([]i18n.Message, error) {
 	warnings, err := o.app.SetOverride(key, &value, who.String())
 	if err != nil {
 		return nil, configError(err)
@@ -53,7 +55,7 @@ func (o *Ops) SetConfig(who Actor, key, value string) ([]string, error) {
 // ResetConfig removes one console override and goes back to the value in the configuration file.
 func (o *Ops) ResetConfig(who Actor, key string) error {
 	if _, ok := o.app.Store.Data().ConfigOverrides[key]; !ok {
-		return &Error{Status: http.StatusNotFound, Key: "config.not_found", Arg: key}
+		return NewError(http.StatusNotFound, "config.not_found", key)
 	}
 	if _, err := o.app.SetOverride(key, nil, who.String()); err != nil {
 		return configError(err)
@@ -70,7 +72,9 @@ func configError(err error) error {
 	case errors.Is(err, app.ErrConfigEditOff):
 		return conflict("config.edit_off")
 	case errors.As(err, &oe):
-		return &Error{Status: http.StatusUnprocessableEntity, Key: "config.invalid", Detail: oe.Error()}
+		e := NewError(http.StatusUnprocessableEntity, "config.invalid")
+		e.Cause = oe.Err
+		return e
 	}
 	return err
 }
@@ -85,7 +89,7 @@ func (o *Ops) ConfigText(view string) ([]byte, error) {
 	case "file":
 		return rt.FileConfig.Print()
 	}
-	return nil, &Error{Status: http.StatusBadRequest, Key: "config.view"}
+	return nil, NewError(http.StatusBadRequest, "config.view")
 }
 
 // ExportConfig exports the active console overrides in configuration file form, for copying back into
@@ -108,17 +112,17 @@ func (o *Ops) ExportConfig(format string) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		head := "# 在后台对配置的修改（只有改过的部分），合进配置文件后可以在后台重置\n"
+		head := "# Console overrides (only the changed parts). Once merged into the configuration file, reset them in the console.\n"
 		if len(b) == 0 {
-			head = "# 没有生效中的后台修改\n"
+			head = "# No console overrides are in effect.\n"
 		}
 		return append([]byte(head), b...), nil
 	case "merged":
 		b, err := config.ExportMerged(o.app.ConfigFile(), ovs)
 		if err != nil {
-			return nil, fmt.Errorf("导出：%w", err)
+			return nil, fmt.Errorf("export: %w", err)
 		}
 		return b, nil
 	}
-	return nil, &Error{Status: http.StatusBadRequest, Key: "config.format"}
+	return nil, NewError(http.StatusBadRequest, "config.format")
 }

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 )
 
 func mustParse(t *testing.T, y string) *Result {
@@ -45,7 +47,7 @@ func TestDefaults(t *testing.T) {
 	if c.Admin.Store.Path != filepath.Join("/var/lib/registry-mirrors-relay", "state.db") {
 		t.Fatalf("wrong operational database path: %s", c.Admin.Store.Path)
 	}
-	if !strings.Contains(strings.Join(res.Warnings, "\n"), "trusted_proxies 为空") {
+	if !strings.Contains(warnText(res.Warnings), "trusted_proxies is empty") {
 		t.Fatalf("want a warning that trusted_proxies is empty: %v", res.Warnings)
 	}
 }
@@ -159,7 +161,7 @@ upstreams:
 	if strings.Contains(string(out), "dckr_pat_secret") || !strings.Contains(string(out), "HUB_PAT") {
 		t.Fatalf("the printed configuration must not contain the plain text, only the source:\n%s", out)
 	}
-	if !strings.Contains(strings.Join(res.Warnings, "\n"), "配了账号") {
+	if !strings.Contains(warnText(res.Warnings), "has credentials") {
 		t.Fatalf("want a warning about the configured account: %v", res.Warnings)
 	}
 }
@@ -181,7 +183,7 @@ func TestSecretFromFileAndMissing(t *testing.T) {
 
 func TestTrustedProxies(t *testing.T) {
 	msg := parseErr(t, "client_ip:\n  trusted_proxies: [0.0.0.0/0]\n")
-	if !strings.Contains(msg, "伪造") {
+	if !strings.Contains(msg, "forged") {
 		t.Fatalf("trusting every address should be an error: %s", msg)
 	}
 	ps, err := ParsePrefixes([]string{"private_ranges", "203.0.113.7", "2001:db8::/32"})
@@ -289,13 +291,13 @@ func TestInitialAdminFromEnvFile(t *testing.T) {
 	// the password file has been deleted: only a warning, and startup goes ahead
 	t.Setenv("RELAY_ADMIN_PASSWORD_FILE", filepath.Join(t.TempDir(), "gone"))
 	res = mustParse(t, "")
-	if res.Config.Admin.InitialAdmin.Username != "" || !strings.Contains(strings.Join(res.Warnings, "\n"), "读不到") {
+	if res.Config.Admin.InitialAdmin.Username != "" || !strings.Contains(warnText(res.Warnings), "cannot be read") {
 		t.Fatalf("a missing password file should be ignored with a warning: %+v %v", res.Config.Admin.InitialAdmin, res.Warnings)
 	}
 	t.Setenv("RELAY_ADMIN_PASSWORD_FILE", "")
 	// an inline password gives a warning; a password equal to the user name is refused
 	res = mustParse(t, "admin: {initial_admin: {username: root, password: {value: inline-password-1}}}\n")
-	if !strings.Contains(strings.Join(res.Warnings, "\n"), "直接写在配置里") {
+	if !strings.Contains(warnText(res.Warnings), "written in the configuration") {
 		t.Fatalf("want a warning about the inline password: %v", res.Warnings)
 	}
 	parseErr(t, "admin: {initial_admin: {username: administrator1, password: {value: Administrator1}}}\n")
@@ -307,12 +309,12 @@ func TestRemovedKeys(t *testing.T) {
 		"entrances[].listen": "entrances:\n  - listen: \":5001\"\n    upstream: docker.io\n",
 	} {
 		_, err := Parse([]byte(y))
-		if err == nil || !strings.Contains(err.Error(), "v0.2.0") || !strings.Contains(err.Error(), "第 ") {
+		if err == nil || !strings.Contains(err.Error(), "v0.2.0") || !strings.Contains(err.Error(), "line ") {
 			t.Errorf("%s: want an error that explains what to write instead: %v", name, err)
 		}
 	}
 	res := mustParse(t, "listen:\n  http: \":8080\"\n  metrics: \"\"\n")
-	if !strings.Contains(strings.Join(res.Warnings, "\n"), "listen.metrics 已经去掉") {
+	if !strings.Contains(warnText(res.Warnings), "listen.metrics was removed") {
 		t.Fatalf("an empty listen.metrics should only give a warning: %v", res.Warnings)
 	}
 }
@@ -333,14 +335,22 @@ func TestManagementSettings(t *testing.T) {
 	}
 	mustParse(t, "client_ip: {trusted_proxies: [10.0.0.0/8]}\nadmin: {public_url: \"https://a.example.com\", proxied_allow: [198.51.100.0/24]}")
 	for y, want := range map[string]string{
-		"admin: {allow: [], public: false}":         "关掉了",
-		"admin: {allow: []}":                        "指标和 pprof 谁也打不开",
-		"listen: {http: \":8080\"}":                 "明文",
+		"admin: {allow: [], public: false}":         "closed to everyone",
+		"admin: {allow: []}":                        "nobody can reach metrics",
+		"listen: {http: \":8080\"}":                 "clear text",
 		"metrics: {pprof: true}":                    "metrics.enabled",
-		"admin: {allow: [\"0.0.0.0/0\", \"::/0\"]}": "只靠口令",
+		"admin: {allow: [\"0.0.0.0/0\", \"::/0\"]}": "only passwords",
 	} {
-		if w := strings.Join(mustParse(t, y).Warnings, "\n"); !strings.Contains(w, want) {
+		if w := warnText(mustParse(t, y).Warnings); !strings.Contains(w, want) {
 			t.Errorf("%s: want a warning containing %q: %s", y, want, w)
 		}
 	}
+}
+
+func warnText(ws []i18n.Message) string {
+	var out []string
+	for _, w := range ws {
+		out = append(out, w.String())
+	}
+	return strings.Join(out, "\n")
 }

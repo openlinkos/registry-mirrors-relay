@@ -1,12 +1,13 @@
 package config
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 )
 
 // Duration is a duration written as "30s" or "6h".
@@ -25,7 +26,7 @@ func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 	}
 	v, err := parseDuration(s)
 	if err != nil {
-		return fmt.Errorf("第 %d 行：%w", n.Line, err)
+		return i18n.Errorf("line %d: %w", n.Line, err)
 	}
 	*d = Duration(v)
 	return nil
@@ -39,13 +40,13 @@ func parseDuration(s string) (time.Duration, error) {
 	if days, ok := strings.CutSuffix(s, "d"); ok {
 		n, err := strconv.ParseFloat(days, 64)
 		if err != nil || n < 0 {
-			return 0, fmt.Errorf("时长 %q 写法不对", s)
+			return 0, i18n.Errorf("invalid duration %q", s)
 		}
 		return time.Duration(n * float64(24*time.Hour)), nil
 	}
 	v, err := time.ParseDuration(s)
 	if err != nil || v < 0 {
-		return 0, fmt.Errorf("时长 %q 写法不对，应写成 30s、5m、6h、7d 这样", s)
+		return 0, i18n.Errorf("invalid duration %q: write it like 30s, 5m, 6h or 7d", s)
 	}
 	return v, nil
 }
@@ -69,7 +70,7 @@ func (s *Size) UnmarshalYAML(n *yaml.Node) error {
 	}
 	v, err := parseSize(raw)
 	if err != nil {
-		return fmt.Errorf("第 %d 行：%w", n.Line, err)
+		return i18n.Errorf("line %d: %w", n.Line, err)
 	}
 	*s = Size(v)
 	return nil
@@ -93,14 +94,14 @@ func parseSize(raw string) (int64, error) {
 		if num, ok := strings.CutSuffix(t, u.suffix); ok {
 			n, err := strconv.ParseInt(strings.TrimSpace(num), 10, 64)
 			if err != nil || n < 0 {
-				return 0, fmt.Errorf("大小 %q 写法不对", raw)
+				return 0, i18n.Errorf("invalid size %q", raw)
 			}
 			return n * u.mult, nil
 		}
 	}
 	n, err := strconv.ParseInt(t, 10, 64)
 	if err != nil || n < 0 {
-		return 0, fmt.Errorf("大小 %q 写法不对，应写成 64MiB、32KiB 这样", raw)
+		return 0, i18n.Errorf("invalid size %q: write it like 64MiB or 32KiB", raw)
 	}
 	return n, nil
 }

@@ -139,7 +139,7 @@ func TestAdminCommand(t *testing.T) {
 	if code, _, _ := runCmd(t, "long-enough-password\n", "admin", "create", "-config", cfg, "-name", "bad name"); code != 2 {
 		t.Fatalf("invalid name: %d", code)
 	}
-	if code, out, errs := runCmd(t, "long-enough-password\n", "admin", "create", "-config", cfg, "-name", "ops", "-role", "viewer"); code != 0 || !strings.Contains(out, "ops") {
+	if code, out, errs := runCmd(t, "long-enough-password\n", "admin", "create", "-config", cfg, "-name", "ops", "-role", "viewer"); code != 0 || out != "" || !strings.Contains(errs, "Created the administrator ops") {
 		t.Fatalf("create: %d %s %s", code, out, errs)
 	}
 	if code, _, errs := runCmd(t, "long-enough-password\n", "admin", "create", "-config", cfg, "-name", "ops"); code != 1 || !strings.Contains(errs, "already exists") {

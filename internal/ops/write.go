@@ -488,27 +488,13 @@ func activeAdmins(d *store.Data) int {
 // CreateAdmin creates a console administrator. The password is set by whoever creates the account, so
 // the new administrator must change it after the first login.
 func (o *Ops) CreateAdmin(who Actor, name, password, role string) error {
-	if !nameRe.MatchString(name) {
-		return bad("user.name")
-	}
-	if role != "admin" && role != "viewer" {
-		return bad("role.invalid")
-	}
-	if strings.EqualFold(password, name) {
-		return bad("password.username")
-	}
-	h, err := HashPassword(password)
+	h, err := checkNewAdmin(name, password, role)
 	if err != nil {
 		return err
 	}
+	// Passwords set from the command line need not be changed at the first sign-in
 	return o.change(who, "admin.create", name, role, func(d *store.Data) error {
-		for _, a := range d.Admins {
-			if a.Name == name {
-				return conflict("admin.exists")
-			}
-		}
-		d.Admins = append(d.Admins, store.Admin{Name: name, Hash: h, Role: role, MustChange: true, Created: time.Now().UTC()})
-		return nil
+		return addAdmin(d, store.Admin{Name: name, Hash: h, Role: role, MustChange: who.Kind != "cli", Created: time.Now().UTC()})
 	})
 }
 
@@ -556,7 +542,7 @@ func (o *Ops) UpdateAdmin(who Actor, name string, in AdminInput) error {
 				if self && bcrypt.CompareHashAndPassword([]byte(a.Hash), []byte(*in.Password)) == nil {
 					return bad("password.same")
 				}
-				a.Hash, a.MustChange = h, !self
+				a.Hash, a.MustChange = h, !self && who.Kind != "cli"
 			}
 			if in.Role != nil {
 				a.Role = *in.Role
@@ -627,11 +613,11 @@ func (o *Ops) SetSite(who Actor, in SiteInput) error {
 			continue
 		}
 		if !allowed[k] {
-			return &Error{Status: http.StatusBadRequest, Key: "site.link_key", Arg: k}
+			return NewError(http.StatusBadRequest, "site.link_key", k)
 		}
 		u, err := url.Parse(v)
 		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || len(v) > 500 {
-			return &Error{Status: http.StatusBadRequest, Key: "site.link", Arg: k}
+			return NewError(http.StatusBadRequest, "site.link", k)
 		}
 		links[k] = v
 	}
@@ -660,7 +646,7 @@ func (o *Ops) Reload(who Actor) (*app.ReloadStatus, error) {
 	}
 	o.Audit(who, "config.reload", "", detail)
 	if err != nil {
-		return o.app.LastReload(), &Error{Status: http.StatusUnprocessableEntity, Key: "reload.failed", Detail: err.Error()}
+		return o.app.LastReload(), &Error{Status: http.StatusUnprocessableEntity, Key: "reload.failed", Msg: messages["reload.failed"], Cause: err}
 	}
 	return o.app.LastReload(), nil
 }

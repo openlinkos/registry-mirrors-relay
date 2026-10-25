@@ -12,6 +12,7 @@ package admin
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"html/template"
 	"log/slog"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/openlinkos/registry-mirrors-relay/internal/app"
 	"github.com/openlinkos/registry-mirrors-relay/internal/clientip"
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 	"github.com/openlinkos/registry-mirrors-relay/internal/ops"
 	"github.com/openlinkos/registry-mirrors-relay/internal/version"
 )
@@ -46,12 +48,13 @@ const SVGCSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
 // host, SameSite=Lax); otherwise (local machine, SSH forwarding) it uses a plain name, only under /admin,
 // SameSite=Strict.
 const (
-	secureCookie = "__Host-relay-admin"
-	plainCookie  = "relay-admin"
-	langCookie   = "relay-admin-lang"
-	themeCookie  = "relay-admin-theme"
-	maxBody      = 64 << 10
-	busyRetry    = 5 * time.Second
+	secureCookie  = "__Host-relay-admin"
+	plainCookie   = "relay-admin"
+	langCookie    = "relay-lang" // shared with the usage page, so Path=/ and readable by scripts
+	oldLangCookie = "relay-admin-lang"
+	themeCookie   = "relay-admin-theme"
+	maxBody       = 64 << 10
+	busyRetry     = 5 * time.Second
 )
 
 // Options are mainly for tests.
@@ -139,7 +142,7 @@ type ctx struct {
 	w      http.ResponseWriter
 	r      *http.Request
 	now    time.Time
-	lang   string // zh | en
+	lang   i18n.Lang
 	theme  string // auto | light | dark
 	sess   *session
 	secure bool // this request came from the https public_url (decides the session cookie's form)
@@ -170,12 +173,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for k, v := range securityHeaders(h.publicHTTPS()) {
 		hd.Set(k, v)
 	}
+	lang := Lang(r)
 	if !ops.HostAllowed(h.app.Runtime().Config.Admin, r) {
-		http.Error(w, "With admin.public: false the admin UI answers only at admin.public_url, localhost or an IP address. 管理后台只接受 admin.public_url、localhost 或 IP 访问。", http.StatusMisdirectedRequest)
+		http.Error(w, i18n.T(lang, "With admin.public: false, the console answers only at admin.public_url, localhost or an IP address."),
+			http.StatusMisdirectedRequest)
 		return
 	}
-	c := &ctx{h: h, w: w, r: r, now: h.now(), ip: h.clientAddr(r)}
-	c.lang = negotiateLang(cookie(r, langCookie), r.Header.Get("Accept-Language"))
+	c := &ctx{h: h, w: w, r: r, now: h.now(), ip: h.clientAddr(r), lang: lang}
 	switch t := cookie(r, themeCookie); t {
 	case "light", "dark":
 		c.theme = t
@@ -239,8 +243,13 @@ func cookie(r *http.Request, name string) string {
 
 func (h *Handler) dispatch(c *ctx) error {
 	r := c.r
-	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		c.w.Header().Set("Allow", "GET, POST")
+	// HEAD is answered like GET (net/http drops the body), for monitoring probes
+	method := r.Method
+	if method == http.MethodHead {
+		method = http.MethodGet
+	}
+	if method != http.MethodGet && method != http.MethodPost {
+		c.w.Header().Set("Allow", "GET, HEAD, POST")
 		return fail(http.StatusMethodNotAllowed, "error.method")
 	}
 	p := r.URL.Path
@@ -248,8 +257,8 @@ func (h *Handler) dispatch(c *ctx) error {
 		return c.redirect("/admin/")
 	}
 	if file, ok := strings.CutPrefix(p, "/admin/assets/"); ok {
-		if r.Method != http.MethodGet {
-			c.w.Header().Set("Allow", "GET")
+		if method != http.MethodGet {
+			c.w.Header().Set("Allow", "GET, HEAD")
 			return fail(http.StatusMethodNotAllowed, "error.method")
 		}
 		return h.serveAsset(c, file)
@@ -259,7 +268,7 @@ func (h *Handler) dispatch(c *ctx) error {
 	for i := range h.routes {
 		if h.routes[i].path == p {
 			allowed = append(allowed, h.routes[i].method)
-			if h.routes[i].method == r.Method {
+			if h.routes[i].method == method {
 				rt = &h.routes[i]
 			}
 		}
@@ -272,7 +281,7 @@ func (h *Handler) dispatch(c *ctx) error {
 		return fail(http.StatusNotFound, "error.notFound")
 	}
 
-	if r.Method == http.MethodPost {
+	if method == http.MethodPost {
 		if err := h.checkOrigin(c); err != nil {
 			return err
 		}
@@ -288,12 +297,12 @@ func (h *Handler) dispatch(c *ctx) error {
 		return rt.run(c)
 	}
 	if c.sess == nil {
-		if r.Method == http.MethodGet {
+		if method == http.MethodGet {
 			return c.redirect("/admin/login?next=" + url.QueryEscape(c.here()))
 		}
 		return c.redirect("/admin/login")
 	}
-	if r.Method == http.MethodPost {
+	if method == http.MethodPost {
 		tok := r.Header.Get("X-CSRF-Token")
 		if tok == "" {
 			tok = c.form.Get("_csrf")
@@ -312,7 +321,7 @@ func (h *Handler) dispatch(c *ctx) error {
 	}
 	if rt.auth == authFresh && !c.sess.fresh(c.now) {
 		back := c.here()
-		if r.Method == http.MethodPost {
+		if method == http.MethodPost {
 			back = rt.back
 		}
 		return c.redirect("/admin/reauth?next=" + url.QueryEscape(safeNext(back)))
@@ -594,18 +603,18 @@ func (h *Handler) Session(r *http.Request) (ops.Actor, string, bool, error) {
 		return ops.Actor{}, "", false, nil
 	}
 	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
-		return ops.Actor{}, "", false, errors.New("不接受跨站请求")
+		return ops.Actor{}, "", false, i18n.Coded("auth.cross_site", "Cross-site requests are not accepted.")
 	}
 	if s.MustChange {
-		return ops.Actor{}, "", false, errors.New("请先在管理后台修改口令")
+		return ops.Actor{}, "", false, i18n.Coded("auth.must_change", "Change your password in the console first.")
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		c := &ctx{h: h, r: r}
 		if err := h.checkOrigin(c); err != nil {
-			return ops.Actor{}, "", false, errors.New("请求来源不对")
+			return ops.Actor{}, "", false, i18n.Coded("auth.origin", "The request comes from the wrong origin.")
 		}
 		if !safeEqual(r.Header.Get("X-CSRF-Token"), s.CSRF) {
-			return ops.Actor{}, "", false, errors.New("缺少或错误的 X-CSRF-Token")
+			return ops.Actor{}, "", false, i18n.Coded("auth.csrf", "X-CSRF-Token is missing or wrong.")
 		}
 	}
 	return ops.Actor{Kind: "admin", Name: s.Admin, IP: h.clientAddr(r)}, s.Role, true, nil
@@ -650,7 +659,7 @@ func (h *Handler) renderError(c *ctx, err error) {
 	case errors.As(err, &he):
 		status, msg = he.status, tr(c.lang, he.key)
 	case errors.As(err, &oe):
-		status, msg = oe.Status, oe.Message(c.lang)
+		status, msg = oe.Status, i18n.Localize(err, c.lang)
 	default:
 		h.log.Error("admin console error", "path", c.r.URL.Path, "err", err)
 		msg = tr(c.lang, "error.internalText")
@@ -663,7 +672,7 @@ func (h *Handler) renderError(c *ctx, err error) {
 	}
 }
 
-func errorTitle(lang string, status int) string {
+func errorTitle(lang i18n.Lang, status int) string {
 	switch {
 	case status == http.StatusNotFound:
 		return tr(lang, "error.notFoundTitle")
@@ -684,9 +693,15 @@ func (c *ctx) retry(err error, page func(*ctx) error) error {
 	if !errors.As(err, &oe) {
 		return err
 	}
-	c.status, c.formErr = oe.Status, oe.Message(c.lang)
+	c.status, c.formErr = oe.Status, i18n.Localize(err, c.lang)
 	return page(c)
 }
 
 // Version is the version shown in the page footer.
 func Version() string { return version.Version }
+
+// Lang is the interface language of a request: the language cookie (shared with the usage page), then
+// Accept-Language, then English. The JSON API uses it too.
+func Lang(r *http.Request) i18n.Lang {
+	return i18n.Negotiate(cmp.Or(cookie(r, langCookie), cookie(r, oldLangCookie)), r.Header.Get("Accept-Language"))
+}

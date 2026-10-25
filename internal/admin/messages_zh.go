@@ -28,11 +28,10 @@ var messagesZH = map[string]string{ //nolint:gosec // 界面文案，里面的�
 	"nav.account":        "我的账号",
 	"nav.backToOverview": "返回概览",
 
-	"prefs.switchLanguage": "English",
-	"prefs.theme":          "配色",
-	"theme.auto":           "跟随系统",
-	"theme.light":          "浅色",
-	"theme.dark":           "深色",
+	"prefs.theme": "配色",
+	"theme.auto":  "跟随系统",
+	"theme.light": "浅色",
+	"theme.dark":  "深色",
 
 	"search.quick": "搜索请求：IP、镜像、账号…",
 	"search.label": "搜索最近的请求",

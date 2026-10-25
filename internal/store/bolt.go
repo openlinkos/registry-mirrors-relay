@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	bolt "go.etcd.io/bbolt"
+	berrors "go.etcd.io/bbolt/errors"
 )
 
 var (
@@ -39,8 +41,11 @@ func OpenBolt(path string) (*Bolt, error) {
 		return nil, err
 	}
 	db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: 2 * time.Second})
+	if errors.Is(err, berrors.ErrTimeout) {
+		return nil, fmt.Errorf("open %s: %w", path, ErrLocked)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("open operational database %s: %w (is another process using it?)", path, err)
+		return nil, fmt.Errorf("open operational database %s: %w", path, err)
 	}
 	s := &Bolt{db: db, now: time.Now, maxAudit: maxAudit}
 	var d Data

@@ -2,7 +2,7 @@
 {{template "header" (dict "Title" .Title "Desc" (.T "config.upstreamDescription"))}}
 {{template "notices" .}}
 {{if $d.Credentials}}<div class="ol-notices">{{template "alert" (dict "Tone" "info" "Text" (.T "config.upstreamCredentials"))}}</div>{{end}}
-{{with $d.Override}}{{if not (or (eq .State "active") (eq .State "drift"))}}<div class="ol-notices">{{template "alert" (dict "Tone" "warning" "Text" ($v.T "config.upstreamNotApplied" "error" (or .Error "admin.config_edit: false")))}}</div>{{end}}{{end}}
+{{with $d.Override}}{{if not (or (eq .State "active") (eq .State "drift"))}}<div class="ol-notices">{{template "alert" (dict "Tone" "warning" "Text" ($v.T "config.upstreamNotApplied" "error" (or ($v.Err .Cause) "admin.config_edit: false")))}}</div>{{end}}{{end}}
 
 <section class="ol-section">
   {{if not $d.New}}<p class="ol-section-description">{{.T (print "config.source." $d.Source)}}{{with $d.Override}} {{template "ovState" (dict "S" .State "V" $v)}}{{end}}</p>{{end}}

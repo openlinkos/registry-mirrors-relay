@@ -1,10 +1,10 @@
 package config
 
 import (
-	"errors"
-	"fmt"
 	"os"
 	"strings"
+
+	"github.com/openlinkos/registry-mirrors-relay/internal/i18n"
 )
 
 // Secret is a secret read from an environment variable or a file (suited to k8s Secrets and systemd
@@ -54,23 +54,23 @@ func (s *Secret) resolve() error {
 		}
 	}
 	if n > 1 {
-		return errors.New("env、file、value 只能写一个")
+		return i18n.Errorf("set only one of env, file and value")
 	}
 	switch {
 	case s.Env != "":
 		v, ok := os.LookupEnv(s.Env)
 		if !ok || v == "" {
-			return fmt.Errorf("环境变量 %s 没有设置", s.Env)
+			return i18n.Errorf("environment variable %s is not set", s.Env)
 		}
 		s.resolved = v
 	case s.File != "":
 		b, err := os.ReadFile(s.File)
 		if err != nil {
-			return fmt.Errorf("读取 %s：%w", s.File, err)
+			return i18n.Errorf("read %s: %w", s.File, err)
 		}
 		v := strings.TrimRight(string(b), "\r\n")
 		if v == "" {
-			return fmt.Errorf("%s 是空文件", s.File)
+			return i18n.Errorf("%s is empty", s.File)
 		}
 		s.resolved = v
 	case s.Value != "":
