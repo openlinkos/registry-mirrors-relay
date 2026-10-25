@@ -127,7 +127,7 @@ server = "https://registry-1.docker.io"
   capabilities = ["pull", "resolve"]
 ```
 
-其他上游（`ghcr.io`、`registry.k8s.io`、`quay.io`、`gcr.io`）各写一个，`server` 是上游自己的地址，`host` 都指向 relay：containerd 会在请求里带上 `?ns=<上游>`，relay 据此选上游。relay 出问题时 containerd 会退回 `server` 直连。管理后台的「入口与用法」页能按你的域名生成全部配置，包括 k3s 的 `registries.yaml`。
+其他上游（`ghcr.io`、`registry.k8s.io`、`quay.io`、`gcr.io`）各写一个，`server` 是上游自己的地址，`host` 都指向 relay：containerd 会在请求里带上 `?ns=<上游>`，relay 据此选上游。relay 出问题时 containerd 会退回 `server` 直连。管理后台每个入口的页面能按它的域名生成全部配置，包括 k3s 的 `registries.yaml`。
 
 ## Helm
 

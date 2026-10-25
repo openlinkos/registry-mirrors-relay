@@ -2,27 +2,27 @@
 
 [简体中文](zh/admin.md) | English
 
-The admin console and the [admin API](api.md) share the pull port (8080) by default, under `/admin/`; with `listen.admin` they move to that separate port. They are open to every address by default and protected by sign-in, see [Opening the console](#opening-the-console). Every page is rendered on the server, nothing is loaded from third parties, and everything works without JavaScript. The styles come from the OpenLinkOS design system [`@openlinkos/ui`](https://www.npmjs.com/package/@openlinkos/ui), embedded in the binary. Chinese and English, light and dark: the language follows the browser (English when it asks for neither) until you choose one, which is kept in the `relay-lang` cookie that the usage page shares.
+The admin console and the [admin API](api.md) share the pull port (8080) by default, under `/admin/`; with `listen.admin` they move to that separate port. They are open to every address by default and protected by sign-in, see [Opening the console](#opening-the-console). Every page is rendered on the server, nothing is loaded from third parties, and everything works without JavaScript. The styles come from the OpenLinkOS design system [`@openlinkos/ui`](https://www.npmjs.com/package/@openlinkos/ui), embedded in the binary. Chinese and English, light and dark: the language follows the browser (English when it asks for neither) until you choose one in the account menu at the foot of the sidebar (or at the foot of the sign-in page), which is kept in the `relay-lang` cookie that the usage page shares. The colour scheme (Auto, Light, Dark) is switched above it. With `site.brand`, the console takes the brand's colours and marks, like the usage page.
 
 ## Pages
 
 | Group | Page | Content |
 | --- | --- | --- |
 | | Overview | Requests per minute, traffic, layers downloading, 5xx share, manifest cache hits, rate-limited requests, Docker Hub quota left (refreshed every 15 seconds); 24-hour charts of traffic and requests; service status: overall state, each upstream's hourly availability over 24 hours and this site's request success rate (as on the usage page); top images and clients |
-| Service | Upstreams | Results of the `/v2/` probe every minute (not counted as pulls) and availability over 24 hours, circuit breaker, pull quota; redirect hosts outside the allowlist, with one-click allow; check now |
-| | Entrances and usage | The entrances in effect, each one's usage page setting (public, sign-in, off) and whether the usage page shows the service status; Docker `daemon.json`, containerd `hosts.toml`, k3s `registries.yaml` and Podman `registries.conf` generated for your host name |
-| Access | Client accounts | Accounts for entrances that require sign-in: create (with an optional random password), disable, reset the password, per-account limits, last use |
+| Service | Upstreams | Results of the `/v2/` probe every minute (not counted as pulls) and availability over 24 hours, circuit breaker, pull quota; redirect hosts outside the allowlist, with one-click allow; check now. Each upstream's settings (address, aliases, redirect allowlists, token services) have their own page, where new upstreams are added too |
+| | Entrances | The domains clients pull from. Each entrance has its own page: the client configuration for it (Docker `daemon.json`, containerd `hosts.toml`, k3s `registries.yaml`, Podman `registries.conf` and `docker login` when it requires sign-in, generated for its host name) and its settings (domains, fixed or default upstream, sign-in, usage page) |
+| | Usage page | What a browser sees at an entrance's domain: site name, operator, brand and footer links (overriding `site` in the configuration), whether it shows the service status, and which entrances show it |
+| Access | Client accounts | Accounts for entrances that require sign-in: find, filter, and act on each from its row; create one on its own page, which then shows how to sign in (and a generated password, once); each account's page shows its latest requests, its limits and note, a password reset, and deleting it |
 | | Rules | "Can this image be pulled?"; temporary bans; IP lists; image rules with refusal counts |
-| | Rate limits | Limits in effect, current concurrency, recently limited clients (one-click ban), accounts with their own limits |
+| | Rate limits | Current concurrency; the limits, changed in place; recently limited clients (one-click ban); accounts with their own limits |
 | Records | Requests | The last 5,000 requests, filtered by client, image, upstream and status |
 | | Abuse | The same client downloading the same layer in full again and again; top clients by traffic (1 hour, 24 hours, 7 days) |
 | | Audit log | Every change through the console or the API, and every sign-in and sign-out |
-| System | Settings | Site name, operator and links on the usage page (overriding `site` in the configuration); log settings |
-| | Configuration | Change entrances, upstreams, rate limits, the manifest cache, upstream connections and the usage page's service status; the changes made here, their state and reset; export in configuration file form; the configuration in effect |
+| System | Configuration | Every change made in the console, with its state, where it is edited, and reset; the manifest cache and upstream connections; export in configuration file form; the configuration in effect (secrets hidden) |
 | | Admins and tokens | Administrators (admin and viewer roles), API tokens, current sessions |
-| | System | Version, memory, goroutines, configuration file, last reload, operational data; the management entrance (shared or separate port, allowed addresses, metrics, pprof); reload the configuration; the configuration in effect (secrets hidden) |
+| | System | Version, uptime, memory, goroutines, operational data; configuration file and last reload, with a reload button; the management entrance (shared or separate port, allowed addresses, metrics, pprof); log settings |
 
-Accounts, rules and tokens from the configuration file are shown read-only; entrances, upstreams, rate limits and more can be changed on the Configuration page, see [Changing the configuration in the console](#changing-the-configuration-in-the-console). With read-only operational data (`admin.store.driver: none`), every change goes into the configuration file.
+Your own password and preferences are under My account, in the account menu. Accounts, rules and tokens from the configuration file are shown read-only. Each setting is changed on the page that uses it, see [Changing the configuration in the console](#changing-the-configuration-in-the-console). With read-only operational data (`admin.store.driver: none`), every change goes into the configuration file.
 
 ## The first administrator
 
@@ -91,16 +91,18 @@ Sign-in protects it (see [Security](#security) below), so put it behind HTTPS wh
 
 ## Changing the configuration in the console
 
-The Configuration page (and [`/config/overrides`](api.md#endpoints) in the API) can change these settings:
+These settings can be changed in the console, each on the page that uses it (and through [`/config/overrides`](api.md#endpoints) in the API):
 
-| Setting | What can change | How it combines |
-| --- | --- | --- |
-| Entrances (`entrances`) | Name, domains, fixed or default upstream, sign-in, usage page | The whole list is replaced |
-| Upstreams (`upstreams.<name>`) | `registry`, `aliases`, `library_prefix`, redirect allowlists, `token_realm_hosts`, `unlisted_redirect`, disabled; new upstreams can be added | Field by field |
-| Rate limits (`limits`) | Every field except `tracked_clients` | Field by field |
-| Manifest cache (`cache`) | Every field | Field by field |
-| Upstream connections (`proxy`) | Idle connections, redirects, passing `Ratelimit-*` headers, CDN caching, the circuit breaker, the probe interval | Field by field |
-| Usage page (`site.show_status`) | Whether the service status is shown | |
+| Setting | Page | What can change | How it combines |
+| --- | --- | --- | --- |
+| Entrances (`entrances`) | Entrances, one page per entrance | Name, domains, fixed or default upstream, sign-in, usage page | The whole list is replaced |
+| Upstreams (`upstreams.<name>`) | Upstreams, one page per upstream | `registry`, `aliases`, `library_prefix`, redirect allowlists, `token_realm_hosts`, `unlisted_redirect`, disabled; new upstreams can be added | Field by field |
+| Rate limits (`limits`) | Rate limits | Every field except `tracked_clients` | Field by field |
+| Manifest cache (`cache`) | Configuration | Every field | Field by field |
+| Upstream connections (`proxy`) | Configuration | Idle connections, redirects, passing `Ratelimit-*` headers, CDN caching, the circuit breaker, the probe interval | Field by field |
+| Usage page (`site.show_status`) | Usage page | Whether the service status is shown | |
+
+The usage page's name, operator, brand and links are saved in the console as a whole and replace `site` in the configuration file until reset there. The Configuration page lists every change made in the console, with a link to where it is edited.
 
 Changes are stored in the operational database and never written back to the configuration file. When the configuration is parsed they are merged into the file first and then validated like the file, so defaults, validation rules and errors are the same as when you edit the file. Only fields that differ from the file are stored; setting a field back to the file's value, or pressing Reset, removes the change. Changes take effect at once, without a reload. With ACME, a certificate for a new entrance domain is requested the first time it is visited (at most 100 domains).
 
@@ -111,7 +113,7 @@ Changes are stored in the operational database and never written back to the con
 - A save must pass validation together with the other changes in effect and the file; otherwise nothing is saved and nothing changes. An upstream used by an entrance cannot be removed, for example.
 - On a restart or a reload of the file, changes that conflict with it are suspended (with a warning on the overview and an audit entry) and the rest apply; they resume once the conflict is resolved.
 - If the file later changes a field that was changed here, the state shows "File changed since" and the console's value still applies; reset or save again once you have checked.
-- `registry-mirrors-relay check` checks only the file, without the console's changes. The configuration in effect is on the Configuration and System pages and at `GET /config`.
+- `registry-mirrors-relay check` checks only the file, without the console's changes. The configuration in effect is on the Configuration page and at `GET /config`.
 
 **GitOps**: when the configuration lives in Git, changes made here are not visible there. Treat them as temporary: export them on the Configuration page (only the changes, or the whole merged file), commit them to Git, and reset them here once deployed. To make Git the only source, set `admin.config_edit: false`: changes made here then never apply and can only be reset. The metric `relay_config_overrides{key,state}` lists every change, for alerting.
 

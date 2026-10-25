@@ -127,7 +127,7 @@ server = "https://registry-1.docker.io"
   capabilities = ["pull", "resolve"]
 ```
 
-Write one for each other upstream (`ghcr.io`, `registry.k8s.io`, `quay.io`, `gcr.io`) with the upstream's own address as `server` and the relay as `host`: containerd adds `?ns=<upstream>` to its requests and the relay picks the upstream from it. If the relay fails, containerd falls back to `server`. The console's Entrances and usage page generates all of this for your host name, including k3s `registries.yaml`.
+Write one for each other upstream (`ghcr.io`, `registry.k8s.io`, `quay.io`, `gcr.io`) with the upstream's own address as `server` and the relay as `host`: containerd adds `?ns=<upstream>` to its requests and the relay picks the upstream from it. If the relay fails, containerd falls back to `server`. Each entrance's page in the console generates all of this for its host name, including k3s `registries.yaml`.
 
 ## Helm
 

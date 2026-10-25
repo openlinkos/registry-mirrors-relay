@@ -30,7 +30,7 @@ docker logs relay 2>&1 | grep 'generated password'   # the first administrator's
 
 - Pull: `docker pull server:8080/library/alpine` (over plain HTTP, add `server:8080` to Docker's `insecure-registries`; for real use put it behind HTTPS, see [Deployment](docs/deploy.md)).
 - Admin console: `http://server:8080/admin/`, user `admin` and the password from the log; you choose your own at the first sign-in. To set a password at any time: `docker exec -it relay registry-mirrors-relay admin password`. The console shares the pull port and is open to every address, protected by sign-in; put it behind HTTPS when it faces the internet, or set `admin.public: false` to keep it to the local machine and the LAN.
-- The Entrances and usage page generates Docker, containerd, k3s and Podman configuration for your host name.
+- Each entrance's page in the console generates Docker, containerd, k3s and Podman configuration for its host name.
 
 Docker Compose (behind a CDN, direct with ACME, or behind Caddy), Kubernetes (kustomize or the Helm chart, with several replicas, a writable single replica, Gateway API, monitoring and network policy) and systemd are covered in **[docs/deploy.md](docs/deploy.md)**.
 

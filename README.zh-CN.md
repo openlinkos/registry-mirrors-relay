@@ -30,7 +30,7 @@ docker logs relay 2>&1 | grep 'generated password'   # 第一个管理员的口�
 
 - 拉取：`docker pull 服务器:8080/library/alpine`（明文时要把 `服务器:8080` 加进 Docker 的 `insecure-registries`；正式使用请放在 HTTPS 之后，见[部署](docs/zh/deploy.md)）。
 - 管理后台：`http://服务器:8080/admin/`，用户名 `admin`，口令在日志里，第一次登录后改成自己的。随时可以重设口令：`docker exec -it relay registry-mirrors-relay admin password`。后台和拉取共用端口，对所有地址开放、靠登录保护，对外请放在 HTTPS 之后；只想让本机和内网打开就写 `admin.public: false`。
-- 「入口与用法」页会按你的域名生成 Docker、containerd、k3s、Podman 的配置。
+- 后台每个入口的页面会按它的域名生成 Docker、containerd、k3s、Podman 的配置。
 
 Docker Compose（CDN 之后、直接用 ACME、Caddy 在前三种）、Kubernetes（kustomize 或 Helm chart，带多副本、单副本可写、Gateway API、监控、网络策略）和 systemd 的写法见 **[docs/zh/deploy.md](docs/zh/deploy.md)**。
 
