@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# CI 和发布用的工具，版本、校验和都固定在这里（GitHub 的 ubuntu 运行器，linux/amd64）：
+# Tools for CI and releases; versions and checksums are all pinned here (GitHub's ubuntu runner, linux/amd64):
 #   kubectl  kubectl
 #   kind     kind
-#   helm     Helm 4（装成 helm4）和 Helm 3（装成 helm：chart-testing 只支持 Helm 3）
-#   chart    kubeconform、yq、helm-docs（go install，由 Go 的校验和数据库保证内容）
-# 用法：scripts/ci-tools.sh kubectl helm chart
+#   helm     Helm 4 (installed as helm4) and Helm 3 (installed as helm: chart-testing only supports Helm 3)
+#   chart    kubeconform, yq, helm-docs (go install; Go's checksum database guarantees the contents)
+# Usage: scripts/ci-tools.sh kubectl helm chart
 set -euo pipefail
 
-get() { # 地址 sha256 存成的文件名
+get() { # URL sha256 file-name-to-save-as
   curl -fsSLo "$3" "$1"
   echo "$2  $3" | sha256sum -c - >/dev/null
 }
@@ -40,7 +40,7 @@ for t in "$@"; do
       go install github.com/norwoodj/helm-docs/cmd/helm-docs@v1.14.2
       ;;
     *)
-      echo "不认识的工具：$t" >&2
+      echo "Unknown tool: $t" >&2
       exit 2
       ;;
   esac

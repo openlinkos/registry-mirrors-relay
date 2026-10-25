@@ -1,4 +1,5 @@
-# 单独的管理端口：NodePort 也不用 externalTrafficPolicy: Local；ServiceMonitor 抓 admin 口，NetworkPolicy 放行 metricsFrom
+# separate management port: NodePort does not need externalTrafficPolicy: Local either; the ServiceMonitor
+# scrapes the admin port and NetworkPolicy lets metricsFrom in
 admin:
   separatePort: true
 service:

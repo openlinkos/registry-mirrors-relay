@@ -1,4 +1,4 @@
-# 打包 chart 时排除的文件
+# files excluded when packaging the chart
 .DS_Store
 *.tgz
 ci/

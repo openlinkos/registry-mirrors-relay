@@ -20,7 +20,8 @@ spec:
         - name: {{ include "rmr.fullname" . }}
           port: {{ .Values.service.port }}
       {{- with .Values.httpRoute.timeouts }}
-      # 镜像层可能要下载很久：0s 表示不设总超时（relay 自己按空闲时间判断连接是否断了）
+      # a layer can take a long time to download: 0s means no overall timeout (the relay itself decides from idle
+      # time whether a connection has gone)
       timeouts:
         {{- toYaml . | nindent 8 }}
       {{- end }}

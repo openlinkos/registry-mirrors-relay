@@ -1,11 +1,12 @@
-# 经 Gateway 对外。全部选项见仓库的 config.example.yaml。
+# Exposed through a Gateway. For every option see config.example.yaml in the repository.
 data_dir: /var/lib/registry-mirrors-relay
 
 listen:
-  http: ":8080"      # 经 Gateway 来的管理请求是 404，后台只通过 kubectl port-forward 访问
+  http: ":8080"      # the console opens through the Gateway too, protected by sign-in; metrics through the Gateway get 404
 
 client_ip:
-  # 信任集群内（Gateway 的 Pod）发来的 X-Forwarded-For。集群的 Pod 网段不在私有地址段里时，改成实际的网段。
+  # Trust X-Forwarded-For sent from inside the cluster (the Gateway's Pods). If the cluster's Pod network is not in
+  # the private address ranges, change this to the actual range.
   trusted_proxies: [private_ranges]
 
 admin:

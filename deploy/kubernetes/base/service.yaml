@@ -1,8 +1,9 @@
-# 拉取入口，也是管理后台和指标的入口。管理后台：
+# The pull entrance, and also the entrance for the admin console and metrics. Admin console:
 #   kubectl port-forward svc/registry-mirrors-relay 8080:80
-# 然后打开 http://127.0.0.1:8080/admin/。经 Ingress、Gateway 来的管理请求是 404。
-# 改成 NodePort 或 LoadBalancer 时请写 externalTrafficPolicy: Local，否则外部客户端的来源会变成节点地址，
-# 看起来像内网直连。
+# then open http://127.0.0.1:8080/admin/, or open /admin/ through the Ingress or Gateway. Metrics requests through
+# an Ingress or Gateway get 404.
+# When changing it to NodePort or LoadBalancer, set externalTrafficPolicy: Local; otherwise the source of outside
+# clients becomes the node address, which looks like a direct connection from the internal network.
 apiVersion: v1
 kind: Service
 metadata:

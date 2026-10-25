@@ -96,8 +96,7 @@ func TestRunAndGracefulShutdown(t *testing.T) {
 	}
 }
 
-// startTLS starts a Server with the given configuration and returns the HTTPS entrance's address and a stop
-// function.
+// startTLS starts a Server with the given configuration and returns it and a stop function.
 func startTLS(t *testing.T, yaml string) (*Server, func()) {
 	t.Helper()
 	res, err := config.Parse([]byte(yaml))

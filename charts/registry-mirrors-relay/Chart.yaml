@@ -2,10 +2,10 @@ apiVersion: v2
 name: registry-mirrors-relay
 description: A container registry mirror that relays and never stores image data, with a built-in admin console.
 type: application
-# 发布时由 release.yml 改成标签的版本（chart 和应用同一个版本号）
-version: 0.4.0
-appVersion: "v0.4.0"
-# preStop 的 sleep 动作需要 1.30+
+# release.yml changes this to the tag's version when releasing (the chart and the application share one version number)
+version: 0.5.0
+appVersion: "v0.5.0"
+# the preStop sleep action needs 1.30+
 kubeVersion: ">=1.30.0-0"
 home: https://github.com/openlinkos/registry-mirrors-relay
 sources:
@@ -21,5 +21,6 @@ maintainers:
   - name: OpenLinkOS
     url: https://github.com/openlinkos
 annotations:
-  # 发布时写入 appVersion 对应镜像的 digest；没有设置 image.tag、image.digest 时按它拉取
+  # the digest of the appVersion image is written here when releasing; the image is pulled by it when neither
+  # image.tag nor image.digest is set
   openlinkos.org/image-digest: ""

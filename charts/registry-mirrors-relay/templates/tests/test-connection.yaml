@@ -1,6 +1,6 @@
 {{- if .Values.tests.enabled }}
-# helm test：用 relay 镜像自己的 probe 命令探测 Service 的 /readyz，不用另拉镜像。
-# 不带 selector 用的标签，免得被 NetworkPolicy 当成 relay 的 Pod 限制出站。
+# helm test: probes the Service's /readyz with the relay image's own probe command, so no other image is pulled.
+# It does not carry the selector labels, so that NetworkPolicy does not treat it as a relay Pod and restrict its egress.
 apiVersion: v1
 kind: Pod
 metadata:
@@ -24,7 +24,7 @@ spec:
     - name: probe
       image: {{ include "rmr.image" . }}
       imagePullPolicy: {{ .Values.image.pullPolicy }}
-      # 新建的 Service 要等 kube-proxy 同步后才连得通，所以最多重试 60 秒
+      # a new Service is reachable only after kube-proxy has synced, so retry for up to 60 seconds
       args: [probe, -url, "http://{{ include "rmr.fullname" . }}:{{ .Values.service.port }}/readyz", -timeout, 5s, -wait, 60s]
       securityContext:
         {{- toYaml .Values.securityContext | nindent 8 }}

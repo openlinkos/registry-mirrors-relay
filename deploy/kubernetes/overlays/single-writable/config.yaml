@@ -1,8 +1,9 @@
-# 单副本，运营数据存在 PVC 里的 state.db，后台可写。全部选项见仓库的 config.example.yaml。
+# A single replica; the operational data is in state.db on a PVC, and the console is writable. For every option
+# see config.example.yaml in the repository.
 data_dir: /var/lib/registry-mirrors-relay
 
 listen:
-  http: ":8080"      # 管理后台也在这个端口，只通过 kubectl port-forward 访问
+  http: ":8080"      # the admin console is on this port too, reached only through kubectl port-forward
 
 admin:
   store: {driver: bolt}

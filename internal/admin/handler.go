@@ -329,17 +329,17 @@ func (h *Handler) dispatch(c *ctx) error {
 	return rt.run(c)
 }
 
+// mustChangeAllowed are the pages a session that must change its password first can open.
+var mustChangeAllowed = map[string]bool{
+	"/admin/account": true, "/admin/account/password": true, "/admin/logout": true, "/admin/reauth": true,
+}
+
 // checkOrigin is the cross-site check for every POST: it rejects Sec-Fetch-Site: cross-site and requires
 // Origin to be one of the allowed origins: the origin of public_url, or <scheme>://<Host> of this request
 // (only localhost and IP addresses when admin.public: false).
 // The https scheme is accepted too: requests through a TLS-terminating reverse proxy (CDN, Ingress) arrive
 // here in plain text while the browser shows an https page; an https page on the same Host must belong to
 // this site. When Origin is https the session cookie is Secure.
-// mustChangeAllowed are the pages a session that must change its password first can open.
-var mustChangeAllowed = map[string]bool{
-	"/admin/account": true, "/admin/account/password": true, "/admin/logout": true, "/admin/reauth": true,
-}
-
 func (h *Handler) checkOrigin(c *ctx) error {
 	r := c.r
 	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {

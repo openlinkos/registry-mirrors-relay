@@ -31,8 +31,8 @@ type Listen struct {
 	HTTP  string `yaml:"http"`  // pull entrance (plain HTTP), for use behind a CDN or reverse proxy
 	HTTPS string `yaml:"https"` // pull entrance (TLS), used when tls.mode is not off
 	// Admin is a separate management port: the admin console, the admin API and metrics are served here and no
-	// longer on the pull port. When empty (the default) they share the port with the pull entrance and answer only
-	// direct connections from the local machine or the private network, see admin.allow.
+	// longer on the pull port. When empty (the default) they share the port with the pull entrance. Who may reach
+	// them is set by admin.public and admin.allow.
 	Admin string `yaml:"admin"`
 }
 
@@ -204,7 +204,8 @@ type Proxy struct {
 	BreakerFailures int      `yaml:"breaker_failures"`
 	BreakerCooldown Duration `yaml:"breaker_cooldown"`
 	// HealthInterval is the interval at which each upstream's /v2/ is probed (not counted as pulls); the results
-	// are only shown in the admin console and metrics and do not affect readyz. 0 turns probing off.
+	// are shown in the admin console, the metrics and the usage page's /status.json, and do not affect readyz. 0
+	// turns probing off.
 	HealthInterval Duration `yaml:"health_interval"`
 }
 

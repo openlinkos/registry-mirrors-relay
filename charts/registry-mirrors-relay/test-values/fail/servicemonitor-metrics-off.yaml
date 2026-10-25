@@ -1,4 +1,4 @@
-# 开了 ServiceMonitor 又在 config 里关掉指标
+# ServiceMonitor turned on while config turns metrics off
 metrics:
   serviceMonitor:
     enabled: true

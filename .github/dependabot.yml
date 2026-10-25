@@ -1,4 +1,5 @@
-# 依赖更新：Go 模块、GitHub Actions（按提交 SHA 固定）、镜像的基础镜像（按 digest 固定）、Compose 示例里的镜像。
+# Dependency updates: Go modules, GitHub Actions (pinned by commit SHA), the image's base image (pinned by
+# digest) and the images in the Compose examples.
 version: 2
 updates:
   - package-ecosystem: gomod
@@ -24,5 +25,5 @@ updates:
     schedule:
       interval: weekly
     ignore:
-      # 我们自己的镜像跟着发布更新
+      # our own image is updated along with releases
       - dependency-name: ghcr.io/openlinkos/registry-mirrors-relay

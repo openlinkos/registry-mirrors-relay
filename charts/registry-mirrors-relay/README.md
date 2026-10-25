@@ -13,7 +13,7 @@ openssl rand -base64 18 > admin-password
 kubectl -n registry-mirror create secret generic registry-mirrors-relay-admin --from-file=password=admin-password
 
 helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay \
-  --namespace registry-mirror --version 0.4.0 \
+  --namespace registry-mirror --version 0.5.0 \
   --set admin.existingSecret=registry-mirrors-relay-admin
 ```
 
@@ -51,17 +51,17 @@ ingress:
       secretName: mirror-example-com-tls
 ```
 
-To let containerd on the nodes pull through the relay, expose it on an address the nodes can reach (`service.type: NodePort` or `LoadBalancer`, or the Ingress host) and write `/etc/containerd/certs.d/<upstream>/hosts.toml`; see the [deployment guide](https://github.com/openlinkos/registry-mirrors-relay/blob/main/docs/deploy.en.md).
+To let containerd on the nodes pull through the relay, expose it on an address the nodes can reach (`service.type: NodePort` or `LoadBalancer`, or the Ingress host) and write `/etc/containerd/certs.d/<upstream>/hosts.toml`; see the [deployment guide](https://github.com/openlinkos/registry-mirrors-relay/blob/main/docs/deploy.md).
 
 ## Verify
 
 The chart is signed keylessly by this repository's release workflow and has a build provenance attestation:
 
 ```bash
-cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.4.0 \
+cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.5.0 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.4.0 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.5.0 -R openlinkos/registry-mirrors-relay
 ```
 
 ## Requirements
@@ -72,7 +72,7 @@ Kubernetes: `>=1.30.0-0`
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| admin.existingSecret | string | `""` | Name of an existing Secret holding the first administrator's password. There is no default password. With `writable` the administrator must change it at the first sign-in, after which the Secret can be deleted. With `readonly` this is the only administrator and the password stays valid. |
+| admin.existingSecret | string | `""` | Name of an existing Secret holding the first administrator's password. There is no default password: without a Secret, `writable` creates `admin` with a generated password written to the log once, and `registry-mirrors-relay admin password` (through `kubectl exec`) sets one at any time. With `writable` the administrator from the Secret must change it at the first sign-in, after which the Secret can be deleted. With `readonly` this is the only administrator and the password stays valid. |
 | admin.existingSecretKey | string | `"password"` | Key in that Secret. |
 | admin.separatePort | bool | `false` | Serve the admin console, the admin API and metrics on their own port (`containerPorts.admin`) instead of the pull port. The console is open to every address unless `config.admin.public` is false; metrics answer only direct connections from loopback and private addresses (`config.admin.allow`). Turn this on when metrics are on and the pull Service is a NodePort or LoadBalancer without `externalTrafficPolicy: Local`. |
 | admin.service.port | int | `9090` | With `separatePort`: port of the `<fullname>-admin` ClusterIP Service, for `kubectl port-forward`. |

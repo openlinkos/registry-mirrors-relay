@@ -1,4 +1,4 @@
-# 默认的三合一：后台、API、指标都在拉取端口上，ServiceMonitor 抓 http 口
+# the default three-in-one: console, API and metrics all on the pull port; the ServiceMonitor scrapes the http port
 metrics:
   serviceMonitor:
     enabled: true

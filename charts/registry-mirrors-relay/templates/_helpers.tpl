@@ -1,4 +1,4 @@
-{{/* 名字：和常见 chart 一样，release 名里已经含有 chart 名时不再重复 */}}
+{{/* Names: as in most charts, the chart name is not repeated when the release name already contains it */}}
 {{- define "rmr.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
@@ -16,7 +16,7 @@
 {{- end -}}
 {{- end -}}
 
-{{/* selector 只用 name 和 instance：Deployment、StatefulSet 的 selector 建好后不能改 */}}
+{{/* The selector uses only name and instance: a Deployment's or StatefulSet's selector cannot change once created */}}
 {{- define "rmr.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "rmr.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
@@ -32,7 +32,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 {{- end -}}
 
-{{/* readonly 模式的副本数：没写时是 2 */}}
+{{/* Replica count in readonly mode: 2 when not set */}}
 {{- define "rmr.replicas" -}}
 {{- .Values.replicaCount | default 2 | int -}}
 {{- end -}}
@@ -46,8 +46,9 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
 {{/*
-镜像：image.digest 优先；其次 image.tag；都没写时用 appVersion，并带上发布时记在 Chart 注解里的 digest。
-用户自己写了 tag 时不附加 digest，免得改了 tag 却悄悄拉旧镜像。
+Image: image.digest comes first, then image.tag; when neither is set, appVersion is used together with the digest
+recorded in the Chart annotation at release time.
+When the user sets a tag, no digest is added, so that changing the tag never silently pulls the old image.
 */}}
 {{- define "rmr.image" -}}
 {{- $repo := .Values.image.repository -}}
@@ -65,7 +66,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 {{- end -}}
 
-{{/* 拒绝 chart 管不了或不安全的写法 */}}
+{{/* Reject settings the chart cannot manage or that are unsafe */}}
 {{- define "rmr.validate" -}}
 {{- $c := .Values.config | default dict -}}
 {{- if not (has .Values.mode (list "readonly" "writable")) -}}
@@ -124,19 +125,19 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- if and .Values.metrics.serviceMonitor.enabled (hasKey $m "enabled") (not (index $m "enabled")) -}}
 {{- fail "metrics.serviceMonitor.enabled needs metrics; config.metrics.enabled is false" -}}
 {{- end -}}
-{{- /* 按地址放行的部分（指标、pprof，以及 admin.public: false 时的后台）靠 TCP 对端判断，NodePort、LoadBalancer 的 SNAT 会让外部客户端看起来像集群地址 */ -}}
+{{- /* What is allowed by address (metrics, pprof, and the console with admin.public: false) is decided by the TCP peer, and the SNAT of NodePort and LoadBalancer makes outside clients look like cluster addresses */ -}}
 {{- $gated := or .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled (eq (index $m "enabled" | toString) "true") (eq (index $admin "public" | toString) "false") -}}
 {{- if and $gated (not .Values.admin.separatePort) (has .Values.service.type (list "NodePort" "LoadBalancer")) (ne .Values.service.externalTrafficPolicy "Local") -}}
 {{- fail (printf "service.type %s without externalTrafficPolicy: Local makes outside clients look like cluster addresses, and metrics (or the console with config.admin.public: false) share the pull port; set service.externalTrafficPolicy: Local or admin.separatePort: true" .Values.service.type) -}}
 {{- end -}}
 {{- end -}}
 
-{{/* 管理入口（后台、API、指标）在哪个端口：共用拉取端口时是 http */}}
+{{/* Which port the management entrance (console, API, metrics) is on: http when it shares the pull port */}}
 {{- define "rmr.mgmtPort" -}}
 {{- ternary "admin" "http" .Values.admin.separatePort -}}
 {{- end -}}
 
-{{/* 生效的配置：用户的 config，加上 chart 定下的监听、数据目录、运营数据的存放方式和指标开关 */}}
+{{/* The effective configuration: the user's config plus what the chart decides (listen, data directory, how operational data is stored, and the metrics switch) */}}
 {{- define "rmr.configMap" -}}
 {{- include "rmr.validate" . -}}
 {{- $cfg := deepCopy (.Values.config | default dict) -}}
@@ -156,9 +157,9 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
 {{/*
-滚动更新用的 checksum。restartOnly 只看要重启才能生效的字段，和 internal/app/app.go 的 restartNeeded 对应
-（listen、tls、data_dir、admin.store、log.access、log.level、timeouts 的 read_header/idle/shutdown_grace、
-proxy.buffer_size、limits.tracked_clients）。
+The checksum that triggers rolling updates. restartOnly looks only at the fields that need a restart to take
+effect, matching restartNeeded in internal/app/app.go (listen, data_dir, admin.store, log.access, log.level,
+read_header/idle/shutdown_grace in timeouts, proxy.buffer_size, limits.tracked_clients).
 */}}
 {{- define "rmr.configChecksum" -}}
 {{- $cfg := fromYaml (include "rmr.configMap" .) -}}

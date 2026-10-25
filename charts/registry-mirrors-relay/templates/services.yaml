@@ -34,7 +34,8 @@ spec:
       {{- end }}
 {{- if .Values.admin.separatePort }}
 ---
-# 单独的管理端口（后台、API、指标）：只用于 kubectl port-forward 和集群里的 Prometheus，不要经 Ingress、LoadBalancer 暴露
+# Separate management port (console, API, metrics): only for kubectl port-forward and Prometheus in the cluster;
+# do not expose it through an Ingress or LoadBalancer
 apiVersion: v1
 kind: Service
 metadata:

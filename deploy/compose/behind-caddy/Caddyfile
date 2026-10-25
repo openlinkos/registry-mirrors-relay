@@ -1,7 +1,7 @@
-# Caddy 负责 HTTPS，把拉取请求和管理后台（/admin/）转给 relay。改成你的域名。
+# Caddy handles HTTPS and passes pull requests and the admin console (/admin/) to the relay. Change it to your domain.
 mirror.example.com {
 	reverse_proxy relay:8080 {
-		# 边收边转：镜像层可能有几个 GB，不要缓冲
+		# forward while receiving: a layer can be several GB, so do not buffer
 		flush_interval -1
 	}
 }

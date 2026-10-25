@@ -1,4 +1,4 @@
-# 0.2.0 去掉了单独的指标 Service
+# 0.2.0 removed the separate metrics Service
 metrics:
   service:
     enabled: true

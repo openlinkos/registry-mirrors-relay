@@ -1,4 +1,4 @@
-# 放在 CDN 或反向代理之后：它们负责 HTTPS，回源到这台机器的 8080。说明见 docs/deploy.md。
+# Behind a CDN or reverse proxy: it handles HTTPS and fetches from port 8080 of this machine. See docs/deploy.md.
 #
 #   openssl rand -base64 18 > admin-password && chmod 400 admin-password && sudo chown 65532 admin-password
 #   docker compose up -d
@@ -6,21 +6,22 @@ name: registry-mirrors-relay
 
 services:
   relay:
-    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.4.0
+    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.5.0
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     ports:
-      - "8080:8080"             # 拉取入口和管理后台（/admin/），CDN 或反向代理回源到这里
+      - "8080:8080"             # pull entrance and admin console (/admin/); the CDN or reverse proxy fetches from here
     volumes:
       - ./config.yaml:/etc/registry-mirrors-relay/config.yaml:ro
       - data:/var/lib/registry-mirrors-relay
-    # 第一个管理员：口令来自 secret 文件，第一次登录后必须改口令；之后可以删掉这两段和 admin-password
+    # first administrator: the password comes from the secret file and must be changed after the first sign-in;
+    # afterwards these two sections and admin-password can be removed
     environment:
       RELAY_ADMIN_PASSWORD_FILE: /run/secrets/admin_password
     secrets: [admin_password]
-    stop_grace_period: 40s      # 比 timeouts.shutdown_grace（30 秒）长一点，让进行中的下载有时间结束
+    stop_grace_period: 40s      # a little longer than timeouts.shutdown_grace (30 seconds), so downloads in progress have time to finish
     logging:
       driver: json-file
       options: {max-size: 50m, max-file: "5"}

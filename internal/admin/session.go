@@ -280,7 +280,7 @@ func (l *loginLimiter) fail(client string, now time.Time) int {
 
 // checkQueue runs password checks one at a time: bcrypt is deliberately slow, and running checks in
 // series both limits CPU use and makes the rate limit exact (a batch of concurrent guesses cannot all
-// pass the check before the first failure is recorded). At most maxWaiting wait in the queue; any more
+// pass the check before the first failure is recorded). At most max wait in the queue; any more
 // are rejected outright.
 type checkQueue struct {
 	run     sync.Mutex

@@ -4,7 +4,7 @@ run:
   timeout: 5m
 
 linters:
-  default: standard # errcheck、govet、ineffassign、staticcheck、unused
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
   enable:
     - bodyclose
     - copyloopvar
@@ -23,7 +23,7 @@ linters:
         - fmt.Fprintln
     gosec:
       excludes:
-        - G115 # 整数转换：这里的转换都有上下界，逐处标注反而降低可读性
+        - G115 # integer conversions: every conversion here is bounded, and annotating each one would only hurt readability
   exclusions:
     rules:
       - path: (_test\.go|internal/testutil/|tools/)

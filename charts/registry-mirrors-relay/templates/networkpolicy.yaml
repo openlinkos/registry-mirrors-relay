@@ -11,13 +11,14 @@ spec:
       {{- include "rmr.selectorLabels" . | nindent 6 }}
   policyTypes: [Ingress, Egress]
   ingress:
-    # 拉取入口：节点上的 containerd、集群里的 Pod、Ingress 或 Gateway 都会连
+    # pull entrance: containerd on the nodes, Pods in the cluster, the Ingress or Gateway all connect to it
     - ports:
         - port: {{ .Values.containerPorts.http }}
           protocol: TCP
     {{- if .Values.admin.separatePort }}
     {{- with .Values.networkPolicy.metricsFrom }}
-    # 单独的管理端口：只给 metricsFrom（例如 Prometheus）。kubectl port-forward 不经过 NetworkPolicy
+    # separate management port: only for metricsFrom (for example Prometheus). kubectl port-forward does not go
+    # through NetworkPolicy
     - from:
         {{- toYaml . | nindent 8 }}
       ports:
@@ -25,7 +26,8 @@ spec:
           protocol: TCP
     {{- end }}
     {{- end }}
-    # 共用端口时管理路径由 relay 自己把关（只接受不经代理的直连）：NetworkPolicy 不能按路径过滤
+    # on a shared port the relay guards the management paths itself (sign-in for the console, direct
+    # connections only for metrics): NetworkPolicy cannot filter by path
     {{- with .Values.networkPolicy.extraIngress }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -37,7 +39,8 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    # 上游 registry、令牌服务和对象存储：只用 HTTPS，只去公网（relay 自己也拒绝连接内网地址）
+    # upstream registries, token services and object storage: HTTPS only, internet only (the relay itself also
+    # refuses to connect to internal addresses)
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0

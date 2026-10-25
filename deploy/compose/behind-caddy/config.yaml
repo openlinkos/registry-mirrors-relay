@@ -1,11 +1,12 @@
-# Caddy 在前面负责 HTTPS。全部选项见仓库的 config.example.yaml。
+# Caddy in front handles HTTPS. For every option see config.example.yaml in the repository.
 data_dir: /var/lib/registry-mirrors-relay
 
 listen:
-  http: ":8080"   # 管理后台也在这个端口，经 Caddy 打开 https://mirror.example.com/admin/
+  http: ":8080"   # the admin console is on this port too; open https://mirror.example.com/admin/ through Caddy
 
 client_ip:
-  # relay 的 8080 只在 Compose 的内部网络里，只有 Caddy 连得到，所以信任私有地址段发来的 X-Forwarded-For
+  # the relay's 8080 is only on Compose's internal network and only Caddy can reach it, so X-Forwarded-For from
+  # private address ranges is trusted
   trusted_proxies: [private_ranges]
 
 site:

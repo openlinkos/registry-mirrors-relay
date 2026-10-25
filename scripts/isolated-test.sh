@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
-# 断网测试：客户端放进不能上外网的 Docker 网络（--internal），只能连到 relay。拉取成功就说明没有哪一步
-# 被引去直连上游（认证、重定向都由 relay 在服务端处理）。拉到的 digest 和直接从上游取的比对。
+# Offline test: the clients sit in a Docker network with no internet access (--internal) and can reach only
+# the relay. A successful pull shows that no step was diverted to a direct connection to the upstream
+# (the relay handles authentication and redirects on the server side). The pulled digests are compared with
+# the ones fetched directly from the upstream.
 #
-# 覆盖的客户端：经典存储和 containerd 存储的 Docker、skopeo、crane、ctr。
-# 覆盖的写法：每个上游一个域名的入口（*.relay.test，网络别名）；单域名入口的根路径（daemon.json 的 registry-mirrors）、
-# 路径前缀、ns（ctr + hosts.toml）。另外检查和拉取共用端口的管理后台、指标只接受不经代理的直连。
+# Clients covered: Docker with classic storage and with containerd storage, skopeo, crane, ctr.
+# Setups covered: entrances with one domain per upstream (*.relay.test, network aliases); on the single-domain
+# entrance, the root path (registry-mirrors in daemon.json), the path prefix and ns (ctr + hosts.toml). It also
+# checks the admin console (open to every address) and the metrics (direct connections only), which share the
+# pull port; with IMAGE, also the generated first password and the admin command against the running service.
 #
-# 用法：scripts/isolated-test.sh <relay 的 linux 二进制>
-#       IMAGE=<镜像> scripts/isolated-test.sh     # 测试发布的镜像本身：用镜像的入口、默认配置路径和 HEALTHCHECK
-# 需要 docker（能跑 --privileged 容器）和 jq。会拉几个测试镜像，测完删除所有容器、网络、卷和新拉的镜像。
-# 注意：会消耗这台机器出口 IP 的 Docker Hub 匿名额度。
+# Usage: scripts/isolated-test.sh <linux binary of the relay>
+#        IMAGE=<image> scripts/isolated-test.sh     # test the released image itself: uses the image's entrypoint, default configuration path and HEALTHCHECK
+# Requires docker (able to run --privileged containers) and jq. Pulls a few test images; afterwards removes all
+# the containers, networks, volumes and newly pulled images.
+# Note: this uses up the Docker Hub anonymous quota of this machine's egress IP.
 set -euo pipefail
 
 IMAGE="${IMAGE:-}"
@@ -26,15 +31,16 @@ DIND=docker:29-dind
 BASE=gcr.io/distroless/static-debian12:nonroot
 fail=0
 
-ok() { printf '  通过  %s\n' "$1"; }
-bad() { printf '  失败  %s\n' "$1"; fail=1; }
+ok() { printf '  pass  %s\n' "$1"; }
+bad() { printf '  FAIL  %s\n' "$1"; fail=1; }
 
 work="$(mktemp -d)"
 before="$work/images-before"
 docker images --format '{{.Repository}}:{{.Tag}}@{{.ID}}' | sort >"$before"
 
 cleanup() {
-  docker rm -fv "$RELAY" "$P-classic" "$P-ctrd" >/dev/null 2>&1 || true
+  docker rm -fv "$RELAY" "$RELAY-w" "$P-classic" "$P-ctrd" >/dev/null 2>&1 || true
+  docker volume rm "$P-data" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
   docker images --format '{{.Repository}}:{{.Tag}}@{{.ID}}' | sort | comm -13 "$before" - | cut -d@ -f1 |
     xargs -r docker rmi >/dev/null 2>&1 || true
@@ -46,7 +52,7 @@ trap cleanup EXIT
 for img in "$SK" "$CR" "$DIND"; do docker pull -q "$img" >/dev/null; done
 [ -z "$IMAGE" ] && docker pull -q "$BASE" >/dev/null
 
-echo "启动 relay（只读根文件系统、去掉全部能力、非 root）"
+echo "Starting the relay (read-only root file system, all capabilities dropped, non-root)"
 docker network create --internal "$NET" >/dev/null
 mkdir -p "$work/logs" && chmod 777 "$work/logs"
 if [ -n "$IMAGE" ]; then
@@ -69,7 +75,8 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 
-# 两个 Docker：经典存储、containerd 存储。都把单域名入口配成 registry-mirrors，所有入口都允许明文
+# Two Dockers: classic storage and containerd storage. Both use the single-domain entrance as registry-mirrors,
+# and every entrance is allowed over plain HTTP
 insecure="$(for h in "$RELAY" $HOSTS; do printf '"%s:5000",' "$h"; done)"
 mkdir -p "$work/classic" "$work/ctrd"
 printf '{"features":{"containerd-snapshotter":false},"registry-mirrors":["http://%s:5000"],"insecure-registries":[%s]}\n' "$RELAY" "${insecure%,}" >"$work/classic/daemon.json"
@@ -84,7 +91,7 @@ done
 direct() { echo "sha256:$(docker run --rm "$SK" inspect --raw "docker://$1" 2>/dev/null | sha256sum | cut -d' ' -f1)"; }
 dpull() { docker exec "$P-$1" docker pull "$2" 2>&1 | sed -n 's/^Digest: //p'; }
 
-echo "每个上游一个域名：两种 Docker、skopeo（完整下载）、crane"
+echo "One domain per upstream: both Dockers, skopeo (full download), crane"
 HOST_CASES=(
   "docker.relay.test library/hello-world:latest docker.io/library/hello-world:latest"
   "docker.relay.test library/alpine:3.22 docker.io/library/alpine:3.22"
@@ -100,7 +107,7 @@ for c in "${HOST_CASES[@]}"; do
   ref="$host:5000/$name"
   for d in classic ctrd; do
     got="$(dpull "$d" "$ref")"
-    [ "$got" = "$want" ] && ok "$d $ref" || bad "$d $ref：'$got'，上游 '$want'"
+    [ "$got" = "$want" ] && ok "$d $ref" || bad "$d $ref: '$got', upstream '$want'"
   done
   if docker run --rm --network "$NET" --tmpfs /out:size=2g "$SK" copy -q --src-tls-verify=false "docker://$ref" dir:/out/x >/dev/null 2>&1; then
     ok "skopeo $ref"
@@ -114,31 +121,31 @@ for c in "${HOST_CASES[@]}"; do
   fi
 done
 
-echo "单域名入口：路径前缀"
+echo "Single-domain entrance: path prefix"
 for up in docker.io/library/alpine:3.22 gcr.io/distroless/static:nonroot ghcr.io/containerd/busybox:1.36 registry.k8s.io/pause:3.10 quay.io/prometheus/busybox:latest; do
   want="$(direct "$up")"
   got="$(dpull classic "$RELAY:5000/$up")"
-  [ "$got" = "$want" ] && ok "前缀 $RELAY:5000/$up" || bad "前缀 $RELAY:5000/$up：'$got'，上游 '$want'"
+  [ "$got" = "$want" ] && ok "Prefix $RELAY:5000/$up" || bad "Prefix $RELAY:5000/$up: '$got', upstream '$want'"
 done
 
-echo "单域名入口：根路径（daemon.json 的 registry-mirrors）"
+echo "Single-domain entrance: root path (registry-mirrors in daemon.json)"
 want="$(direct docker.io/library/busybox:1.37)"
 for d in classic ctrd; do
   got="$(dpull "$d" busybox:1.37)"
-  [ "$got" = "$want" ] && ok "$d docker pull busybox:1.37" || bad "$d docker pull busybox:1.37：'$got'，上游 '$want'"
+  [ "$got" = "$want" ] && ok "$d docker pull busybox:1.37" || bad "$d docker pull busybox:1.37: '$got', upstream '$want'"
 done
 
-echo "单域名入口：containerd 的 ns（ctr + hosts.toml）"
+echo "Single-domain entrance: containerd ns (ctr + hosts.toml)"
 docker exec "$P-ctrd" sh -c "mkdir -p /etc/containerd/certs.d/ghcr.io && printf 'server = \"https://ghcr.io\"\n[host.\"http://$RELAY:5000\"]\n  capabilities = [\"pull\", \"resolve\"]\n' > /etc/containerd/certs.d/ghcr.io/hosts.toml"
 want="$(direct ghcr.io/containerd/busybox:1.36)"
 if docker exec "$P-ctrd" ctr --address /var/run/docker/containerd/containerd.sock -n relaytest images pull --local --hosts-dir /etc/containerd/certs.d ghcr.io/containerd/busybox:1.36 >/dev/null 2>&1; then
   got="$(docker exec "$P-ctrd" ctr --address /var/run/docker/containerd/containerd.sock -n relaytest images ls | awk '/ghcr.io\/containerd\/busybox:1.36/ {print $3}')"
-  [ "$got" = "$want" ] && ok "ctr ns=ghcr.io $got" || bad "ctr ns=ghcr.io：'$got'，上游 '$want'"
+  [ "$got" = "$want" ] && ok "ctr ns=ghcr.io $got" || bad "ctr ns=ghcr.io: '$got', upstream '$want'"
 else
-  bad "ctr 经 ns 拉取失败"
+  bad "ctr pull through ns failed"
 fi
 
-echo "访问日志"
+echo "Access log"
 sleep 2
 log="$work/logs/access.log"
 total="$(wc -l <"$log")"
@@ -146,38 +153,52 @@ redirects="$(jq -s '[.[] | select(.status >= 300 and .status < 400)] | length' "
 errors="$(jq -s '[.[] | select(.status >= 500)] | length' "$log")"
 ns="$(jq -s '[.[] | select(.request.uri | contains("ns=ghcr.io"))] | length' "$log")"
 hops="$(jq -r '[.redirect1, .redirect2, .redirect3] | map(select(. != null)) | join(" > ")' "$log" | grep -v '^$' | sed -E 's/[0-9a-f]{20,}/X/g' | sort | uniq -c | sort -rn)"
-[ "$redirects" = 0 ] && ok "$total 条请求，没有把重定向交给客户端" || bad "有 $redirects 个重定向交给了客户端"
-[ "$errors" = 0 ] && ok "没有 5xx" || bad "有 $errors 个 5xx"
-[ "$ns" -gt 0 ] && ok "收到 $ns 个带 ns=ghcr.io 的请求" || bad "没有收到带 ns 的请求"
-echo "  服务端跟随的跳转："
+[ "$redirects" = 0 ] && ok "$total requests, no redirect handed to the client" || bad "$redirects redirects were handed to the client"
+[ "$errors" = 0 ] && ok "No 5xx" || bad "$errors 5xx responses"
+[ "$ns" -gt 0 ] && ok "Received $ns requests with ns=ghcr.io" || bad "Received no requests with ns"
+echo "  Redirects followed on the server side:"
 printf '%s\n' "$hops" | sed 's/^/    /'
 
-echo "管理后台和指标（和拉取共用 5000）"
-# 后台默认公开：直连和带 X-Forwarded-For（像经过反向代理）都能打开登录页。指标没有登录，只给直连：
-# 带 X-Forwarded-For 就是 404。
+echo "Admin console and metrics (sharing 5000 with pulls)"
+# The console is public by default: a direct connection and one with X-Forwarded-For (as if through a
+# reverse proxy) can both open the sign-in page. Metrics have no sign-in and are served only to direct connections:
+# with X-Forwarded-For the answer is 404.
 rip="$(docker inspect -f "{{(index .NetworkSettings.Networks \"$NET\").IPAddress}}" "$RELAY")"
 mg="$(docker run --rm --network "$NET" --entrypoint sh "$CR" -c "
   wget -q -O /dev/null http://$rip:5000/admin/login && echo direct=200 || echo direct=fail
   wget -q -O /dev/null --header 'X-Forwarded-For: 198.51.100.7' http://$rip:5000/admin/login && echo proxied=200 || echo proxied=fail
   wget -q -O - http://$rip:5000/metrics | grep -q '^relay_' && echo dmetrics=200 || echo dmetrics=fail
   wget -q -O /dev/null --header 'X-Forwarded-For: 198.51.100.7' http://$rip:5000/metrics && echo pmetrics=200 || echo pmetrics=fail" 2>/dev/null)"
-case "$mg" in *direct=200*) ok "直连能打开后台" ;; *) bad "直连打不开后台：$mg" ;; esac
-case "$mg" in *proxied=200*) ok "经代理（带 X-Forwarded-For）也能打开后台登录页" ;; *) bad "经代理打不开后台：$mg" ;; esac
-case "$mg" in *dmetrics=200*) ok "直连能抓指标" ;; *) bad "抓不到指标：$mg" ;; esac
-case "$mg" in *pmetrics=fail*) ok "带 X-Forwarded-For 的指标请求是 404" ;; *) bad "经代理的指标请求没有被拒绝：$mg" ;; esac
+case "$mg" in *direct=200*) ok "Direct connection opens the console" ;; *) bad "Direct connection cannot open the console: $mg" ;; esac
+case "$mg" in *proxied=200*) ok "Proxied request (with X-Forwarded-For) also opens the console sign-in page" ;; *) bad "Proxied request cannot open the console: $mg" ;; esac
+case "$mg" in *dmetrics=200*) ok "Direct connection can scrape the metrics" ;; *) bad "Cannot scrape the metrics: $mg" ;; esac
+case "$mg" in *pmetrics=fail*) ok "Metrics request with X-Forwarded-For gets 404" ;; *) bad "Proxied metrics request was not rejected: $mg" ;; esac
 
 if [ -n "$IMAGE" ]; then
-  echo "镜像"
-  # HEALTHCHECK 不带参数运行 probe：按镜像里的配置路径找端口
+  echo "Image"
+  # HEALTHCHECK runs probe without arguments: it finds the port through the configuration path in the image
   for _ in $(seq 1 40); do
     st="$(docker inspect -f '{{.State.Health.Status}}' "$RELAY")"
     [ "$st" = starting ] || break
     sleep 1
   done
-  if [ "$st" = healthy ]; then ok "HEALTHCHECK：$st"; else bad "HEALTHCHECK：$st"; fi
+  if [ "$st" = healthy ]; then ok "HEALTHCHECK: $st"; else bad "HEALTHCHECK: $st"; fi
   uid="$(docker exec "$RELAY" "$RBIN" version >/dev/null && docker inspect -f '{{.Config.User}}' "$RELAY")"
-  if [ "$uid" = 65532:65532 ]; then ok "以 nonroot（$uid）运行"; else bad "运行用户：$uid"; fi
+  if [ "$uid" = 65532:65532 ]; then ok "Runs as nonroot ($uid)"; else bad "Runs as user: $uid"; fi
+
+  echo "First administrator and the admin command (the image's own configuration, writable data)"
+  docker run -d --name "$RELAY-w" --read-only --cap-drop ALL --security-opt no-new-privileges \
+    -v "$P-data:/var/lib/registry-mirrors-relay" "$IMAGE" >/dev/null
+  for _ in $(seq 1 30); do docker exec "$RELAY-w" "$RBIN" probe 2>/dev/null && break; sleep 1; done
+  if docker logs "$RELAY-w" 2>&1 | grep -q 'generated password'; then ok "First start logs a generated password"; else bad "No generated password in the log"; fi
+  pw="$(docker exec "$RELAY-w" registry-mirrors-relay admin password --generate 2>/dev/null || true)"
+  if [ "${#pw}" -ge 20 ] && docker exec "$RELAY-w" registry-mirrors-relay admin list 2>/dev/null | grep -q '^admin  admin  active'; then
+    ok "admin password works against the running service through docker exec"
+  else
+    bad "admin password through docker exec failed"
+  fi
+  docker rm -fv "$RELAY-w" >/dev/null && docker volume rm "$P-data" >/dev/null
 fi
 
-if [ "$fail" = 0 ]; then echo "全部通过"; else echo "有检查失败"; fi
+if [ "$fail" = 0 ]; then echo "All checks passed"; else echo "Some checks failed"; fi
 exit "$fail"

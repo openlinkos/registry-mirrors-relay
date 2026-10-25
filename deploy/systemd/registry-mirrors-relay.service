@@ -1,12 +1,14 @@
-# registry-mirrors-relay 的 systemd 单元。安装：
+# systemd unit for registry-mirrors-relay. To install:
 #   sudo install -m 0755 registry-mirrors-relay /usr/local/bin/
 #   sudo install -d /etc/registry-mirrors-relay && sudo install -m 0644 config.yaml /etc/registry-mirrors-relay/
 #   sudo install -m 0644 registry-mirrors-relay.service /etc/systemd/system/
 #   sudo systemctl daemon-reload && sudo systemctl enable --now registry-mirrors-relay
 #
-# 运行用户由 systemd 动态分配（DynamicUser），运营数据在 /var/lib/registry-mirrors-relay（StateDirectory）。
-# 配置里的 data_dir 保持默认值 /var/lib/registry-mirrors-relay。
-# 第一个管理员：见下面的 LoadCredential，或者停止服务后用 systemd-run 运行 admin create（docs/deploy.md）。
+# systemd allocates the user dynamically (DynamicUser); the operational data is in /var/lib/registry-mirrors-relay
+# (StateDirectory). Keep data_dir in the configuration at its default, /var/lib/registry-mirrors-relay.
+# First administrator: the first start writes a generated password to the journal
+# (journalctl -u registry-mirrors-relay | grep 'generated password'); sudo registry-mirrors-relay admin password
+# sets one at any time. To choose the first one yourself, see LoadCredential below (docs/deploy.md).
 
 [Unit]
 Description=registry-mirrors-relay: a container registry mirror that relays and never stores
@@ -17,23 +19,25 @@ After=network-online.target
 [Service]
 Type=exec
 ExecStart=/usr/local/bin/registry-mirrors-relay serve -config /etc/registry-mirrors-relay/config.yaml
-# 重新加载配置，不中断进行中的下载
+# reload the configuration without interrupting downloads in progress
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=2s
-# 比 timeouts.shutdown_grace（30 秒）长一点
+# a little longer than timeouts.shutdown_grace (30 seconds)
 TimeoutStopSec=45s
 
 DynamicUser=yes
 StateDirectory=registry-mirrors-relay
 StateDirectoryMode=0700
 
-# 第一个管理员的口令文件（只有 root 能读的文件即可，systemd 交给服务时只有服务能读）。
-# 第一次登录后必须改口令；之后可以把这两行和口令文件删掉。
+# Password file for the first administrator (a file only root can read is enough; when systemd passes it to the
+# service, only the service can read it).
+# The password must be changed after the first sign-in; afterwards these two lines and the password file can be removed.
 #LoadCredential=admin-password:/etc/registry-mirrors-relay/admin-password
 #Environment=RELAY_ADMIN_PASSWORD_FILE=%d/admin-password
 
-# 监听 1024 以下的端口（例如直接对外的 80、443）时需要这个能力；只用 8080 等高端口时可以删掉
+# this capability is needed to listen on ports below 1024 (for example 80 and 443 when facing the internet
+# directly); remove it when only high ports such as 8080 are used
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 

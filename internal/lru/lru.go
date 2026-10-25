@@ -32,8 +32,8 @@ func New[K comparable, V any](maxItems int, maxWeight int64) *Cache[K, V] {
 	return &Cache[K, V]{ll: list.New(), items: map[K]*list.Element{}, maxItems: maxItems, maxWeight: maxWeight}
 }
 
-// OnEvict sets the callback for evictions (it is called with the lock held, so the callback must not
-// use this cache again).
+// OnEvict sets the callback for evictions and explicit removals (it is called with the lock held, so the
+// callback must not use this cache again).
 func (c *Cache[K, V]) OnEvict(f func(K, V)) { c.onEvict = f }
 
 // Get returns the value and marks it as most recently used.

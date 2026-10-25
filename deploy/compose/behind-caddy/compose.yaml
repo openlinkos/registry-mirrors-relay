@@ -1,5 +1,6 @@
-# Caddy 在前面负责 HTTPS（自动申请证书），relay 只在 Compose 的内部网络里。说明见 docs/deploy.md。
-# 已经有 Caddy 或 Nginx 时，照着 Caddyfile 把反向代理配到 relay 的 8080 即可。
+# Caddy in front handles HTTPS (obtaining certificates automatically); the relay is only on Compose's internal
+# network. See docs/deploy.md.
+# If you already run Caddy or Nginx, just point its reverse proxy at port 8080 of the relay, following the Caddyfile.
 #
 #   openssl rand -base64 18 > admin-password && chmod 400 admin-password && sudo chown 65532 admin-password
 #   docker compose up -d
@@ -18,13 +19,14 @@ services:
     depends_on: [relay]
 
   relay:
-    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.4.0
+    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.5.0
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     ports:
-      # 8080 上有拉取入口，也有管理后台（/admin/），都经 Caddy 对外。宿主机上只映射到 127.0.0.1（本机调试用）
+      # 8080 serves both the pull entrance and the admin console (/admin/), both exposed through Caddy. On the host it
+      # is mapped only to 127.0.0.1 (for local debugging)
       - "127.0.0.1:8080:8080"
     volumes:
       - ./config.yaml:/etc/registry-mirrors-relay/config.yaml:ro

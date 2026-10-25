@@ -47,7 +47,8 @@ jobs:
         with:
           version: v2.15.0
       - name: govulncheck
-        # v1.1.4 自带的 x/tools 太旧，分析 Go 1.27 的标准库时会 panic；先固定到已升级 x/tools 的主干提交，下个版本发布后换回 tag
+        # the x/tools bundled with v1.1.4 is too old and panics when analysing the Go 1.27 standard library; pinned for
+        # now to a main-branch commit that has the upgraded x/tools, back to a tag once the next version is released
         run: go run golang.org/x/vuln/cmd/govulncheck@e672cbe8fbc8c76e28fcb6db0efd9ce354e0dac5 ./...
       - name: actionlint
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
@@ -133,7 +134,8 @@ jobs:
         if: matrix.install == 'helm'
       - name: ct install
         if: matrix.install == 'helm'
-        # 每组 ci/*-values.yaml 装进一个新的命名空间、跑 helm test 再删掉；用上一步载入 kind 的镜像
+        # installs each ci/*-values.yaml into a fresh namespace, runs helm test, then deletes it; uses the image the
+        # previous step loaded into kind
         run: >-
           ct install --config charts/ct.yaml --charts charts/registry-mirrors-relay
           --helm-extra-set-args "--set=image.repository=registry-mirrors-relay --set=image.tag=e2e --set=image.pullPolicy=Never"
@@ -163,7 +165,7 @@ jobs:
           docker images ghcr.io/openlinkos/registry-mirrors-relay
           for arch in amd64 arm64 armv7; do
             ref="$(docker images ghcr.io/openlinkos/registry-mirrors-relay --format '{{.Repository}}:{{.Tag}}' | grep -- "-$arch\$" | head -n 1)"
-            [ -n "$ref" ] || { echo "没有 $arch 的镜像"; exit 1; }
+            [ -n "$ref" ] || { echo "No image for $arch"; exit 1; }
             docker image inspect "$ref" --format "$arch {{.Os}}/{{.Architecture}}{{with .Variant}}/{{.}}{{end}} user={{.Config.User}}"
           done
           docker run --rm "$(docker images ghcr.io/openlinkos/registry-mirrors-relay --format '{{.Repository}}:{{.Tag}}' | grep -- '-amd64$' | head -n 1)" version

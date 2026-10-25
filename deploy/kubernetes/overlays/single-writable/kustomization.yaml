@@ -1,8 +1,9 @@
-# 单副本、运营数据可写：StatefulSet + PVC，后台可以建账号、加规则、封禁。代替 base 里的 Deployment 和 PDB。
+# A single replica with writable operational data: StatefulSet + PVC, and the console can create accounts, add
+# rules and ban. Replaces the Deployment and PDB from base.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# base 的标签只作用于 base 里的资源，这里新加的 StatefulSet 也要带上（含 selector）
+# the base labels apply only to the resources in base, so the StatefulSet added here needs them too (selector included)
 labels:
   - pairs:
       app.kubernetes.io/name: registry-mirrors-relay
@@ -19,7 +20,7 @@ patches:
       kind: Deployment
       metadata:
         name: registry-mirrors-relay
-  # 只有一个副本时 minAvailable: 1 会挡住节点维护
+  # with only one replica, minAvailable: 1 would block node maintenance
   - patch: |-
       $patch: delete
       apiVersion: policy/v1

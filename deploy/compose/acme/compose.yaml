@@ -1,5 +1,7 @@
-# 直接对外：relay 自己用 ACME（Let's Encrypt）申请证书，监听宿主机的 80 和 443。说明见 docs/deploy.md。
-# 域名要先解析到这台机器，80 和 443 端口要能从公网访问（HTTP-01、TLS-ALPN-01 验证）。
+# Facing the internet directly: the relay obtains its own certificate with ACME (Let's Encrypt) and listens on
+# ports 80 and 443 of the host. See docs/deploy.md.
+# The domain must resolve to this machine first, and ports 80 and 443 must be reachable from the internet
+# (HTTP-01 and TLS-ALPN-01 validation).
 #
 #   openssl rand -base64 18 > admin-password && chmod 400 admin-password && sudo chown 65532 admin-password
 #   docker compose up -d
@@ -7,17 +9,17 @@ name: registry-mirrors-relay
 
 services:
   relay:
-    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.4.0
+    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.5.0
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     ports:
-      - "80:8080"               # 明文：ACME 的 HTTP-01 验证，也能拉取
-      - "443:8443"              # HTTPS：证书自动申请和续期；管理后台在 https://<域名>/admin/
+      - "80:8080"               # plain HTTP: ACME HTTP-01 validation, pulls work here too
+      - "443:8443"              # HTTPS: certificates are obtained and renewed automatically; the admin console is at https://<domain>/admin/
     volumes:
       - ./config.yaml:/etc/registry-mirrors-relay/config.yaml:ro
-      - data:/var/lib/registry-mirrors-relay   # 运营数据库和 ACME 证书
+      - data:/var/lib/registry-mirrors-relay   # operational database and ACME certificates
     environment:
       RELAY_ADMIN_PASSWORD_FILE: /run/secrets/admin_password
     secrets: [admin_password]

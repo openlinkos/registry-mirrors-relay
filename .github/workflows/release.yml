@@ -1,8 +1,9 @@
 name: release
 
-# 推送 v* 标签时发布：二进制、压缩包、SHA256SUMS（cosign keyless 签名）、SBOM、多平台镜像（签名）、
-# Helm chart（OCI，签名），并为二进制、镜像和 chart 生成 GitHub 的构建来源证明；最后从 GHCR 匿名安装一遍 chart 验证。
-# 配置见 .goreleaser.yaml。
+# Publishes a release when a v* tag is pushed: binaries, archives, SHA256SUMS (cosign keyless signature), SBOMs,
+# multi-platform image (signed), Helm chart (OCI, signed), plus GitHub build provenance attestations for the
+# binaries, the image and the chart; finally installs the chart anonymously from GHCR once to verify it.
+# See .goreleaser.yaml for the configuration.
 on:
   push:
     tags: ["v*"]
@@ -19,8 +20,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write       # GitHub Release
-      packages: write       # ghcr.io/openlinkos/registry-mirrors-relay、ghcr.io/openlinkos/charts/registry-mirrors-relay
-      id-token: write       # cosign keyless、构建来源证明
+      packages: write       # ghcr.io/openlinkos/registry-mirrors-relay, ghcr.io/openlinkos/charts/registry-mirrors-relay
+      id-token: write       # cosign keyless, build provenance attestations
       attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -41,7 +42,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: install helm and yq
         run: scripts/ci-tools.sh helm chart
-      # chart 有问题时在发布任何东西之前停下
+      # if the chart has a problem, stop before publishing anything
       - name: helm lint
         run: helm4 lint --strict charts/registry-mirrors-relay
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
@@ -51,7 +52,8 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 同一个提交上有多个标签时（例如先发了 -rc），按触发这次运行的标签发布
+          # when one commit has several tags (for example an -rc was released first), release the tag that
+          # triggered this run
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
       - name: image digest
         id: image
@@ -82,7 +84,7 @@ jobs:
             { cat dist/chart/push.log; exit 1; }
           cat dist/chart/push.log
           digest="$(sed -n 's/^Digest: //p' dist/chart/push.log)"
-          case "$digest" in sha256:*) ;; *) echo "helm push 的输出里没有 digest"; exit 1 ;; esac
+          case "$digest" in sha256:*) ;; *) echo "No digest in the helm push output"; exit 1 ;; esac
           cosign sign --yes "ghcr.io/openlinkos/charts/registry-mirrors-relay@$digest"
           echo "digest=$digest" >>"$GITHUB_OUTPUT"
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -91,7 +93,8 @@ jobs:
           subject-digest: ${{ steps.chart.outputs.digest }}
           push-to-registry: true
 
-  # 发布之后从 GHCR 匿名拉取刚发布的 chart 和镜像，装进 kind（restricted 命名空间）再跑 helm test
+  # after the release, pull the just-published chart and image anonymously from GHCR, install them into kind
+  # (restricted namespace) and run helm test
   verify:
     name: verify the published chart
     needs: release
@@ -122,4 +125,4 @@ jobs:
           helm4 test registry-mirrors-relay -n relay --logs
           image="$(kubectl -n relay get deploy registry-mirrors-relay -o jsonpath='{.spec.template.spec.containers[0].image}')"
           echo "$image"
-          case "$image" in "ghcr.io/openlinkos/registry-mirrors-relay:$TAG@sha256:"*) ;; *) echo "没有按 digest 拉取本次发布的镜像"; exit 1 ;; esac
+          case "$image" in "ghcr.io/openlinkos/registry-mirrors-relay:$TAG@sha256:"*) ;; *) echo "The image from this release was not pulled by digest"; exit 1 ;; esac

@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# 冒烟测试：检查每个上游都能正确拉取、镜像层经由本服务下载，入口只放行拉取，管理后台和指标只接受直连。
-# 需要 docker、curl、jq。两种用法：
-#   本机：relay 用 deploy/test/config.yaml 跑在本机的一个端口上（默认 5000），在本机运行
-#     scripts/smoke.sh [主机 IP，默认 127.0.0.1]；端口用 SMOKE_PORT 改。
-#     每个上游一个域名的入口（docker.relay.test 等）用 curl --resolve 测；docker pull 走单域名入口的路径前缀，
-#     另外检查 ns 和根路径两种写法。
-#   按域名：经 HTTPS（通常经 CDN）访问 docker、gcr、ghcr、k8s、quay.<域名>
+# Smoke test: checks that every upstream pulls correctly, that layers are downloaded through this service, that
+# the entrances let only pulls through, that the admin console answers every address and that metrics accept
+# only direct connections.
+# Requires docker, curl and jq. Two ways to use it:
+#   Local: the relay runs with deploy/test/config.yaml on a port of this machine (default 5000); run
+#     scripts/smoke.sh [host IP, default 127.0.0.1] on this machine; change the port with SMOKE_PORT.
+#     The entrances with one domain per upstream (docker.relay.test etc.) are tested with curl --resolve; docker
+#     pull goes through the path prefix of the single-domain entrance, and the ns and root-path forms are checked too.
+#   By domain: reaches docker, gcr, ghcr, k8s and quay.<domain> over HTTPS (usually through a CDN)
 #     SMOKE_DOMAIN=example.com scripts/smoke.sh
-#     这时管理后台和指标应当是 404（经代理的请求一律拒绝）。
-# 运行这个脚本的机器能直连上游，所以测不出"客户端被引去直连上游"的情况；那要用 scripts/isolated-test.sh。
+#     The console's sign-in page should then open, and metrics should be 404 (proxied requests never get them).
+# The machine running this script can connect to the upstreams directly, so it cannot catch "the client was
+# diverted to a direct connection to the upstream"; that needs scripts/isolated-test.sh.
 set -euo pipefail
 
 HOST="${1:-127.0.0.1}"
@@ -16,13 +19,13 @@ HOST="${1:-127.0.0.1}"
 PORT="${SMOKE_PORT:-5000}"
 fail=0
 
-ok() { printf '  通过  %s\n' "$1"; }
-bad() { printf '  失败  %s\n' "$1"; fail=1; }
+ok() { printf '  pass  %s\n' "$1"; }
+bad() { printf '  FAIL  %s\n' "$1"; fail=1; }
 RESOLVE=()
 cu() { curl "${RESOLVE[@]}" "$@"; }
 status() { cu -s -o /dev/null -w '%{http_code}' "$@"; }
 
-# 每个上游的入口地址和显示用的名字，顺序：Docker Hub、gcr.io、ghcr.io、registry.k8s.io、quay.io
+# Entrance address and display name of each upstream, in this order: Docker Hub, gcr.io, ghcr.io, registry.k8s.io, quay.io
 BASES=()
 NAMES=()
 if [ -n "${SMOKE_DOMAIN:-}" ]; then
@@ -37,7 +40,7 @@ else
     RESOLVE+=(--resolve "$sub.relay.test:$PORT:$HOST")
   done
 fi
-one="$HOST:$PORT" # 本机模式的单域名入口
+one="$HOST:$PORT" # single-domain entrance in local mode
 
 wait_ready() {
   for _ in $(seq 1 60); do
@@ -47,7 +50,7 @@ wait_ready() {
   return 1
 }
 
-# 上游序号、经镜像站拉取的名称、直接从上游拉取的名称
+# Upstream index, name to pull through the mirror, name to pull directly from the upstream
 CASES=(
   "0 library/hello-world:latest docker.io/library/hello-world:latest"
   "1 distroless/static:nonroot gcr.io/distroless/static:nonroot"
@@ -58,8 +61,8 @@ CASES=(
 
 ACCEPT='application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json'
 
-# 取镜像（linux/amd64）第一个层的状态码：不跟随重定向，200 或 206 说明由本服务转发。
-# 本服务在服务端取令牌，客户端不需要令牌。
+# Status code for the first layer of the image (linux/amd64), without following redirects: 200 or 206 means
+# this service forwarded it. This service fetches tokens on the server side; the client needs no token.
 blob_status() {
   local base=$1 repo=$2 ref=$3 manifest digest
   manifest="$(cu -s -H "Accept: $ACCEPT" "$base/v2/$repo/manifests/$ref")"
@@ -68,116 +71,119 @@ blob_status() {
     manifest="$(cu -s -H "Accept: $ACCEPT" "$base/v2/$repo/manifests/$digest")"
   fi
   digest="$(jq -r '.layers[0].digest // empty' <<<"$manifest")"
-  [ -n "$digest" ] || { echo "无清单"; return; }
+  [ -n "$digest" ] || { echo "no manifest"; return; }
   cu -s -o /dev/null -r 0-1023 -w '%{http_code}' "$base/v2/$repo/blobs/$digest"
 }
 
 pull_digest() { docker pull "$1" | sed -n 's/^Digest: //p' || true; }
 
-echo "拉取并比对摘要"
+echo "Pulling and comparing digests"
 for c in "${CASES[@]}"; do
   read -r i name upstream <<<"$c"
-  if ! wait_ready "${BASES[i]}"; then bad "${NAMES[i]}：没有就绪"; continue; fi
-  # 按域名时 docker pull 每个上游的域名；本机时 docker 解析不了 *.relay.test，走单域名入口的前缀
+  if ! wait_ready "${BASES[i]}"; then bad "${NAMES[i]}: not ready"; continue; fi
+  # By domain, docker pull uses each upstream's domain; locally docker cannot resolve *.relay.test, so the pull
+  # goes through the prefix of the single-domain entrance
   if [ -n "${SMOKE_DOMAIN:-}" ]; then ref="${NAMES[i]}/$name"; else ref="$one/$upstream"; fi
   mirrored="$(pull_digest "$ref")"
   direct="$(pull_digest "$upstream")"
   if [ -n "$mirrored" ] && [ "$mirrored" = "$direct" ]; then
     ok "$ref $mirrored"
   else
-    bad "$ref：镜像站 '${mirrored:-无}'，上游 '${direct:-无}'"
+    bad "$ref: mirror '${mirrored:-none}', upstream '${direct:-none}'"
   fi
 done
 
-echo "镜像层经由本服务下载（上游的 CDN 地址在白名单内）"
+echo "Layers downloaded through this service (the upstream CDN addresses are on the allow list)"
 for c in "${CASES[@]}"; do
   read -r i name _ <<<"$c"
   s="$(blob_status "${BASES[i]}" "${name%:*}" "${name##*:}")"
   case "$s" in
-    200 | 206) ok "${NAMES[i]} ${name%:*} 返回 $s" ;;
-    *) bad "${NAMES[i]} ${name%:*} 返回 $s：可能是上游换了 CDN 地址，请看访问日志的 redirect1..3 并补充白名单" ;;
+    200 | 206) ok "${NAMES[i]} ${name%:*} returned $s" ;;
+    *) bad "${NAMES[i]} ${name%:*} returned $s: the upstream may have changed its CDN addresses; check redirect1..3 in the access log and extend the allow list" ;;
   esac
 done
 
-echo "不发认证质询，不透露源站出口 IP"
+echo "No authentication challenge, origin egress IP not disclosed"
 for i in "${!BASES[@]}"; do
   hdr="$(cu -s -o /dev/null -D - "${BASES[i]}/v2/" | tr -d '\r')"
   if grep -qi '^www-authenticate' <<<"$hdr"; then
-    bad "${NAMES[i]} /v2/ 带了认证质询"
+    bad "${NAMES[i]} /v2/ sent an authentication challenge"
   else
-    ok "${NAMES[i]} /v2/ 不要求认证"
+    ok "${NAMES[i]} /v2/ requires no authentication"
   fi
 done
 read -r _ name _ <<<"${CASES[0]}"
 hdr="$(cu -s -o /dev/null -D - -H "Accept: $ACCEPT" "${BASES[0]}/v2/${name%:*}/manifests/${name##*:}" | tr -d '\r')"
 if grep -qi -E '^(docker-ratelimit-source|set-cookie)' <<<"$hdr"; then
-  bad "${NAMES[0]} 响应带了 Docker-Ratelimit-Source 或 Set-Cookie"
+  bad "${NAMES[0]} response carries Docker-Ratelimit-Source or Set-Cookie"
 else
-  ok "${NAMES[0]} 响应不带 Docker-Ratelimit-Source、Set-Cookie"
+  ok "${NAMES[0]} response carries neither Docker-Ratelimit-Source nor Set-Cookie"
 fi
 
-echo "入口规则"
+echo "Entrance rules"
 for i in "${!BASES[@]}"; do
   base="${BASES[i]}" n="${NAMES[i]}"
   s="$(status -X POST "$base/v2/smoke/blobs/uploads/")"
-  [ "$s" = 405 ] && ok "$n POST 返回 405" || bad "$n POST 返回 $s，应为 405"
+  [ "$s" = 405 ] && ok "$n POST returned 405" || bad "$n POST returned $s, expected 405"
   s="$(status -X DELETE "$base/v2/smoke/manifests/latest")"
-  [ "$s" = 405 ] && ok "$n DELETE 返回 405" || bad "$n DELETE 返回 $s，应为 405"
+  [ "$s" = 405 ] && ok "$n DELETE returned 405" || bad "$n DELETE returned $s, expected 405"
   s="$(status "$base/v2/_catalog")"
-  [ "$s" = 404 ] && ok "$n /v2/_catalog 返回 404" || bad "$n /v2/_catalog 返回 $s，应为 404"
+  [ "$s" = 404 ] && ok "$n /v2/_catalog returned 404" || bad "$n /v2/_catalog returned $s, expected 404"
 done
 
-echo "上游隔离"
+echo "Upstream isolation"
 for i in 1 2 3 4; do
   s="$(status -H "Accept: $ACCEPT" "${BASES[i]}/v2/library/hello-world/manifests/latest")"
   case "$s" in
-    2*) bad "${NAMES[i]} 返回了 Docker Hub 的 library/hello-world（$s）" ;;
-    *) ok "${NAMES[i]} 请求 library/hello-world 返回 $s" ;;
+    2*) bad "${NAMES[i]} returned Docker Hub's library/hello-world ($s)" ;;
+    *) ok "${NAMES[i]} request for library/hello-world returned $s" ;;
   esac
   s="$(status -H "Accept: $ACCEPT" "${BASES[i]}/v2/library/hello-world/manifests/latest?ns=docker.io")"
-  [ "$s" = 404 ] && ok "${NAMES[i]} ns=docker.io 返回 404" || bad "${NAMES[i]} ns=docker.io 返回 $s，应为 404"
+  [ "$s" = 404 ] && ok "${NAMES[i]} ns=docker.io returned 404" || bad "${NAMES[i]} ns=docker.io returned $s, expected 404"
 done
 
 if [ -z "${SMOKE_DOMAIN:-}" ]; then
-  echo "单域名入口（$one）：ns 和根路径（路径前缀已在上面拉取时测过）"
+  echo "Single-domain entrance ($one): ns and root path (the path prefix was already tested by the pulls above)"
   s="$(status -I -H "Accept: $ACCEPT" "http://$one/v2/containerd/busybox/manifests/1.36?ns=ghcr.io")"
-  [ "$s" = 200 ] && ok "ns=ghcr.io 返回 200" || bad "ns=ghcr.io 返回 $s，应为 200"
+  [ "$s" = 200 ] && ok "ns=ghcr.io returned 200" || bad "ns=ghcr.io returned $s, expected 200"
   s="$(status -I -H "Accept: $ACCEPT" "http://$one/v2/hello-world/manifests/latest")"
-  [ "$s" = 200 ] && ok "根路径（默认 Docker Hub，补 library/）返回 200" || bad "根路径返回 $s，应为 200"
+  [ "$s" = 200 ] && ok "Root path (Docker Hub by default, library/ added) returned 200" || bad "Root path returned $s, expected 200"
   s="$(status -I -H "Accept: $ACCEPT" "http://$one/v2/example.org/x/manifests/latest")"
-  [ "$s" = 404 ] && ok "没有配置的前缀返回 404" || bad "没有配置的前缀返回 $s，应为 404"
+  [ "$s" = 404 ] && ok "Unconfigured prefix returned 404" || bad "Unconfigured prefix returned $s, expected 404"
 fi
 
-echo "用法页与探活"
+echo "Usage page and health probe"
 for i in "${!BASES[@]}"; do
   ct="$(cu -s -o /dev/null -w '%{http_code} %{content_type}' "${BASES[i]}/")"
   case "$ct" in
-    "200 text/html"*) ok "${NAMES[i]} / 返回用法页" ;;
-    *) bad "${NAMES[i]} / 返回 '$ct'，应为 200 text/html" ;;
+    "200 text/html"*) ok "${NAMES[i]} / returned the usage page" ;;
+    *) bad "${NAMES[i]} / returned '$ct', expected 200 text/html" ;;
   esac
   s="$(status "${BASES[i]}/healthz")"
-  [ "$s" = 200 ] && ok "${NAMES[i]} /healthz 返回 200" || bad "${NAMES[i]} /healthz 返回 $s，应为 200"
+  [ "$s" = 200 ] && ok "${NAMES[i]} /healthz returned 200" || bad "${NAMES[i]} /healthz returned $s, expected 200"
 done
 s="$(status "${BASES[0]}/robots.txt")"
-[ "$s" = 200 ] && ok "/robots.txt 返回 200" || bad "/robots.txt 返回 $s，应为 200"
+[ "$s" = 200 ] && ok "/robots.txt returned 200" || bad "/robots.txt returned $s, expected 200"
 
-echo "管理后台和指标"
+echo "Admin console and metrics"
 if [ -n "${SMOKE_DOMAIN:-}" ]; then
-  # 经 CDN、反向代理来的请求一律当作不存在
+  # The console is public by default; metrics through a CDN or reverse proxy are treated as if they did not exist
   for i in "${!BASES[@]}"; do
-    for path in /admin/login /metrics; do
-      s="$(status "${BASES[i]}$path")"
-      [ "$s" = 404 ] && ok "${NAMES[i]}$path 返回 404" || bad "${NAMES[i]}$path 返回 $s，经代理时应为 404"
-    done
+    s="$(status "${BASES[i]}/admin/login")"
+    [ "$s" = 200 ] && ok "${NAMES[i]}/admin/login returned 200" || bad "${NAMES[i]}/admin/login returned $s, expected 200"
+    s="$(status "${BASES[i]}/metrics")"
+    [ "$s" = 404 ] && ok "${NAMES[i]}/metrics returned 404" || bad "${NAMES[i]}/metrics returned $s, expected 404 when proxied"
   done
 else
   s="$(status "http://$one/admin/login")"
-  [ "$s" = 200 ] && ok "直连 $one/admin/login 返回 200" || bad "直连 $one/admin/login 返回 $s，应为 200"
+  [ "$s" = 200 ] && ok "Direct $one/admin/login returned 200" || bad "Direct $one/admin/login returned $s, expected 200"
   s="$(status -H 'X-Forwarded-For: 198.51.100.7' "http://$one/admin/login")"
-  [ "$s" = 404 ] && ok "带 X-Forwarded-For 时返回 404" || bad "带 X-Forwarded-For 时返回 $s，应为 404"
+  [ "$s" = 200 ] && ok "With X-Forwarded-For the sign-in page still opens (public console)" || bad "With X-Forwarded-For returned $s, expected 200"
   s="$(status "http://$one/metrics")"
-  [ "$s" = 200 ] && ok "直连 $one/metrics 返回 200（测试配置打开了指标）" || bad "直连 $one/metrics 返回 $s，应为 200"
+  [ "$s" = 200 ] && ok "Direct $one/metrics returned 200 (the test configuration enables metrics)" || bad "Direct $one/metrics returned $s, expected 200"
+  s="$(status -H 'X-Forwarded-For: 198.51.100.7' "http://$one/metrics")"
+  [ "$s" = 404 ] && ok "Metrics with X-Forwarded-For returned 404" || bad "Metrics with X-Forwarded-For returned $s, expected 404"
 fi
 
-if [ "$fail" = 0 ]; then echo "全部通过"; else echo "有检查失败"; fi
+if [ "$fail" = 0 ]; then echo "All checks passed"; else echo "Some checks failed"; fi
 exit "$fail"

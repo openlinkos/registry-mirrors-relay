@@ -39,7 +39,18 @@ They must change the password at the first sign-in; afterwards you can delete th
 {{- else }}
 In readonly mode this is the only administrator and its password stays valid: keep it long and random.
 {{- end }}
+{{- else if eq .Values.mode "writable" }}
+
+The first administrator is "admin", with a generated password written once to the log:
+
+  kubectl -n {{ .Release.Namespace }} logs sts/{{ include "rmr.fullname" . }} | grep 'generated password'
 {{- else }}
 
 No administrator is configured (admin.existingSecret is empty), so nobody can sign in to the console.
+{{- end }}
+{{- if eq .Values.mode "writable" }}
+
+Set an administrator's password at any time (it applies at once):
+
+  kubectl -n {{ .Release.Namespace }} exec -it sts/{{ include "rmr.fullname" . }} -- registry-mirrors-relay admin password
 {{- end }}

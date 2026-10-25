@@ -34,9 +34,11 @@ config: {}
 configRollout: always
 
 admin:
-  # -- Name of an existing Secret holding the first administrator's password. There is no default password.
-  # With `writable` the administrator must change it at the first sign-in, after which the Secret can be deleted.
-  # With `readonly` this is the only administrator and the password stays valid.
+  # -- Name of an existing Secret holding the first administrator's password. There is no default password:
+  # without a Secret, `writable` creates `admin` with a generated password written to the log once, and
+  # `registry-mirrors-relay admin password` (through `kubectl exec`) sets one at any time.
+  # With `writable` the administrator from the Secret must change it at the first sign-in, after which the
+  # Secret can be deleted. With `readonly` this is the only administrator and the password stays valid.
   existingSecret: ""
   # -- Key in that Secret.
   existingSecretKey: password

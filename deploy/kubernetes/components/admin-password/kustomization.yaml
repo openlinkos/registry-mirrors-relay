@@ -1,13 +1,16 @@
-# 用 Secret 里的口令文件创建第一个管理员（RELAY_ADMIN_PASSWORD_FILE）。没有默认口令；先建好 Secret：
+# Creates the first administrator from the password file in a Secret (RELAY_ADMIN_PASSWORD_FILE). There is no
+# default password; create the Secret first:
 #
 #   openssl rand -base64 18 > admin-password
-#   kubectl create secret generic registry-mirrors-relay-admin --from-file=password=admin-password -n <命名空间>
+#   kubectl create secret generic registry-mirrors-relay-admin --from-file=password=admin-password -n <namespace>
 #   rm admin-password
 #
-# 然后在自己的 kustomization.yaml 里写：components: [<仓库>/deploy/kubernetes/components/admin-password]
+# Then write in your own kustomization.yaml: components: [<repository>/deploy/kubernetes/components/admin-password]
 #
-# 运营数据可写（single-writable）时，这个管理员第一次登录后必须改口令，之后可以删掉 Secret 和这个组件。
-# 运营数据只读（base，多副本）时，它就是唯一的管理员，口令一直有效：请用足够长的随机口令，后台只用 port-forward 访问。
+# With writable operational data (single-writable), this administrator must change the password after the first
+# sign-in; afterwards the Secret and this component can be removed.
+# With read-only operational data (base, multiple replicas), it is the only administrator and its password stays
+# valid: use a long enough random password, and reach the console only through port-forward.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 

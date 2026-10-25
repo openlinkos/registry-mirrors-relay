@@ -1,12 +1,15 @@
-# registry-mirrors-relay 的镜像。
+# The registry-mirrors-relay image.
 #
-# 二进制在镜像外编译好，放在构建上下文的 <平台>/registry-mirrors-relay（GoReleaser 发布时自动这样放；
-# 自己构建用 scripts/build-image.sh）。这里只复制文件、不编译，最后一层没有任何 RUN，
-# 所以构建 arm64、arm/v7 的镜像也不需要 QEMU。基础镜像按 digest 固定，由 Dependabot 更新。
+# The binary is compiled outside the image and placed at <platform>/registry-mirrors-relay in the build context
+# (GoReleaser does this automatically when releasing; for your own builds use scripts/build-image.sh). This file
+# only copies files and compiles nothing, and the final stage has no RUN at all, so building the arm64 and
+# arm/v7 images does not need QEMU either. The base images are pinned by digest and updated by Dependabot.
 
-# 配置和数据目录在这一阶段准备好，权限和属主一并定下来，再整个复制过去（COPY --from 保留属主和权限）。
-# 数据目录属于 nonroot（65532）：挂一个新的命名卷时，Docker 按镜像里这个目录的属主初始化卷。
-# 这一阶段在构建机本身的平台上运行，产物只是几个文件和目录。
+# This stage prepares the configuration and data directories, fixes their permissions and ownership, and then
+# everything is copied over in one go (COPY --from keeps ownership and permissions).
+# The data directory belongs to nonroot (65532): when a new named volume is mounted, Docker initialises the
+# volume with the ownership of this directory in the image.
+# This stage runs on the build machine's own platform, and its output is just a few files and directories.
 FROM --platform=$BUILDPLATFORM docker.io/library/busybox:1.38@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e AS files
 COPY deploy/docker/config.yaml /out/etc/registry-mirrors-relay/config.yaml
 RUN mkdir -p /out/var/lib/registry-mirrors-relay \
@@ -20,7 +23,7 @@ ARG TARGETPLATFORM
 COPY --from=files /out/ /
 COPY --chmod=0755 $TARGETPLATFORM/registry-mirrors-relay /usr/local/bin/registry-mirrors-relay
 USER 65532:65532
-# 8080：拉取入口和管理后台
+# 8080: pull entrance and admin console
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["/usr/local/bin/registry-mirrors-relay", "probe"]
 ENTRYPOINT ["/usr/local/bin/registry-mirrors-relay"]

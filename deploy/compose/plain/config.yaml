@@ -1,12 +1,14 @@
-# 放在 CDN 或反向代理之后。挂载后它代替镜像自带的配置文件（没写的项用程序的默认值）；
-# 管理后台在同一个域名的 /admin/。全部选项见仓库的 config.example.yaml。
+# Behind a CDN or reverse proxy. Once mounted it replaces the configuration file built into the image (anything
+# not written here takes the program's default); the admin console is at /admin/ on the same domain. For every
+# option see config.example.yaml in the repository.
 data_dir: /var/lib/registry-mirrors-relay
 
 listen:
   http: ":8080"
 
 client_ip:
-  # 只信任 CDN 或反向代理的回源地址发来的 X-Forwarded-For。改成你自己的地址段。
+  # Trust X-Forwarded-For only from the origin-fetch addresses of the CDN or reverse proxy. Change them to your own
+  # address ranges.
   trusted_proxies:
     - 203.0.113.0/24
 
@@ -15,6 +17,6 @@ site:
   operator: Example Org
 
 entrances:
-  # 一个域名覆盖所有标准用法：根路径（Docker 的 registry-mirrors）、路径前缀、containerd 的 ns
+  # one domain covers every standard usage: the root path (Docker's registry-mirrors), the path prefix, containerd's ns
   - name: mirror
     hosts: [mirror.example.com]

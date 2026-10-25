@@ -1,8 +1,8 @@
-// Package route maps requests to entrances and upstreams: it finds the entrance by listen address and Host,
-// then parses the path according to the entrance type.
+// Package route maps requests to entrances and upstreams: it finds the entrance by Host, then parses the
+// path according to the entrance type.
 //
 // There are two kinds of entrance:
-//   - Fixed-upstream entrances (one subdomain or one port per upstream): the repository name in the path is
+//   - Fixed-upstream entrances (one host name per upstream): the repository name in the path is
 //     passed to that upstream as is, and the first segment is never taken as a registry; when containerd's
 //     ns parameter does not match this upstream, the result is 404.
 //   - Single-domain entrances: when the first path segment is an upstream name or alias from the

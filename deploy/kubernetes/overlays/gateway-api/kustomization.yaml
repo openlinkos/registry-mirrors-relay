@@ -1,6 +1,6 @@
-# 通过 Gateway API 对外：一个 HTTPRoute 挂到你已有的 Gateway 上，由 Gateway 负责 HTTPS。
-# 改 httproute.yaml 里的域名和 parentRefs。ingress-nginx 已在 2026 年 3 月停止维护，所以这里用 Gateway API；
-# 其他 Ingress 控制器的写法见 docs/deploy.md。
+# Exposed through the Gateway API: an HTTPRoute attached to your existing Gateway, which handles HTTPS.
+# Change the domain and parentRefs in httproute.yaml. ingress-nginx stopped being maintained in March 2026, so
+# the Gateway API is used here; for other Ingress controllers see docs/deploy.md.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

@@ -24,7 +24,7 @@ spec:
 {{- end }}
 {{- if .Values.metrics.dashboard.enabled }}
 ---
-# Grafana 面板：kube-prometheus-stack 的 Grafana sidecar 按标签自动导入
+# Grafana dashboard: the Grafana sidecar of kube-prometheus-stack imports it automatically by label
 apiVersion: v1
 kind: ConfigMap
 metadata:

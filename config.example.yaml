@@ -1,40 +1,42 @@
-# registry-mirrors-relay 配置示例。只需要写和默认值不同的部分。
-# 运行 registry-mirrors-relay check -config 本文件 -print 可以查看全部生效的值（含默认值）。
+# Example registry-mirrors-relay configuration. Write only what differs from the defaults.
+# Run registry-mirrors-relay check -config <this file> -print to see every effective value (defaults included).
 #
-# 这个例子：放在 CDN 之后（CDN 负责 TLS），一个单域名入口覆盖所有标准用法，另有每个上游一个子域名的旧用法。
+# This example: behind a CDN (the CDN handles TLS), one single-domain entrance covering every standard usage, plus
+# the older style with one subdomain per upstream.
 
-# 运营数据库和 ACME 证书放在这里，不存放任何镜像数据。
+# The operational database and ACME certificates are kept here; no image data is stored.
 data_dir: /var/lib/registry-mirrors-relay
 
 listen:
-  http: ":8080"              # 拉取入口（明文），CDN 回源到这里。管理后台（/admin/）和指标（/metrics）默认也在这个端口
-  # admin: "127.0.0.1:9090"  # 写了就把管理后台、管理 API 和指标挪到这个单独的端口
+  http: ":8080"              # pull entrance (plain HTTP); the CDN's origin fetches arrive here. The admin console (/admin/) and metrics (/metrics) are on this port too by default
+  # admin: "127.0.0.1:9090"  # when set, moves the admin console, the management API and the metrics to this separate port
 
 client_ip:
-  # 只信任 CDN 回源地址发来的 X-Forwarded-For，从右往左取第一个不受信任的地址
+  # Trust X-Forwarded-For only from the CDN's origin-fetch addresses; take the first untrusted address from the right
   trusted_proxies:
     - 10.0.0.0/8
     - 203.0.113.0/24
 
 site:
-  name: LinkOS Mirrors
-  operator: OpenLinkOS
+  name: Example Mirrors
+  operator: Example Org
   links:
-    home: https://linkos.org
-    status: https://uptime.linkos.org
+    home: https://example.com
+    status: https://status.example.com
     source: https://github.com/openlinkos/registry-mirrors-relay
-  # 用法页上显示服务状态（/status.json）：各上游的连通性和近 24 小时的可用率、本站的请求成功率。默认打开
+  # Show the service status on the usage page (/status.json): each upstream's reachability and availability over the
+  # last 24 hours, and this site's request success rate. On by default
   # show_status: true
 
 entrances:
-  # 单域名入口：
-  #   docker pull mirror.example.com/library/nginx         根路径，默认 Docker Hub（daemon.json 的 registry-mirrors 也是这样）
-  #   docker pull mirror.example.com/ghcr.io/owner/image   路径前缀
-  #   containerd 的 hosts.toml 指向这里时，按 ?ns= 选上游
+  # Single-domain entrance:
+  #   docker pull mirror.example.com/library/nginx         root path, Docker Hub by default (registry-mirrors in daemon.json works the same way)
+  #   docker pull mirror.example.com/ghcr.io/owner/image   path prefix
+  #   when containerd's hosts.toml points here, the upstream is chosen by ?ns=
   - name: mirror
     hosts: [mirror.example.com]
 
-  # 每个上游一个子域名（兼容旧用法）
+  # One subdomain per upstream (compatible with the older usage)
   - hosts: [docker.example.com]
     upstream: docker.io
   - hosts: [ghcr.example.com]
@@ -46,22 +48,23 @@ entrances:
   - hosts: [quay.example.com]
     upstream: quay.io
 
-  # 需要登录的入口：账号在 access.users_file 或管理后台里。用法页默认谁都能看，只有拉取要登录；
-  # page: login 时用法页也要登录，page: off 时不提供用法页
+  # An entrance that requires sign-in: the accounts are in access.users_file or the admin console. By default anyone
+  # can see the usage page and only pulls require sign-in; with page: login the usage page requires sign-in too, and
+  # with page: off there is no usage page
   # - hosts: [private.example.com]
   #   auth: basic
   #   page: public
 
 upstreams:
-  # 内置 docker.io、gcr.io、ghcr.io、registry.k8s.io、quay.io。同名的上游只写要改的字段。
+  # Built in: docker.io, gcr.io, ghcr.io, registry.k8s.io, quay.io. For an upstream with the same name, write only the fields to change.
   quay.io:
-    unlisted_redirect: pass   # 白名单外的重定向原样交给客户端；改成 deny 则返回 502
-  # 新增一个上游
+    unlisted_redirect: pass   # redirects outside the allow list are handed to the client as they are; deny returns 502 instead
+  # Add an upstream
   mcr.microsoft.com:
     registry: mcr.microsoft.com
     redirect_hosts: ['(?:[a-z0-9-]+\.)*mcr\.microsoft\.com', '(?:[a-z0-9-]+\.)*azureedge\.net']
     token_realm_hosts: ['mcr\.microsoft\.com']
-  # 给 Docker Hub 配一个只能读公开仓库的令牌，提高共用的额度：
+  # Give Docker Hub a token that can only read public repositories, to raise the shared quota:
   # docker.io:
   #   credentials:
   #     username: your-bot
@@ -70,61 +73,72 @@ upstreams:
   #     public_only: true
 
 access:
-  # users_file: /etc/registry-mirrors-relay/htpasswd   # bcrypt，可用 registry-mirrors-relay hash-password 生成
+  # users_file: /etc/registry-mirrors-relay/htpasswd   # bcrypt; registry-mirrors-relay hash-password can generate it
   images:
     deny:
       - pattern: "ghcr.io/example-bad-actor/**"
         status: 451
-        message: "此镜像因投诉已屏蔽"
+        message: "This image has been blocked following a complaint"
 
 limits:
-  manifest_rate: 2       # 每个客户端每秒的 manifest 请求，突发 120
+  manifest_rate: 2       # manifest requests per client per second, burst 120
   manifest_burst: 120
   blob_streams_per_client: 16
 
-# manifest 内存缓存（只放 manifest，不放镜像层）。按 tag 拉取时先 HEAD（Docker Hub 不计次数），
-# 同一个 tag 反复拉只有第一次消耗上游额度。max_bytes 为 0 时关闭。
+# In-memory manifest cache (manifests only, never layers). Pulls by tag start with a HEAD (which Docker Hub does not
+# count), so pulling the same tag again and again uses upstream quota only the first time. max_bytes: 0 turns it off.
 # cache:
 #   max_bytes: 64MiB
-#   tag_ttl: 30s          # tag → digest 的映射多久后重新确认
-#   stale_if_error: 6h    # 上游出错时还能用旧的映射多久
+#   tag_ttl: 30s          # how long until a tag → digest mapping is confirmed again
+#   stale_if_error: 6h    # how long the old mapping can still be used while the upstream returns errors
 
 # proxy:
-#   buffer_size: 16KiB    # 每个流的转发缓冲
-#   blob_http2: false     # 镜像层默认走 HTTP/1.1，见 docs/benchmark.md
-#   breaker_failures: 5   # 连续 5 次连不上上游就熔断
+#   buffer_size: 16KiB    # forwarding buffer per stream
+#   blob_http2: false     # layers use HTTP/1.1 by default, see docs/benchmark.md
+#   breaker_failures: 5   # the breaker trips after 5 consecutive failures to reach the upstream
 #   breaker_cooldown: 10s
-#   health_interval: 1m   # 探测各上游 /v2/ 的间隔（不算拉取次数），0 表示不探测
+#   health_interval: 1m   # interval between probes of each upstream's /v2/ (not counted as pulls); 0 disables probing
 
-# 管理后台和 API（见 docs/admin.md、docs/api.md）。运营数据（后台建的账号、规则、封禁）存在 data_dir/state.db。
+# Admin console and API (see docs/admin.md, docs/api.md). Operational data (accounts, rules and bans created in the
+# console) is stored in data_dir/state.db.
 admin:
-  # 第一个管理员：没有默认口令。运营数据库里还没有管理员时按它创建，第一次登录后必须改口令，之后请删掉这一段。
-  # 容器里更简单的做法是设置环境变量 RELAY_ADMIN_PASSWORD_FILE 指向口令文件（secret）。
-  # 也可以停止服务后运行 registry-mirrors-relay admin create。见 docs/admin.md。
+  # First administrator: there is no default password. On the first start the service creates admin with a generated
+  # password, written to the log once; registry-mirrors-relay admin password sets one at any time, also while the
+  # service runs. To choose the first one yourself, use this section (applied while the operational database has no
+  # administrator; the password must be changed after the first sign-in, and the section should then be removed), or
+  # in a container point RELAY_ADMIN_PASSWORD_FILE at a password file (a secret). See docs/admin.md.
   # initial_admin:
   #   username: admin
-  #   password: {file: /run/secrets/relay_admin_password}   # 12 到 72 个字节，不要直接写在配置里
-  # 管理后台和管理 API 默认对所有地址开放，经 CDN、反向代理用拉取的域名就能打开（/admin/），靠登录保护。
-  # 对外请放在 HTTPS 之后。写 false 时只回应下面 allow、proxied_allow 里的地址，经代理来的一律 404
+  #   password: {file: /run/secrets/relay_admin_password}   # 12 to 72 bytes; do not write it into the configuration directly
+  # The admin console and the management API are open to every address by default: through a CDN or reverse proxy they
+  # open on the pull domain (/admin/), protected by sign-in.
+  # Put them behind HTTPS when they face the internet. With false, only the addresses in allow and proxied_allow below get
+  # an answer, and proxied requests always get 404
   # public: true
-  # 指标和 pprof（没有登录），以及 public: false 时的后台：只接受不经代理的直连，并且对端在这些地址里
+  # Metrics and pprof (no sign-in), and the console when public: false: only direct connections that do not come through a
+  # proxy are accepted, and the peer must be in these addresses
   # allow: [loopback, private_ranges]
-  # 后台的正式地址（可选）：写了 https 的地址时，用它访问只认 __Host- 的会话 Cookie
+  # The console's canonical address (optional): when it is an https address, access through it accepts only the __Host-
+  # session cookie
   # public_url: https://admin.example.com
-  # public: false 时还要经 https 反向代理访问：代理写进 client_ip.trusted_proxies，再放行客户端地址
+  # To reach the console through an https reverse proxy as well when public: false, add the proxy to
+  # client_ip.trusted_proxies, then allow the client addresses
   # proxied_allow: [198.51.100.0/24]
   api_tokens:
-    - {name: ops, role: admin, token: {env: RELAY_ADMIN_TOKEN}}   # 至少 32 个字符：openssl rand -hex 32
-  # 在后台改配置（入口、上游、限流、缓存等）：存在 state.db 里，叠加在这个文件之上，默认打开。
-  # 配置放在 Git 里、要完全以这个文件为准时写 false：后台的修改都不生效，只能重置。见 docs/admin.md
+    - {name: ops, role: admin, token: {env: RELAY_ADMIN_TOKEN}}   # at least 32 characters: openssl rand -hex 32
+  # Changing the configuration in the console (entrances, upstreams, limits, cache and more): stored in state.db, layered
+  # on top of this file, on by default.
+  # Set false when the configuration lives in Git and this file must be the only source of truth: console overrides then
+  # never take effect and can only be reset. See docs/admin.md
   # config_edit: true
-  # store: {driver: none}   # k8s 多副本时：运营数据只读，全部来自配置文件
+  # store: {driver: none}   # for multiple replicas on k8s: operational data is read-only and comes entirely from the configuration file
 
-# Prometheus 指标：和管理后台在同一个入口，只接受本机、内网的直连（admin.allow），默认关
+# Prometheus metrics: on the same entrance as the admin console, accepting only direct connections from the local machine
+# and the internal network (admin.allow); off by default
 # metrics:
 #   enabled: true
-#   pprof: false   # 再开 /debug/pprof/
+#   pprof: false   # also enables /debug/pprof/
 
 log:
   access:
-    output: stdout       # 容器里写 stdout；也可以写 file，按大小轮转
+    output: stdout       # in a container write to stdout; file is also possible, rotated by size

@@ -1,4 +1,5 @@
-# 直接对外，用 ACME 自动申请证书。全部选项见仓库的 config.example.yaml。
+# Facing the internet directly, with certificates obtained automatically through ACME. For every option see
+# config.example.yaml in the repository.
 data_dir: /var/lib/registry-mirrors-relay
 
 listen:
@@ -8,8 +9,8 @@ listen:
 tls:
   mode: acme
   acme:
-    email: admin@example.com          # Let's Encrypt 的到期提醒发到这里，可以不写
-    # hosts 默认取下面入口里写明的域名；证书存在 data_dir/acme
+    email: admin@example.com          # Let's Encrypt sends expiry reminders here; optional
+    # hosts defaults to the domains named in the entrances below; certificates are stored in data_dir/acme
 
 site:
   name: My Registry Mirror

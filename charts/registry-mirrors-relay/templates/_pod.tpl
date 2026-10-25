@@ -1,4 +1,4 @@
-{{/* Deployment（readonly）和 StatefulSet（writable）共用的 Pod 模板，安全设置和 kustomize 的 base 一致 */}}
+{{/* The Pod template shared by the Deployment (readonly) and the StatefulSet (writable); its security settings match the kustomize base */}}
 {{- define "rmr.podTemplate" -}}
 metadata:
   labels:
@@ -13,7 +13,7 @@ metadata:
     {{- end }}
 spec:
   serviceAccountName: {{ include "rmr.serviceAccountName" . }}
-  # relay 不调用 Kubernetes API
+  # the relay does not call the Kubernetes API
   automountServiceAccountToken: false
   enableServiceLinks: false
   {{- with .Values.imagePullSecrets }}
@@ -91,7 +91,7 @@ spec:
       {{- end }}
       {{- if .Values.preStopSleepSeconds }}
       lifecycle:
-        # 等 Service 把这个 Pod 摘掉再开始退出
+        # wait for the Service to remove this Pod before starting to exit
         preStop:
           sleep:
             seconds: {{ .Values.preStopSleepSeconds }}
@@ -115,7 +115,7 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
   volumes:
-    # 整个目录挂载（不用 subPath），ConfigMap 更新后 relay 会自动重新加载
+    # the whole directory is mounted (no subPath), so the relay reloads automatically when the ConfigMap changes
     - name: config
       configMap:
         name: {{ include "rmr.fullname" . }}-config
@@ -125,7 +125,7 @@ spec:
         sizeLimit: {{ .Values.dataDir.sizeLimit }}
     {{- end }}
     {{- if .Values.admin.existingSecret }}
-    # optional：第一个管理员建好后可以删掉这个 Secret
+    # optional: this Secret can be deleted once the first administrator has been created
     - name: admin-password
       secret:
         secretName: {{ .Values.admin.existingSecret }}

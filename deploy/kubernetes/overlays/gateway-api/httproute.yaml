@@ -4,7 +4,7 @@ metadata:
   name: registry-mirrors-relay
 spec:
   parentRefs:
-    - name: public-gateway        # 你的 Gateway
+    - name: public-gateway        # your Gateway
       namespace: gateway-system
   hostnames:
     - mirror.example.com
@@ -12,7 +12,8 @@ spec:
     - backendRefs:
         - name: registry-mirrors-relay
           port: 80
-      # 镜像层可能要下载很久：关掉总超时（relay 自己按空闲时间判断连接是否断了）
+      # a layer can take a long time to download: turn off the overall timeouts (the relay itself decides from idle
+      # time whether a connection has gone)
       timeouts:
         request: 0s
         backendRequest: 0s

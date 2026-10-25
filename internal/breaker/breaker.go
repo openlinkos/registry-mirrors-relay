@@ -108,7 +108,7 @@ func (b *Breaker) Cancel() {
 	}
 }
 
-// Open reports whether the breaker is currently open (for metrics and the console).
+// Open reports whether the breaker is open or half-open, that is, not closed (for metrics and the console).
 func (b *Breaker) Open() bool {
 	if b == nil {
 		return false

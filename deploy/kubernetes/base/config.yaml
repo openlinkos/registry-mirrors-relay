@@ -1,16 +1,20 @@
-# 挂载到 /etc/registry-mirrors-relay/config.yaml，代替镜像自带的配置。全部选项见仓库的 config.example.yaml。
+# Mounted at /etc/registry-mirrors-relay/config.yaml in place of the configuration built into the image. For
+# every option see config.example.yaml in the repository.
 data_dir: /var/lib/registry-mirrors-relay
 
 listen:
-  # 拉取入口。管理后台（/admin/）也在这个端口，只接受不经代理的直连（kubectl port-forward），
-  # 经 Ingress、Gateway 来的请求是 404。指标默认关，monitoring overlay 会打开
+  # Pull entrance. The admin console (/admin/) is on this port too: open to every address and protected by
+  # sign-in, through an Ingress or Gateway as well. Metrics answer only direct connections and are off by
+  # default; the monitoring overlay turns them on
   http: ":8080"
 
 admin:
-  # 多副本时运营数据只读：账号、规则、封禁都写在这个文件里，后台只能查看
+  # With multiple replicas the operational data is read-only: accounts, rules and bans are all written in this
+  # file, and the console can only view them
   store: {driver: none}
 
-# 默认一个单域名入口，匹配任意 Host。对外的域名写在这里，用法页会用到它：
+# By default there is one single-domain entrance matching any Host. Write the public domain here; the usage page
+# uses it:
 # entrances:
 #   - name: mirror
 #     hosts: [mirror.example.com]

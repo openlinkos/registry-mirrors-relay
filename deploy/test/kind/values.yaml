@@ -1,4 +1,5 @@
-# kind 端到端测试用（scripts/kind-e2e.sh，INSTALL=helm）：和 kustomization.yaml 等价，名字、NodePort、Secret 都相同。
+# For the kind end-to-end test (scripts/kind-e2e.sh, INSTALL=helm): equivalent to kustomization.yaml, with the
+# same names, NodePort and Secret.
 fullnameOverride: registry-mirrors-relay
 image:
   repository: registry-mirrors-relay

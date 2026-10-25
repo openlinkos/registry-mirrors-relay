@@ -1,4 +1,5 @@
-# 尽量多的选项一起开：多个域名、每个域名一个上游、需要登录，HTTPS 交给 Ingress
+# as many options as possible at once: several domains, one upstream per domain, sign-in required,
+# HTTPS left to the Ingress
 mode: writable
 admin:
   existingSecret: relay-admin

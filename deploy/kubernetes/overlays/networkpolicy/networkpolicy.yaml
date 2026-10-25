@@ -8,9 +8,11 @@ spec:
       app.kubernetes.io/name: registry-mirrors-relay
   policyTypes: [Ingress, Egress]
   ingress:
-    # 拉取入口（也是管理后台和指标的入口）：节点上的 containerd、集群里的 Pod、Ingress、Gateway、Prometheus 都会连。
-    # 管理路径由 relay 自己把关（只接受不经代理的直连）；NetworkPolicy 不能按路径过滤。
-    # kubectl port-forward 不经过 NetworkPolicy
+    # pull entrance (also the entrance for the admin console and metrics): containerd on the nodes, Pods in the
+    # cluster, Ingress, Gateway and Prometheus all connect to it.
+    # The relay guards the management paths itself (sign-in for the console, direct connections only for metrics);
+    # NetworkPolicy cannot filter by path.
+    # kubectl port-forward does not go through NetworkPolicy
     - ports:
         - port: 8080
           protocol: TCP
@@ -25,7 +27,8 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    # 上游 registry、令牌服务和对象存储：只用 HTTPS，只去公网（relay 自己也拒绝连接内网地址）
+    # upstream registries, token services and object storage: HTTPS only, internet only (the relay itself also
+    # refuses to connect to internal addresses)
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0

@@ -1,4 +1,5 @@
-# 网络策略：入站只放行 8080，出站只放行 DNS 和公网的 443。需要集群的网络插件支持 NetworkPolicy。
+# Network policy: ingress allows only 8080, egress allows only DNS and 443 on the internet. Requires a cluster
+# network plugin that supports NetworkPolicy.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

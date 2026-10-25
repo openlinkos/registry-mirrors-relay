@@ -1,20 +1,24 @@
-# base 的配置加上打开指标。全部选项见仓库的 config.example.yaml。
+# The base configuration with metrics turned on. For every option see config.example.yaml in the repository.
 data_dir: /var/lib/registry-mirrors-relay
 
 listen:
-  # 拉取入口。管理后台（/admin/）也在这个端口，只接受不经代理的直连（kubectl port-forward），
-  # 经 Ingress、Gateway 来的请求是 404。指标默认关，monitoring overlay 会打开
+  # Pull entrance. The admin console (/admin/) is on this port too: open to every address and protected by
+  # sign-in, through an Ingress or Gateway as well. Metrics answer only direct connections and are off by
+  # default; the monitoring overlay turns them on
   http: ":8080"
 
 admin:
-  # 多副本时运营数据只读：账号、规则、封禁都写在这个文件里，后台只能查看
+  # With multiple replicas the operational data is read-only: accounts, rules and bans are all written in this
+  # file, and the console can only view them
   store: {driver: none}
 
-# 默认一个单域名入口，匹配任意 Host。对外的域名写在这里，用法页会用到它：
+# By default there is one single-domain entrance matching any Host. Write the public domain here; the usage page
+# uses it:
 # entrances:
 #   - name: mirror
 #     hosts: [mirror.example.com]
 
-# 指标：Prometheus 从集群里直连 Pod 的 8080 抓 /metrics（经 Ingress、Gateway 的请求抓不到）
+# Metrics: Prometheus scrapes /metrics from port 8080 of the Pods directly inside the cluster (requests through an
+# Ingress or Gateway cannot scrape them)
 metrics:
   enabled: true

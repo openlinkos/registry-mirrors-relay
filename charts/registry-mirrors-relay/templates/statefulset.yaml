@@ -6,7 +6,7 @@ metadata:
   labels:
     {{- include "rmr.labels" . | nindent 4 }}
 spec:
-  # 运营数据库（bbolt）同时只能被一个进程打开
+  # the operational database (bbolt) can be open in only one process at a time
   replicas: 1
   revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   serviceName: {{ include "rmr.fullname" . }}

@@ -1,4 +1,5 @@
-# writable：StatefulSet + PVC，第一个管理员来自 Secret（ct install 时不存在也能启动：Secret 是 optional）
+# writable: StatefulSet + PVC, first administrator from a Secret (it still starts when the Secret does not exist
+# during ct install: the Secret is optional)
 mode: writable
 admin:
   existingSecret: relay-ci-admin

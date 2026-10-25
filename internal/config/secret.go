@@ -8,7 +8,8 @@ import (
 )
 
 // Secret is a secret read from an environment variable or a file (suited to k8s Secrets and systemd
-// LoadCredential). It can also be written inline in the configuration with value, but check warns about it.
+// LoadCredential). It can also be written inline in the configuration with value; check warns about that for
+// upstream credentials and the initial_admin password.
 // It always prints and serialises as [redacted].
 type Secret struct {
 	Env   string `yaml:"env"`

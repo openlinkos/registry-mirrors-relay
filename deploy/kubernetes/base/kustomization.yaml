@@ -1,5 +1,6 @@
-# registry-mirrors-relay 的基础部署：2 个副本，运营数据只读（admin.store.driver: none，全部来自 config.yaml）。
-# 说明见 docs/deploy.md。用法：kubectl apply -k deploy/kubernetes/base -n <命名空间>
+# Base deployment of registry-mirrors-relay: 2 replicas, read-only operational data (admin.store.driver: none,
+# everything comes from config.yaml).
+# See docs/deploy.md. Usage: kubectl apply -k deploy/kubernetes/base -n <namespace>
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -14,7 +15,7 @@ resources:
   - service.yaml
   - pdb.yaml
 
-# 配置变了会生成新的名字，Deployment 随之滚动更新
+# a configuration change generates a new name, and the Deployment rolls out with it
 configMapGenerator:
   - name: registry-mirrors-relay-config
     files:
@@ -22,4 +23,4 @@ configMapGenerator:
 
 images:
   - name: ghcr.io/openlinkos/registry-mirrors-relay
-    newTag: v0.4.0
+    newTag: v0.5.0

@@ -51,7 +51,7 @@ ingress:
       secretName: mirror-example-com-tls
 ```
 
-To let containerd on the nodes pull through the relay, expose it on an address the nodes can reach (`service.type: NodePort` or `LoadBalancer`, or the Ingress host) and write `/etc/containerd/certs.d/<upstream>/hosts.toml`; see the [deployment guide](https://github.com/openlinkos/registry-mirrors-relay/blob/main/docs/deploy.en.md).
+To let containerd on the nodes pull through the relay, expose it on an address the nodes can reach (`service.type: NodePort` or `LoadBalancer`, or the Ingress host) and write `/etc/containerd/certs.d/<upstream>/hosts.toml`; see the [deployment guide](https://github.com/openlinkos/registry-mirrors-relay/blob/main/docs/deploy.md).
 
 ## Verify
 

@@ -1,4 +1,5 @@
-# 指标和拉取共用端口时 NodePort 要 externalTrafficPolicy: Local，否则外部客户端看起来像集群内的地址
+# when metrics share the port with pulls, NodePort needs externalTrafficPolicy: Local, otherwise outside
+# clients look like addresses inside the cluster
 service:
   type: NodePort
 metrics:

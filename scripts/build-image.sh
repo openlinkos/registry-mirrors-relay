@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# 从源码构建镜像：先在本机为各个平台编译二进制，放进构建上下文的 <平台>/ 目录，再用仓库里的 Dockerfile 打包。
-# 和发布流水线（GoReleaser）用的是同一个 Dockerfile。需要 go 和 docker（buildx）。
+# Builds the image from source: compiles the binary for each platform on this machine, puts it in the
+# build context's <platform>/ directory, then packages it with the repository's Dockerfile.
+# It uses the same Dockerfile as the release pipeline (GoReleaser). Requires go and docker (buildx).
 #
-# 用法：scripts/build-image.sh [镜像名，默认 registry-mirrors-relay:dev] [平台，默认本机的 linux 平台]
+# Usage: scripts/build-image.sh [image name, default registry-mirrors-relay:dev]
+#                               [platforms, default this machine's linux platform]
 #   scripts/build-image.sh registry-mirrors-relay:dev
-#   PUSH=1 scripts/build-image.sh registry.example.com/relay:dev linux/amd64,linux/arm64   # 多平台要推送到仓库
+#   PUSH=1 scripts/build-image.sh registry.example.com/relay:dev linux/amd64,linux/arm64   # multi-platform builds must be pushed to a registry
 set -euo pipefail
 
 IMAGE="${1:-registry-mirrors-relay:dev}"
@@ -31,4 +33,4 @@ if [ "${PUSH:-}" = 1 ]; then
 else
   docker buildx build --platform "$PLATFORMS" -t "$IMAGE" --load "$ctx"
 fi
-echo "已构建 $IMAGE（$PLATFORMS）"
+echo "Built $IMAGE ($PLATFORMS)"
