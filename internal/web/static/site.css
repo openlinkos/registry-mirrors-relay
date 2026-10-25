@@ -124,3 +124,8 @@ html:not(.js) .site-panel + .site-panel {
     margin-block-start: var(--ol-space-2);
   }
 }
+
+/* A code block without a label leaves room on its first line for the copy button. */
+.ol-code:has(> .ol-copy):not(:has(> .ol-code-label)) > pre {
+  padding-inline-end: var(--ol-space-10);
+}

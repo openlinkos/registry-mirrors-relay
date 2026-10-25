@@ -19,3 +19,8 @@
 .ol-form-section-body:has(#upstream option[value=""]:not(:checked)) > .admin-single-only {
   display: none;
 }
+
+/* A code block without a label leaves room on its first line for the copy button. */
+.ol-code:has(> .ol-copy):not(:has(> .ol-code-label)) > pre {
+  padding-inline-end: var(--ol-space-10);
+}
