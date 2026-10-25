@@ -213,13 +213,12 @@ var hanExempt = []string{
 	"internal/i18n/zh.go",
 	"internal/i18n/i18n_test.go", // tests the translations
 	"internal/admin/messages_zh.go",
+	"internal/web/messages_zh.go",
 	"internal/ui/vendor/",
 }
 
 // hanPending lists files still being translated. It must shrink to nothing.
-var hanPending = []string{
-	"internal/web/static/index.html",
-}
+var hanPending = []string{}
 
 var han = regexp.MustCompile(`[\p{Han}\x{3000}-\x{303F}\x{FF00}-\x{FFEF}]`)
 

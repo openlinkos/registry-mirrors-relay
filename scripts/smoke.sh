@@ -164,6 +164,12 @@ for i in "${!BASES[@]}"; do
 done
 s="$(status "${BASES[0]}/robots.txt")"
 [ "$s" = 200 ] && ok "/robots.txt returned 200" || bad "/robots.txt returned $s, expected 200"
+css="$(cu -s "${BASES[0]}/" | grep -o '/assets/ui\.[0-9a-f]*\.css' | head -n 1 || true)"
+ct="$(cu -s -o /dev/null -w '%{http_code} %{content_type}' "${BASES[0]}${css:-/assets/missing.css}")"
+case "$ct" in
+  "200 text/css"*) ok "the usage page's stylesheet ($css) is served" ;;
+  *) bad "the usage page's stylesheet ${css:-(not referenced)} returned '$ct', expected 200 text/css" ;;
+esac
 
 echo "Admin console and metrics"
 if [ -n "${SMOKE_DOMAIN:-}" ]; then

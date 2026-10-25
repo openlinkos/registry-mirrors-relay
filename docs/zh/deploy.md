@@ -284,13 +284,21 @@ gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.5
 
 ## 用法页和服务状态
 
-浏览器打开任一入口的域名，看到的是用法页：各上游的加速地址、地址转换、Docker、containerd、k3s、Podman 的配置，以及**服务状态**：
+浏览器打开任一入口的域名，看到的是用法页：本站加速哪些仓库，按本站域名填好的 Docker、containerd、k3s、Podman 和 Kubernetes 工具的配置步骤，地址转换，各上游的加速地址，以及**服务状态**：
 
 - 各上游现在能不能连通、延迟多少，熔断的上游会标出来。relay 每分钟（`proxy.health_interval`）请求一次各上游的 `/v2/`，不计入拉取额度。
 - 近 24 小时每小时一格：上游的可用率，以及本站的请求成功率（非 5xx 的比例，请求少于 20 个的小时不算）。
 - 版本和已运行时长。数据只在内存里，重启后从头统计。
 
 数据来自 `/status.json`，页面每分钟刷新一次。这个接口谁都能访问，所以只有公开也无妨的内容：失败原因只给分类（超时、DNS、连接、TLS、HTTP 状态码），不给错误原文、地址、上游额度和请求量。不想显示时写 `site.show_status: false`。
+
+页面怎么生成：
+
+- **按配置生成。** 每个上游显示固定到它的入口的域名；没有的话，显示单域名入口的域名加路径前缀（`mirror.example.com/ghcr.io/…`）；哪个入口都到不了的上游不显示。单域名入口匹配任意域名时（默认如此），页面填上打开它时用的域名。需要登录的入口，步骤从逐个域名的 `docker login` 开始，Docker 也改为用加速地址拉取，因为 `registry-mirrors` 不会带上登录信息。
+- **名称和外观。** `site.name` 是页面标题，`site.operator` 写在首屏和页脚，`site.links`（`status`、`terms`、`privacy`、`abuse`、`source`、`home`）放在页脚，只显示写了的。`site.brand` 采用 OpenLinkOS 设计系统里某个品牌的配色和标志，供 OpenLinkOS 和 LinkOS 的服务使用（比如 `linkos-mirrors`）；不写就是中性的外观。
+- **中英文。** 页面里两种语言都有。依次按 `?lang=en` 或 `?lang=zh`、`relay-lang` Cookie 里选过的语言（和管理后台共用）、浏览器的语言决定，都不匹配时用英文；页头的菜单可以切换。配色（自动、浅色、深色）记在浏览器里。
+- **便于缓存，限制严格。** 页面只随配置变化，CDN 可以缓存（`Cache-Control: no-cache` 要求重新验证）。样式、脚本、字体和标志放在 `/assets/` 下，文件名带内容哈希，缓存一年。不从别处加载任何东西；内容安全策略只允许本站文件，不允许内联脚本和样式，并启用不带任何策略的 Trusted Types。
+- **没有 JavaScript 时**，页面照样能完整阅读（英文）：各运行时的步骤依次列出，还有各上游的加速地址；地址转换、语言和配色切换、实时状态需要脚本。
 
 ## 从 v0.4 升级
 

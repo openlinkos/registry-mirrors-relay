@@ -284,13 +284,21 @@ gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.5
 
 ## Usage page and service status
 
-Opening any entrance's host in a browser shows the usage page: the mirror address for each upstream, an address converter, configuration for Docker, containerd, k3s and Podman, and the **service status**:
+Opening any entrance's host in a browser shows the usage page: what the site mirrors, the steps to configure Docker, containerd, k3s, Podman and Kubernetes tools with this site's hosts filled in, an address converter, the mirror address of each upstream, and the **service status**:
 
 - Whether each upstream is reachable right now and how fast it answers; upstreams behind an open circuit breaker are marked. The relay requests every upstream's `/v2/` once a minute (`proxy.health_interval`), which does not count against pull quotas.
 - One bar per hour for the last 24 hours: each upstream's availability, and this site's request success rate (the share of responses that are not 5xx; hours with fewer than 20 requests are not counted).
 - Version and uptime. The figures live in memory and start again after a restart.
 
 The page reads `/status.json` and refreshes it every minute. Anyone can fetch it, so it holds only what is safe to publish: failures are reduced to a category (timeout, DNS, connection, TLS, HTTP status), never the raw error, addresses, upstream quotas or request counts. Set `site.show_status: false` to turn it off.
+
+How the page is built:
+
+- **From the configuration.** Each upstream appears with the host of the entrance fixed to it, or else under the single-domain entrance's host as a path prefix (`mirror.example.com/ghcr.io/…`); upstreams no entrance reaches are left out. When the single-domain entrance answers on any host (the default), the page puts in the host it was opened on. On entrances that require sign-in, the steps start with `docker login` for each host, and Docker is told to pull through the mirror's address, because `registry-mirrors` sends no sign-in.
+- **Names and looks.** `site.name` is the page's title, `site.operator` is named in the hero and the footer, and `site.links` (`status`, `terms`, `privacy`, `abuse`, `source`, `home`) fill the footer; only the ones you set appear. `site.brand` takes the colours and marks of a brand of the OpenLinkOS design system, for OpenLinkOS and LinkOS services (`linkos-mirrors`, for one); leave it out for the neutral look.
+- **English and Chinese.** The page carries both. It shows the one in `?lang=en` or `?lang=zh`, then the one chosen in the `relay-lang` cookie (shared with the admin console), then the browser's, and English otherwise; the menu in the header switches it. The theme (auto, light, dark) is kept in the browser.
+- **Cache-friendly and locked down.** The page changes only when the configuration does, so a CDN can cache it (`Cache-Control: no-cache` asks it to revalidate). Its stylesheet, script, fonts and marks are served from `/assets/` under names that carry their hash and are cached for a year. Nothing is loaded from elsewhere; the Content-Security-Policy allows only the site's own files, no inline script or style, and Trusted Types with no policy.
+- **Without JavaScript** the page still reads whole in English: every runtime's steps one after another, and the mirror addresses; the converter, the language and theme switches and the live status need the script.
 
 ## Upgrading from v0.4
 

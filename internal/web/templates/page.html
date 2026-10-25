@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>{{.Name}}</title>
+<meta name="description" content="{{te "hero.lead" "registries" .Registries}}">
+<link rel="icon" href="{{.Mark "favicon.svg"}}" type="image/svg+xml">
+<link rel="stylesheet" href="{{.Asset "ui.css"}}">
+<link rel="stylesheet" href="{{.Asset "site.css"}}">
+<script src="{{.Asset "head.js"}}"></script>
+<script type="module" src="{{.Asset "site.js"}}"></script>
+</head>
+<body{{with .Brand}} data-brand="{{.}}"{{end}} data-page="{{.Data}}">
+<svg data-sprite hidden></svg>
+<template id="tpl-copy">{{template "copy" (dict "ID" "" "Label" "js.copy")}}</template>
+<a class="ol-skip-link" href="#main">{{t "skip"}}</a>
+<header class="ol-site-header">
+  <a class="ol-brand" href="#main"><img src="{{.Mark "logo.svg"}}" alt="" width="24" height="24" class="site-logo-light"><img src="{{.Mark "logo-dark.svg"}}" alt="" width="24" height="24" class="site-logo-dark"><span>{{.Name}}</span></a>
+  <nav class="ol-site-nav" aria-label="{{te "nav.label"}}" data-zh-aria-label="{{tz "nav.label"}}">
+    <a href="#start">{{t "nav.start"}}</a>
+    <a href="#convert">{{t "nav.convert"}}</a>
+    <a href="#mirrors">{{t "nav.mirrors"}}</a>
+    {{if .ShowStatus}}<a href="#status" data-status-link hidden>{{t "nav.status"}}</a>{{end}}
+    <a href="#faq">{{t "nav.faq"}}</a>
+  </nav>
+  <div class="ol-site-tools">
+    <button class="ol-btn ol-btn-ghost ol-btn-sm only-js" type="button" popovertarget="lang-menu">{{icon "languages" "sm"}}<span class="ol-sr-only">{{t "lang.label"}}</span><span data-l="en">{{.ENName}}</span><span data-l="zh" lang="zh-CN">{{.ZHName}}</span>{{icon "chevron-down" "sm"}}</button>
+    <div class="ol-menu ol-menu-end" id="lang-menu" popover>
+      <a class="ol-menu-item" href="?lang=en" lang="en" hreflang="en" data-lang="en" aria-current="true">{{.ENName}}</a>
+      <a class="ol-menu-item" href="?lang=zh" lang="zh-CN" hreflang="zh-CN" data-lang="zh">{{.ZHName}}</a>
+    </div>
+    <fieldset class="ol-segmented ol-segmented-icons only-js">
+      <legend class="ol-sr-only">{{t "theme.label"}}</legend>
+      <button type="button" data-set-theme="auto" aria-pressed="true" aria-label="{{te "theme.auto"}}" title="{{te "theme.auto"}}" data-zh-aria-label="{{tz "theme.auto"}}" data-zh-title="{{tz "theme.auto"}}">{{icon "sun-moon" "sm"}}</button>
+      <button type="button" data-set-theme="light" aria-pressed="false" aria-label="{{te "theme.light"}}" title="{{te "theme.light"}}" data-zh-aria-label="{{tz "theme.light"}}" data-zh-title="{{tz "theme.light"}}">{{icon "sun" "sm"}}</button>
+      <button type="button" data-set-theme="dark" aria-pressed="false" aria-label="{{te "theme.dark"}}" title="{{te "theme.dark"}}" data-zh-aria-label="{{tz "theme.dark"}}" data-zh-title="{{tz "theme.dark"}}">{{icon "moon" "sm"}}</button>
+    </fieldset>
+  </div>
+</header>
+
+<main id="main" tabindex="-1">
+  <section class="ol-hero" aria-labelledby="hero-title">
+    <div class="ol-hero-rings" aria-hidden="true"><img class="ol-rings-mark" src="{{.Mark "logo-dark.svg"}}" alt=""></div>
+    <div class="ol-hero-body">
+      {{if .ShowStatus}}<a class="ol-status" href="#status" data-status-pill hidden><span class="ol-dot ol-dot-live"></span><span data-status-text></span></a>{{end}}
+      <h1 class="ol-hero-title" id="hero-title">{{t "hero.title"}}</h1>
+      <p class="ol-hero-lead">{{t "hero.lead" "registries" .Registries}}{{if .Login}}{{t "space"}}{{t "hero.signIn"}}{{end}}</p>
+      <div class="ol-hero-actions">
+        <a class="ol-btn ol-btn-primary ol-btn-lg" href="#start">{{t "hero.start"}}</a>
+        <a class="ol-btn ol-btn-secondary ol-btn-lg" href="#convert">{{icon "arrow-right-left"}}{{t "hero.convert"}}</a>
+      </div>
+      {{with .Operator}}<p class="ol-hero-meta">{{t "hero.operator" "operator" .}}</p>{{end}}
+    </div>
+  </section>
+
+  <section class="ol-site-section" id="start" aria-labelledby="start-title">
+    <div class="ol-site-section-header">
+      <h2 class="ol-site-section-title" id="start-title">{{t "start.title"}}</h2>
+      <p class="ol-site-section-description">{{t "start.description"}}</p>
+    </div>
+    {{$s := .S}}{{if eq $s.DockerMode "none"}}<p class="ol-muted">{{t "start.none"}}</p>{{else}}
+    <div class="ol-tabs only-js" role="tablist" aria-label="{{te "start.tabs"}}" data-zh-aria-label="{{tz "start.tabs"}}">
+      <button class="ol-tab" type="button" role="tab" id="tab-docker" aria-controls="panel-docker" aria-selected="true">{{t "tab.docker"}}</button>
+      <button class="ol-tab" type="button" role="tab" id="tab-containerd" aria-controls="panel-containerd" aria-selected="false" tabindex="-1">{{t "tab.containerd"}}</button>
+      <button class="ol-tab" type="button" role="tab" id="tab-k3s" aria-controls="panel-k3s" aria-selected="false" tabindex="-1">{{t "tab.k3s"}}</button>
+      <button class="ol-tab" type="button" role="tab" id="tab-podman" aria-controls="panel-podman" aria-selected="false" tabindex="-1">{{t "tab.podman"}}</button>
+      <button class="ol-tab" type="button" role="tab" id="tab-k8s" aria-controls="panel-k8s" aria-selected="false" tabindex="-1">{{t "tab.k8s"}}</button>
+    </div>
+
+    <div class="ol-tab-panel site-panel" role="tabpanel" id="panel-docker" aria-labelledby="tab-docker">
+      <h3 class="ol-heading-sm only-nojs">{{t "tab.docker"}}</h3>
+      <ol class="ol-steps">
+        {{with $s.Login}}<li>
+          <h4 class="ol-step-title">{{t "login.title"}}</h4>
+          <p class="ol-muted">{{t "login.docker"}}</p>
+          {{template "code" (dict "ID" "code-docker-login" "Code" .)}}
+        </li>{{end}}
+        {{if eq $s.DockerMode "mirror"}}<li>
+          <h4 class="ol-step-title">{{t "docker.daemon.title"}}</h4>
+          <p class="ol-muted">{{t "docker.daemon.text"}}</p>
+          {{template "code" (dict "ID" "code-docker-daemon" "Code" $s.Daemon "Label" "/etc/docker/daemon.json")}}
+        </li>
+        <li>
+          <h4 class="ol-step-title">{{t "docker.restart.title"}}</h4>
+          <p class="ol-muted">{{t "docker.restart.text"}}</p>
+          {{template "code" (dict "ID" "code-docker-restart" "Code" $s.Restart)}}
+        </li>
+        <li>
+          <h4 class="ol-step-title">{{t "docker.pull.title"}}</h4>
+          <p class="ol-muted">{{t "docker.pull.text"}}</p>
+          {{template "code" (dict "ID" "code-docker-pull" "Code" $s.Pull)}}
+        </li>{{else}}<li>
+          <h4 class="ol-step-title">{{t "docker.direct.title"}}</h4>
+          <p class="ol-muted">{{if $s.NoHub}}{{t "docker.noHub.text"}}{{else}}{{t "docker.direct.text"}}{{end}}</p>
+          {{template "code" (dict "ID" "code-docker-direct" "Code" $s.Direct)}}
+        </li>{{end}}
+      </ol>
+    </div>
+
+    <div class="ol-tab-panel site-panel" role="tabpanel" id="panel-containerd" aria-labelledby="tab-containerd">
+      <h3 class="ol-heading-sm only-nojs">{{t "tab.containerd"}}</h3>
+      <ol class="ol-steps">
+        <li>
+          <h4 class="ol-step-title">{{t "containerd.config.title"}}</h4>
+          <p class="ol-muted">{{t "containerd.config.text"}}</p>
+          {{template "code" (dict "ID" "code-containerd-config" "Code" $s.ContainerdConfig "Label" "config.toml, containerd 2.x")}}
+          {{template "code" (dict "ID" "code-containerd-config1" "Code" $s.ContainerdConfig1 "Label" "config.toml, containerd 1.x")}}
+        </li>
+        <li>
+          <h4 class="ol-step-title">{{t "containerd.hosts.title"}}</h4>
+          <p class="ol-muted">{{t "containerd.hosts.text"}}{{if $s.AnyLogin}}{{t "space"}}{{t "login.containerd"}}{{end}}</p>
+          {{template "code" (dict "ID" "code-containerd-hosts" "Code" $s.ContainerdHosts)}}
+        </li>
+        <li>
+          <h4 class="ol-step-title">{{t "containerd.restart.title"}}</h4>
+          {{template "code" (dict "ID" "code-containerd-restart" "Code" $s.ContainerdRestart)}}
+        </li>
+      </ol>
+    </div>
+
+    <div class="ol-tab-panel site-panel" role="tabpanel" id="panel-k3s" aria-labelledby="tab-k3s">
+      <h3 class="ol-heading-sm only-nojs">{{t "tab.k3s"}}</h3>
+      <ol class="ol-steps">
+        <li>
+          <h4 class="ol-step-title">{{t "k3s.config.title"}}</h4>
+          <p class="ol-muted">{{t "k3s.config.text"}}{{if $s.AnyLogin}}{{t "space"}}{{t "login.k3s"}}{{end}}</p>
+          {{template "code" (dict "ID" "code-k3s" "Code" $s.K3s "Label" "registries.yaml")}}
+        </li>
+        <li>
+          <h4 class="ol-step-title">{{t "k3s.restart.title"}}</h4>
+          {{template "code" (dict "ID" "code-k3s-restart" "Code" $s.K3sRestart)}}
+        </li>
+      </ol>
+    </div>
+
+    <div class="ol-tab-panel site-panel" role="tabpanel" id="panel-podman" aria-labelledby="tab-podman">
+      <h3 class="ol-heading-sm only-nojs">{{t "tab.podman"}}</h3>
+      <ol class="ol-steps">
+        <li>
+          <h4 class="ol-step-title">{{t "podman.config.title"}}</h4>
+          <p class="ol-muted">{{t "podman.config.text"}}</p>
+          {{template "code" (dict "ID" "code-podman" "Code" $s.Podman "Label" "registries.conf")}}
+        </li>
+        {{with $s.PodmanLogin}}<li>
+          <h4 class="ol-step-title">{{t "login.title"}}</h4>
+          <p class="ol-muted">{{t "login.podman"}}</p>
+          {{template "code" (dict "ID" "code-podman-login" "Code" .)}}
+        </li>{{end}}
+        <li>
+          <h4 class="ol-step-title">{{t "podman.apply.title"}}</h4>
+          <p class="ol-muted">{{t "podman.apply.text"}}</p>
+          {{template "code" (dict "ID" "code-podman-apply" "Code" $s.PodmanApply)}}
+        </li>
+      </ol>
+    </div>
+
+    <div class="ol-tab-panel site-panel" role="tabpanel" id="panel-k8s" aria-labelledby="tab-k8s">
+      <h3 class="ol-heading-sm only-nojs">{{t "tab.k8s"}}</h3>
+      <ol class="ol-steps">
+        {{with $s.Kubeadm}}<li>
+          <h4 class="ol-step-title">{{t "k8s.kubeadm.title"}}</h4>
+          <p class="ol-muted">{{t "k8s.kubeadm.text"}}</p>
+          {{template "code" (dict "ID" "code-kubeadm" "Code" .)}}
+        </li>{{end}}
+        <li>
+          <h4 class="ol-step-title">{{t "k8s.kind.title"}}</h4>
+          <p class="ol-muted">{{t "k8s.kind.text"}}</p>
+          {{template "code" (dict "ID" "code-kind" "Code" $s.Kind "Label" "kind-config.yaml")}}
+        </li>
+        <li>
+          <h4 class="ol-step-title">{{t "k8s.other.title"}}</h4>
+          <p class="ol-muted">{{t "k8s.other.text"}}</p>
+        </li>
+      </ol>
+    </div>
+    {{end}}
+  </section>
+
+  <section class="ol-site-section ol-site-section-band" id="convert" aria-labelledby="convert-title">
+    <div class="ol-site-section-header">
+      <h2 class="ol-site-section-title" id="convert-title">{{t "convert.title"}}</h2>
+      <p class="ol-site-section-description">{{t "convert.description"}}</p>
+    </div>
+    <p class="ol-muted only-nojs">{{t "convert.nojs"}}</p>
+    <div class="ol-panel only-js">
+      <div class="ol-panel-body ol-stack">
+        <form class="ol-input-group" id="convert-form" autocomplete="off">
+          <label class="ol-sr-only" for="convert-input">{{t "convert.label"}}</label>
+          <input class="ol-input ol-input-lg ol-input-mono" id="convert-input" type="text" spellcheck="false" autocapitalize="off" placeholder="{{te "convert.placeholder"}}" data-zh-placeholder="{{tz "convert.placeholder"}}">
+          <button class="ol-btn ol-btn-primary ol-btn-lg" type="submit">{{icon "arrow-right-left"}}{{t "convert.button"}}</button>
+        </form>
+        <div class="site-result" id="convert-result" aria-live="polite"></div>
+      </div>
+      <div class="ol-panel-footer"><span>{{t "convert.try"}}</span><span class="ol-cluster" id="convert-examples"></span></div>
+    </div>
+  </section>
+
+  <section class="ol-site-section" id="mirrors" aria-labelledby="mirrors-title">
+    <div class="ol-site-section-header">
+      <h2 class="ol-site-section-title" id="mirrors-title">{{t "mirrors.title"}}</h2>
+      <p class="ol-site-section-description">{{if or .Fixed (not .SingleExample)}}{{t "mirrors.fixed"}}{{else}}{{t "mirrors.single" "example" .SingleExample}}{{end}}</p>
+    </div>
+    <ul class="ol-grid ol-grid-3">
+      {{range .Cards}}<li class="ol-card" data-upstream="{{.U.Name}}"{{with .U.Domain}} data-domain="{{.}}"{{end}}>
+        <div class="ol-card-row">
+          <span class="ol-card-title ol-mono site-mirror" id="{{.ID}}">{{.Mirror}}</span>
+          {{template "copy" (dict "ID" .ID "Label" "mirrors.copy")}}
+        </div>
+        <div class="ol-card-row">
+          <span class="ol-muted ol-text-sm">{{.U.Label}}{{if ne .U.Label .U.Name}} <span class="ol-subtle">({{.U.Name}})</span>{{end}}</span>
+          <span class="ol-cluster">{{if .U.Login}}<span class="ol-badge ol-badge-outline">{{t "mirrors.signIn"}}</span>{{end}}<span class="ol-badge ol-badge-accent" data-this-site hidden>{{t "js.thisSite"}}</span></span>
+        </div>
+        <div class="ol-card-row">
+          <span class="ol-card-meta ol-mono site-example" id="{{.ID}}-example">{{.Example}}</span>
+          <span class="ol-card-meta site-health" data-health hidden><span class="ol-dot"></span><span data-health-text></span></span>
+        </div>
+      </li>{{end}}
+    </ul>
+  </section>
+
+  {{if .ShowStatus}}<section class="ol-site-section" id="status" aria-labelledby="status-title" data-status-section hidden>
+    <div class="ol-site-section-header">
+      <h2 class="ol-site-section-title" id="status-title">{{t "status.title"}}</h2>
+      <p class="ol-site-section-description">{{t "status.description"}}</p>
+    </div>
+    <div class="ol-panel">
+      <div class="ol-panel-header"><span class="ol-status" data-status-overall><span class="ol-dot ol-dot-live"></span><span data-status-text></span></span><span class="ol-hint" data-status-meta></span></div>
+      <div class="ol-table-wrap">
+        <table class="ol-table">
+          <thead><tr><th scope="col">{{t "status.registry"}}</th><th scope="col">{{t "status.now"}}</th><th scope="col" class="ol-num">{{t "status.latency"}}</th><th scope="col">{{t "status.day"}}</th><th scope="col" class="ol-num">{{t "status.available"}}</th></tr></thead>
+          <tbody data-status-rows></tbody>
+        </table>
+      </div>
+      <div class="ol-panel-footer"><span data-status-note></span></div>
+    </div>
+  </section>{{end}}
+
+  <section class="ol-site-section" id="faq" aria-labelledby="faq-title">
+    <div class="ol-site-section-header">
+      <h2 class="ol-site-section-title" id="faq-title">{{t "faq.title"}}</h2>
+    </div>
+    <div>
+      <details class="ol-accordion" name="faq"><summary>{{t "faq.404.q"}}</summary><p>{{t "faq.404.a"}}</p></details>
+      <details class="ol-accordion" name="faq"><summary>{{t "faq.429.q"}}</summary><p>{{t "faq.429.a"}}</p></details>
+      <details class="ol-accordion" name="faq"><summary>{{t "faq.5xx.q"}}</summary><p>{{if .StatusLink}}{{t "faq.5xx.aLink" "link" .StatusLink}}{{else if .ShowStatus}}{{t "faq.5xx.aStatus"}}{{else}}{{t "faq.5xx.a"}}{{end}}</p></details>
+      <details class="ol-accordion" name="faq"><summary>{{t "faq.cache.q"}}</summary><p>{{t "faq.cache.a"}}</p></details>
+      <details class="ol-accordion" name="faq"><summary>{{t "faq.tags.q"}}</summary><p>{{t "faq.tags.a"}}</p></details>
+      <details class="ol-accordion" name="faq"><summary>{{t "faq.push.q"}}</summary><p>{{t "faq.push.a"}}</p></details>
+      <details class="ol-accordion" name="faq"><summary>{{t "faq.log.q"}}</summary><p>{{if .Privacy}}{{t "faq.log.aLink" "link" .Privacy}}{{else}}{{t "faq.log.a"}}{{end}}</p></details>
+    </div>
+  </section>
+</main>
+
+<footer class="ol-site-footer">
+  <div>
+    <a class="ol-brand" href="#main"><img src="{{.Mark "logo.svg"}}" alt="" width="24" height="24" class="site-logo-light"><img src="{{.Mark "logo-dark.svg"}}" alt="" width="24" height="24" class="site-logo-dark"><span>{{.Name}}</span></a>
+    {{with .Operator}}<p>{{t "footer.operator" "name" $.Name "operator" .}}</p>{{end}}
+    <p class="ol-site-footer-note">{{t "footer.trademark"}}{{t "space"}}{{t "footer.powered"}}</p>
+  </div>
+  {{with .Links}}<nav class="ol-site-footer-links" aria-label="{{te "footer.links"}}" data-zh-aria-label="{{tz "footer.links"}}">
+    {{range .}}<a href="{{.URL}}" rel="noopener">{{t (print "footer." .Key)}}</a>{{end}}
+  </nav>{{end}}
+</footer>
+</body>
+</html>
+
+{{define "code"}}<div class="ol-code">
+  {{with .Label}}<div class="ol-code-label">{{icon "file-text" "sm"}}{{.}}</div>{{end}}
+  <pre><code id="{{.ID}}">{{.Code}}</code></pre>
+  {{template "copy" (dict "ID" .ID "Label" "js.copy")}}
+</div>{{end}}
+
+{{define "copy"}}<button class="ol-btn ol-btn-ghost ol-btn-sm ol-btn-icon ol-copy only-js" type="button" data-copy="{{.ID}}" aria-label="{{te .Label}}" title="{{te .Label}}" data-zh-aria-label="{{tz .Label}}" data-zh-title="{{tz .Label}}"><span data-copy-icon>{{icon "copy" "sm"}}</span><span data-copied-icon hidden>{{icon "check" "sm"}}</span></button>{{end}}
