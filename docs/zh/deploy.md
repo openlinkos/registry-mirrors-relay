@@ -1,16 +1,16 @@
 # 部署
 
-简体中文 | [English](deploy.en.md)
+简体中文 | [English](../deploy.md)
 
 registry-mirrors-relay 是一个静态链接的 Go 程序，镜像数据不写盘，只在数据目录里存运营数据库（账号、规则、审计，通常不到 10 MiB）和 ACME 证书。五种部署方式：
 
 | 方式 | 适合 | 文件 |
 | --- | --- | --- |
 | `docker run` | 先试一试 | 下面的命令 |
-| Docker Compose | 一台机器长期运行 | [`deploy/compose/`](../deploy/compose/) |
-| Kubernetes（kustomize） | 集群、多副本 | [`deploy/kubernetes/`](../deploy/kubernetes/) |
-| Kubernetes（Helm） | 集群，用 Helm 或 Flux、Argo CD 管理 | [`charts/registry-mirrors-relay/`](../charts/registry-mirrors-relay/) |
-| systemd | 不用容器 | [`deploy/systemd/`](../deploy/systemd/) |
+| Docker Compose | 一台机器长期运行 | [`deploy/compose/`](../../deploy/compose/) |
+| Kubernetes（kustomize） | 集群、多副本 | [`deploy/kubernetes/`](../../deploy/kubernetes/) |
+| Kubernetes（Helm） | 集群，用 Helm 或 Flux、Argo CD 管理 | [`charts/registry-mirrors-relay/`](../../charts/registry-mirrors-relay/) |
+| systemd | 不用容器 | [`deploy/systemd/`](../../deploy/systemd/) |
 
 镜像是 `ghcr.io/openlinkos/registry-mirrors-relay`，支持 linux/amd64、arm64、arm/v7，基于 distroless，以非 root 用户（65532）运行。二进制在 [Releases](https://github.com/openlinkos/registry-mirrors-relay/releases)。
 
@@ -24,31 +24,28 @@ registry-mirrors-relay 是一个静态链接的 Go 程序，镜像数据不写�
 
 ## 第一个管理员
 
-没有默认口令。部署时用一个口令文件（Docker、Compose、k8s 的 secret，systemd 的 credential）创建第一个管理员，环境变量 `RELAY_ADMIN_PASSWORD_FILE` 指向它，用户名默认 `admin`（`RELAY_ADMIN_USERNAME` 可改）：
+没有默认口令。服务第一次启动时创建管理员 `admin`，生成一个口令，在日志里写一次（搜 `generated password`），第一次登录后改成自己的。随时可以用 `admin password` 子命令重设口令，服务运行时也可以：
 
 ```bash
-openssl rand -base64 18 > admin-password
+docker exec -it relay registry-mirrors-relay admin password
+kubectl exec -it sts/registry-mirrors-relay -- registry-mirrors-relay admin password
 ```
 
-这个管理员第一次登录后必须改口令，之后口令文件就没用了，可以删掉（环境变量留着也没关系，文件不存在时只在日志里提醒）。原因和其他办法见 [admin.md](admin.md#第一个管理员)。
+想在第一次启动前自己定口令，就用一个口令文件（Docker、Compose、k8s 的 secret，systemd 的 credential），环境变量 `RELAY_ADMIN_PASSWORD_FILE` 指向它，用户名默认 `admin`（`RELAY_ADMIN_USERNAME` 可改）。这个管理员第一次登录后必须改口令，之后口令文件就没用了，可以删掉（环境变量留着也没关系，文件不存在时只在日志里提醒）。详见 [admin.md](admin.md#第一个管理员)。
 
 ## docker run
 
 ```bash
-openssl rand -base64 18 > admin-password
-chmod 400 admin-password && sudo chown 65532 admin-password
-
-docker run -d --name registry-mirrors-relay --restart unless-stopped \
+docker run -d --name relay --restart unless-stopped \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
   -p 8080:8080 \
   -v relay-data:/var/lib/registry-mirrors-relay \
-  -v "$PWD/admin-password:/run/secrets/admin_password:ro" \
-  -e RELAY_ADMIN_PASSWORD_FILE=/run/secrets/admin_password \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.4.0
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.5.0
+docker logs relay 2>&1 | grep 'generated password'
 ```
 
-- 镜像自带一份配置：拉取入口和管理后台都在 8080，一个匹配任意域名的单域名入口。要改就把自己的配置挂到 `/etc/registry-mirrors-relay/config.yaml`（写法见 [`config.example.yaml`](../config.example.yaml)）。
-- 口令文件要让容器里的 65532 用户能读，所以要 `chown 65532`。
+- 镜像自带一份配置：拉取入口和管理后台都在 8080，一个匹配任意域名的单域名入口。要改就把自己的配置挂到 `/etc/registry-mirrors-relay/config.yaml`（写法见 [`config.example.yaml`](../../config.example.yaml)）。
+- 第一个管理员是 `admin`，口令在日志里。随时可以用 `docker exec -it relay registry-mirrors-relay admin password` 重设。想自己给第一个口令，就挂一个容器里用户 65532 能读的口令文件，用 `RELAY_ADMIN_PASSWORD_FILE` 指向它。
 - 管理后台：打开 `http://服务器:8080/admin/`。它对所有地址开放，靠口令保护；长期对外请放在 HTTPS 之后（见下面 Compose 的例子）。只想在本机打开，就在配置里写 `admin: {public: false}`，远程用 `ssh -L 8080:127.0.0.1:8080 服务器`。
 - 镜像的 `HEALTHCHECK` 运行 `registry-mirrors-relay probe`，它按配置里的端口探测 `/healthz`。
 
@@ -61,7 +58,7 @@ curl -s http://127.0.0.1:8080/v2/library/alpine/manifests/latest \
 
 ## Docker Compose
 
-[`deploy/compose/`](../deploy/compose/) 下有三个例子，每个目录里一个 `compose.yaml` 和一个 `config.yaml`：
+[`deploy/compose/`](../../deploy/compose/) 下有三个例子，每个目录里一个 `compose.yaml` 和一个 `config.yaml`：
 
 | 目录 | 做法 |
 | --- | --- |
@@ -81,7 +78,7 @@ docker compose logs -f relay
 
 ## Kubernetes
 
-[`deploy/kubernetes/`](../deploy/kubernetes/) 是 kustomize 的写法：
+[`deploy/kubernetes/`](../../deploy/kubernetes/) 是 kustomize 的写法：
 
 | 目录 | 内容 |
 | --- | --- |
@@ -102,9 +99,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: registry-mirror
 resources:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.4.0
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.5.0
 components:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.4.0
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.5.0
 ```
 
 ```bash
@@ -134,7 +131,7 @@ server = "https://registry-1.docker.io"
 
 ## Helm
 
-chart 在 [`charts/registry-mirrors-relay/`](../charts/registry-mirrors-relay/)，从 v0.1.1 起随每个版本发布到 `oci://ghcr.io/openlinkos/charts/registry-mirrors-relay`。chart 的版本号就是应用的版本号去掉 `v`；没指定 `image.tag` 时，按 digest 拉取同一次发布的镜像。需要 Helm 3.8 以上（或 Helm 4）和 Kubernetes 1.30 以上。
+chart 在 [`charts/registry-mirrors-relay/`](../../charts/registry-mirrors-relay/)，从 v0.1.1 起随每个版本发布到 `oci://ghcr.io/openlinkos/charts/registry-mirrors-relay`。chart 的版本号就是应用的版本号去掉 `v`；没指定 `image.tag` 时，按 digest 拉取同一次发布的镜像。需要 Helm 3.8 以上（或 Helm 4）和 Kubernetes 1.30 以上。
 
 | `mode` | 工作负载 | 运营数据 | 对应的 kustomize |
 | --- | --- | --- | --- |
@@ -167,7 +164,7 @@ kubectl create namespace registry-mirror
 openssl rand -base64 18 > admin-password
 kubectl -n registry-mirror create secret generic registry-mirrors-relay-admin --from-file=password=admin-password
 rm admin-password
-helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version 0.4.0 \
+helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version 0.5.0 \
   -n registry-mirror -f values.yaml
 helm test registry-mirrors-relay -n registry-mirror
 kubectl -n registry-mirror port-forward svc/registry-mirrors-relay 8080:80   # 打开 http://127.0.0.1:8080/admin/；有 Ingress 时也可以用域名
@@ -179,7 +176,7 @@ kubectl -n registry-mirror port-forward svc/registry-mirrors-relay 8080:80   # �
 - **管理后台和指标**：默认和拉取共用 8080，经 Ingress、Gateway 用域名打开 `/admin/`，或者 `port-forward` 到主 Service；`readonly` 模式有两个副本，经 Ingress 时要开会话保持。`metrics.enabled` 或 `metrics.serviceMonitor.enabled` 打开指标，ServiceMonitor 抓的也是 8080。`admin.separatePort: true` 把它们挪到单独的 9090 和 `<名字>-admin` Service。开了指标（或 `admin.public: false`）并且拉取入口的 Service 是 NodePort 或 LoadBalancer 时，要么写 `service.externalTrafficPolicy: Local`，要么拆端口，否则 chart 拒绝渲染。
 - **在后台改配置**：`mode: writable` 时可以在后台改入口、上游、限流等（见[管理后台](admin.md#在后台改配置)）。这些修改存在 PVC 里，`helm upgrade`、Flux、Argo CD 都看不到。要完全由 values 决定，在 `config` 里写 `admin: {config_edit: false}`；或者用指标 `relay_config_overrides` 报警。`readonly` 模式下后台不能改配置。
 - **可选组件**（默认都关）：`ingress`、`httpRoute`（Gateway API）、`metrics.serviceMonitor`、`metrics.dashboard`（Grafana 面板）、`networkPolicy`。
-- 全部参数见 chart 的 [README](../charts/registry-mirrors-relay/README.md)。节点怎样从 relay 拉镜像见上一节；`service.type: NodePort` 时，`helm install` 的提示里有 `hosts.toml` 的例子。
+- 全部参数见 chart 的 [README](../../charts/registry-mirrors-relay/README.md)。节点怎样从 relay 拉镜像见上一节；`service.type: NodePort` 时，`helm install` 的提示里有 `hosts.toml` 的例子。
 
 ## systemd
 
@@ -192,7 +189,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now registry-mirrors-relay
 ```
 
-单元文件用动态用户（`DynamicUser`），运营数据在 `/var/lib/registry-mirrors-relay`（`StateDirectory`），并且开了较严的沙箱（`systemd-analyze security` 评分 1.5）。第一个管理员：把口令写进一个只有 root 能读的文件，取消单元文件里 `LoadCredential=` 和 `Environment=RELAY_ADMIN_PASSWORD_FILE=` 两行的注释。`systemctl reload` 重新加载配置，不中断进行中的下载。
+单元文件用动态用户（`DynamicUser`），运营数据在 `/var/lib/registry-mirrors-relay`（`StateDirectory`），并且开了较严的沙箱（`systemd-analyze security` 评分 1.5）。第一个管理员的口令在日志里（`journalctl -u registry-mirrors-relay | grep 'generated password'`），随时可以用 `sudo registry-mirrors-relay admin password` 重设。想自己给第一个口令，就把它写进一个只有 root 能读的文件，取消单元文件里 `LoadCredential=` 和 `Environment=RELAY_ADMIN_PASSWORD_FILE=` 两行的注释。`systemctl reload` 重新加载配置，不中断进行中的下载。
 
 管理后台和拉取共用 8080：打开 `http://服务器:8080/admin/`，放在 HTTPS 反向代理之后就用它的域名。只想在本机打开就写 `admin.public: false`，远程用 `ssh -L 8080:127.0.0.1:8080 服务器`。
 
@@ -274,15 +271,15 @@ cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 sha256sum --ignore-missing -c SHA256SUMS
 
-cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.4.0 \
+cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.5.0 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.4.0 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.5.0 -R openlinkos/registry-mirrors-relay
 
-cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.4.0 \
+cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.5.0 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.4.0 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.5.0 -R openlinkos/registry-mirrors-relay
 ```
 
 ## 用法页和服务状态
@@ -294,6 +291,15 @@ gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.4
 - 版本和已运行时长。数据只在内存里，重启后从头统计。
 
 数据来自 `/status.json`，页面每分钟刷新一次。这个接口谁都能访问，所以只有公开也无妨的内容：失败原因只给分类（超时、DNS、连接、TLS、HTTP 状态码），不给错误原文、地址、上游额度和请求量。不想显示时写 `site.show_status: false`。
+
+## 从 v0.4 升级
+
+v0.5.0 不改配置，但有几处变化会被察觉：
+
+- **`admin` 子命令在服务运行时也能用**：经本地管理 socket（运营数据库旁边的 `admin.sock`）交给服务去改。`admin password` 不写名字时设唯一那个管理员的口令，`--generate` 生成口令。`-name` 仍然认。
+- **自动生成第一个管理员**：运营数据可写、没有管理员、配置里也没写时，创建 `admin`，口令在日志里写一次。
+- **默认用英文**：API 的错误、浏览器既不要中文也不要英文时的后台、`docker pull` 看到的错误、命令行输出和日志都是英文。浏览器或 `Accept-Language` 要中文时，后台和 API 用中文。API 的错误多了固定的 `code`，程序请按它判断，不要匹配文字。按日志内容（`msg`）写的告警要改成英文，字段名不变。
+- **后台的语言 Cookie** 改为 `/` 下的 `relay-lang`，和用法页共用；旧的 `relay-admin-lang` 仍然认。
 
 ## 从 v0.3 升级
 

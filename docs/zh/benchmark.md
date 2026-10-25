@@ -1,6 +1,8 @@
 # 压测
 
-用 [`tools/relaybench`](../tools/relaybench/main.go) 测。它在本机起一个假上游（TLS，开着 HTTP/2，镜像层的内容按规律生成、不占内存），再把 relay 作为子进程启动，依次测：
+简体中文 | [English](../benchmark.md)
+
+用 [`tools/relaybench`](../../tools/relaybench/main.go) 测。它在本机起一个假上游（TLS，开着 HTTP/2，镜像层的内容按规律生成、不占内存），再把 relay 作为子进程启动，依次测：
 
 1. 空闲内存（RSS）；
 2. manifest 缓存命中的延迟：先拉一次，再按 digest、按 tag 各请求 5000 次；

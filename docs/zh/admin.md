@@ -1,8 +1,8 @@
 # 管理后台
 
-简体中文 | [English](admin.en.md)
+简体中文 | [English](../admin.md)
 
-管理后台和[管理 API](api.md) 默认和拉取入口共用端口（8080），在 `/admin/`；写了 `listen.admin` 就挪到那个单独的端口。默认对所有地址开放，靠登录保护，见下面的[打开后台](#打开后台)。页面全部在服务端渲染，不加载任何第三方资源，没有脚本也能用；样式来自 OpenLinkOS 的设计系统 [`@openlinkos/ui`](https://www.npmjs.com/package/@openlinkos/ui)，打包在程序里。支持中英文和深浅色。
+管理后台和[管理 API](api.md) 默认和拉取入口共用端口（8080），在 `/admin/`；写了 `listen.admin` 就挪到那个单独的端口。默认对所有地址开放，靠登录保护，见下面的[打开后台](#打开后台)。页面全部在服务端渲染，不加载任何第三方资源，没有脚本也能用；样式来自 OpenLinkOS 的设计系统 [`@openlinkos/ui`](https://www.npmjs.com/package/@openlinkos/ui)，打包在程序里。支持中英文和深浅色：语言默认跟随浏览器（既不要中文也不要英文时用英文），手动选过之后记在 `relay-lang` Cookie 里，用法页也用它。
 
 ## 页面
 
@@ -26,9 +26,36 @@
 
 ## 第一个管理员
 
-没有默认口令，也没有"第一个打开网页的人设口令"的初始化页面：那样的页面在服务刚启动、还没人设口令时，谁先访问谁就拿到管理员。还没有管理员时，登录页只说明怎么创建。三种办法：
+没有默认口令，也没有"第一个打开网页的人设口令"的初始化页面：那样的页面在服务刚启动、还没人设口令时，谁先访问谁就拿到管理员。
 
-- **口令文件（推荐，适合容器）**：把口令写进一个只有服务能读的文件，用环境变量 `RELAY_ADMIN_PASSWORD_FILE` 指向它（用户名默认 `admin`，可用 `RELAY_ADMIN_USERNAME` 改）。Docker Compose 的 `secrets`、k8s 的 Secret、systemd 的 `LoadCredential` 都是这种形式，见[部署](deploy.md)。不提供直接写口令的环境变量：那样口令会出现在 `docker inspect`、进程环境和编排文件里。
+**第一次启动时**，如果运营数据库里没有管理员，配置里也没写，服务会创建 `admin`（可用 `RELAY_ADMIN_USERNAME` 改名），生成一个随机口令，在日志里写一次：
+
+```bash
+docker logs relay 2>&1 | grep 'generated password'
+kubectl logs sts/registry-mirrors-relay | grep 'generated password'
+journalctl -u registry-mirrors-relay | grep 'generated password'
+```
+
+用它登录后改成自己的口令；改之前只能打开「我的账号」，所以日志里的口令改完就没用了。
+
+**命令行**随时可以设口令，服务运行时也可以：
+
+```bash
+docker exec -it relay registry-mirrors-relay admin password                            # Docker
+docker compose exec relay registry-mirrors-relay admin password                        # Compose
+kubectl exec -it sts/registry-mirrors-relay -- registry-mirrors-relay admin password   # Kubernetes
+sudo registry-mirrors-relay admin password                                             # systemd
+```
+
+- 不写名字时，设唯一那个管理员的口令；一个都没有就创建 `admin`。有多个管理员时要写名字：`admin password alice`。
+- 在终端里会让你输入两次，否则从标准输入读一行（`docker exec -i relay registry-mirrors-relay admin password < password.txt`），口令不出现在命令行参数里。`--generate` 生成一个随机口令，只打印这一次。
+- 立即生效，同时启用这个账号，并让它在后台的会话全部下线。命令行设的口令，第一次登录后不需要再改。
+- `admin create bob -role viewer` 新建管理员，`admin list` 列出所有管理员。
+- 服务在运行时，命令经运营数据库旁边的本地管理 socket `admin.sock` 交给服务去改（见[安全](#安全)）；服务停着时，命令直接打开数据库。
+
+**第一次启动前自己定口令**：
+
+- **口令文件**（适合容器）：把口令写进一个只有服务能读的文件，用环境变量 `RELAY_ADMIN_PASSWORD_FILE` 指向它（用户名默认 `admin`，可用 `RELAY_ADMIN_USERNAME` 改）。Docker Compose 的 `secrets`、k8s 的 Secret、systemd 的 `LoadCredential` 都是这种形式，见[部署](deploy.md)。不提供直接写口令的环境变量：那样口令会出现在 `docker inspect`、进程环境和编排文件里。
 
   ```bash
   openssl rand -base64 18 > admin-password   # 生成一个随机口令
@@ -44,13 +71,11 @@
       password: {file: /run/secrets/relay_admin_password}   # 12 到 72 个字节，不能和用户名相同
   ```
 
-- **命令行**：停止服务，运行 `registry-mirrors-relay admin create -name admin`，按提示输入两次口令（也可以从标准输入读，口令不出现在命令行参数里）。运营数据库同时只能被一个进程打开，服务在运行时命令会在 2 秒后报错。
+这两种办法只在运营数据库里还没有管理员时生效，并且**按它创建的管理员第一次登录后必须先改口令**：改之前只能打开「我的账号」，API 也不认这个会话；新口令不能和原来的一样。这样留在配置、环境变量、口令文件、终端历史里的口令只能用一次。改完后服务的日志会提醒把 `initial_admin` 和对应的口令文件删掉。同样，另一个管理员新建的账号、重设过口令的账号，第一次登录后也必须先改口令；自己改的、命令行设的不需要。
 
-前两种办法只在运营数据库里还没有管理员时生效，并且**按它创建的管理员第一次登录后必须先改口令**：改之前只能打开「我的账号」，API 也不认这个会话；新口令不能和原来的一样。这样留在配置、环境变量、口令文件、终端历史里的口令只能用一次。改完后服务的日志会提醒把 `initial_admin` 和对应的口令文件删掉。同样，另一个管理员新建的账号、重设过口令的账号，第一次登录后也必须先改口令；自己改的、命令行设的不需要。
+运营数据只读（`admin.store.driver: none`，k8s 多副本）时，后台和命令行都不能改口令，`initial_admin` 就是唯一的管理员，口令一直有效，只能在配置里换，换完重启 Pod。这时请用足够长的随机口令。
 
-运营数据只读（`admin.store.driver: none`，k8s 多副本）时，后台不能改口令，`initial_admin` 就是唯一的管理员，口令一直有效，只能在配置里换。这时请用足够长的随机口令，并且后台只通过 `kubectl port-forward` 访问。
-
-忘记口令时，其他管理员可以在「管理员与令牌」里重设；只有一个管理员时，停止服务后运行 `registry-mirrors-relay admin password -name admin`。`admin list` 列出所有管理员。
+忘记口令时，其他管理员可以在「管理员与令牌」里重设，也可以按上面运行 `registry-mirrors-relay admin password`。
 
 ## 打开后台
 
@@ -102,6 +127,7 @@
 - **跨站请求**：每个 POST 都要 `Origin` 和 `public_url` 或当前访问的 localhost、IP 地址一致，拒绝 `Sec-Fetch-Site: cross-site`，并且要带会话的 CSRF 令牌；成功后 303 跳转。
 - **登录限速**：口令一个一个地校验（bcrypt），每个客户端 10 分钟内最多失败 10 次，全局最多 100 次，超过后口令正确也拒绝（429），直到窗口过去。失败和封锁在每个窗口里只记一次审计。
 - **敏感操作**：管理员、API 令牌、登录会话和配置的修改，以及改自己的口令，要求 10 分钟内输入过口令，否则先确认身份。改了管理员的口令、角色或停用状态，那个管理员的会话全部结束。
+- **本地管理 socket**：运营数据库旁边的 `admin.sock`，权限 0600，所在目录只有服务的用户能进；在 Linux 和 macOS 上，服务还会拒绝以其他用户身份运行的进程（root 除外）。它只提供 `admin` 子命令需要的几件事：列出管理员、新建管理员、设口令，审计里记为 `cli:<用户>`。只在运营数据可写时打开。
 - **能力限制**：后台不碰 docker.sock，不执行命令，只向配置里的上游发请求；后台新建的上游也只能连公网地址。全部写操作是固定的 30 个 POST 路由，测试把它们逐个固定下来。
 
 JSON API 也认后台的会话：读操作直接用，写操作要带 `X-CSRF-Token` 并通过同样的来源检查。

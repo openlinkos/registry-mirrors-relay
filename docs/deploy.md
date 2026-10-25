@@ -1,6 +1,6 @@
 # Deployment
 
-[简体中文](deploy.md) | English
+[简体中文](zh/deploy.md) | English
 
 registry-mirrors-relay is a statically linked Go program. It never writes image data to disk; its data directory holds only the operational database (accounts, rules, audit log, usually under 10 MiB) and ACME certificates. Five ways to run it:
 
@@ -24,31 +24,28 @@ Ports:
 
 ## The first administrator
 
-There is no default password. Create the first administrator from a password file (a Docker, Compose or Kubernetes secret, or a systemd credential) that `RELAY_ADMIN_PASSWORD_FILE` points to; the user name is `admin` (or `RELAY_ADMIN_USERNAME`):
+There is no default password. On the first start, the service creates the administrator `admin` with a generated password and writes the password to its log once (search for `generated password`); you choose your own at the first sign-in. To set a password at any time, also while the service runs, use the `admin password` subcommand:
 
 ```bash
-openssl rand -base64 18 > admin-password
+docker exec -it relay registry-mirrors-relay admin password
+kubectl exec -it sts/registry-mirrors-relay -- registry-mirrors-relay admin password
 ```
 
-This administrator must change the password at the first sign-in, after which the file is useless and can be deleted (the variable may stay; a missing file only logs a warning). Why, and the other ways, are in [admin.en.md](admin.en.md#the-first-administrator).
+To choose the first password before the first start instead, point `RELAY_ADMIN_PASSWORD_FILE` at a password file (a Docker, Compose or Kubernetes secret, or a systemd credential); the user name is `admin` (or `RELAY_ADMIN_USERNAME`). That administrator must change the password at the first sign-in, after which the file is useless and can be deleted (the variable may stay; a missing file only logs a warning). Details are in [admin.md](admin.md#the-first-administrator).
 
 ## docker run
 
 ```bash
-openssl rand -base64 18 > admin-password
-chmod 400 admin-password && sudo chown 65532 admin-password
-
-docker run -d --name registry-mirrors-relay --restart unless-stopped \
+docker run -d --name relay --restart unless-stopped \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
   -p 8080:8080 \
   -v relay-data:/var/lib/registry-mirrors-relay \
-  -v "$PWD/admin-password:/run/secrets/admin_password:ro" \
-  -e RELAY_ADMIN_PASSWORD_FILE=/run/secrets/admin_password \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.4.0
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.5.0
+docker logs relay 2>&1 | grep 'generated password'
 ```
 
 - The image carries a configuration: pulls and the console on 8080, one single-domain entrance for any host name. To change it, mount your own at `/etc/registry-mirrors-relay/config.yaml` (see [`config.example.yaml`](../config.example.yaml)).
-- The password file must be readable by user 65532 inside the container, hence the `chown 65532`.
+- The first administrator is `admin`, with the password from the log. Set a password at any time with `docker exec -it relay registry-mirrors-relay admin password`. To give the first password yourself instead, mount a password file readable by user 65532 and point `RELAY_ADMIN_PASSWORD_FILE` at it.
 - The console: open `http://server:8080/admin/`. It is open to every address and protected by the password; for long-term public use put it behind HTTPS (see the Compose examples below). To keep it on the machine, write `admin: {public: false}` in the configuration and use `ssh -L 8080:127.0.0.1:8080 server` from elsewhere.
 - The image's `HEALTHCHECK` runs `registry-mirrors-relay probe`, which probes `/healthz` on the port from the configuration.
 
@@ -102,9 +99,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: registry-mirror
 resources:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.4.0
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/overlays/single-writable?ref=v0.5.0
 components:
-  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.4.0
+  - https://github.com/openlinkos/registry-mirrors-relay//deploy/kubernetes/components/admin-password?ref=v0.5.0
 ```
 
 ```bash
@@ -167,7 +164,7 @@ kubectl create namespace registry-mirror
 openssl rand -base64 18 > admin-password
 kubectl -n registry-mirror create secret generic registry-mirrors-relay-admin --from-file=password=admin-password
 rm admin-password
-helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version 0.4.0 \
+helm install registry-mirrors-relay oci://ghcr.io/openlinkos/charts/registry-mirrors-relay --version 0.5.0 \
   -n registry-mirror -f values.yaml
 helm test registry-mirrors-relay -n registry-mirror
 kubectl -n registry-mirror port-forward svc/registry-mirrors-relay 8080:80   # then open http://127.0.0.1:8080/admin/
@@ -177,7 +174,7 @@ kubectl -n registry-mirror port-forward svc/registry-mirrors-relay 8080:80   # t
 - **Secrets**: no value takes a password. The administrator password comes only from `admin.existingSecret`. Write upstream tokens and the accounts file as `env:` or `file:` in `config` and bring them in from Secrets with `extraEnv` and `extraVolumes`; a `value:` fails the render.
 - **Configuration changes**: by default (`configRollout: always`) any change rolls the pods. With `restartOnly`, only changes that need a restart (`listen`, `data_dir`, `admin.store`, `log.access`, `log.level`, the `read_header`, `idle` and `shutdown_grace` timeouts, `proxy.buffer_size`, `limits.tracked_clients`) do; the relay hot-reloads the rest within a minute.
 - **Console and metrics**: they share 8080 by default; open `/admin/` on your Ingress or Gateway host, or `port-forward` to the main Service. `readonly` mode runs two replicas, so turn on session affinity in the Ingress. `metrics.enabled` or `metrics.serviceMonitor.enabled` turns metrics on, and the ServiceMonitor scrapes 8080 too. `admin.separatePort: true` moves them to 9090 and a `<name>-admin` Service. With metrics on (or `admin.public: false`) and a NodePort or LoadBalancer pull Service, set `service.externalTrafficPolicy: Local` or split the port; the chart refuses to render otherwise.
-- **Changing the configuration in the console**: with `mode: writable`, entrances, upstreams, rate limits and more can be changed in the console (see [Admin console](admin.en.md#changing-the-configuration-in-the-console)). Those changes live on the PVC and are invisible to `helm upgrade`, Flux and Argo CD. To let values decide everything, write `admin: {config_edit: false}` under `config`, or alert on the metric `relay_config_overrides`. In `readonly` mode the configuration cannot be changed in the console.
+- **Changing the configuration in the console**: with `mode: writable`, entrances, upstreams, rate limits and more can be changed in the console (see [Admin console](admin.md#changing-the-configuration-in-the-console)). Those changes live on the PVC and are invisible to `helm upgrade`, Flux and Argo CD. To let values decide everything, write `admin: {config_edit: false}` under `config`, or alert on the metric `relay_config_overrides`. In `readonly` mode the configuration cannot be changed in the console.
 - **Optional parts** (all off by default): `ingress`, `httpRoute` (Gateway API), `metrics.serviceMonitor`, `metrics.dashboard` (a Grafana dashboard) and `networkPolicy`.
 - Every value is listed in the chart's [README](../charts/registry-mirrors-relay/README.md). For pulling through the relay on nodes see the previous section; with `service.type: NodePort`, the `helm install` notes include a `hosts.toml` example.
 
@@ -192,7 +189,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now registry-mirrors-relay
 ```
 
-The unit uses a dynamic user (`DynamicUser`), keeps operational data in `/var/lib/registry-mirrors-relay` (`StateDirectory`) and has a strict sandbox (`systemd-analyze security` rates it 1.5). For the first administrator, write the password into a file only root can read and uncomment the `LoadCredential=` and `Environment=RELAY_ADMIN_PASSWORD_FILE=` lines. `systemctl reload` reloads the configuration without interrupting downloads.
+The unit uses a dynamic user (`DynamicUser`), keeps operational data in `/var/lib/registry-mirrors-relay` (`StateDirectory`) and has a strict sandbox (`systemd-analyze security` rates it 1.5). The first administrator's password is in the journal (`journalctl -u registry-mirrors-relay | grep 'generated password'`); `sudo registry-mirrors-relay admin password` sets one at any time. To give the first password yourself, write it into a file only root can read and uncomment the `LoadCredential=` and `Environment=RELAY_ADMIN_PASSWORD_FILE=` lines. `systemctl reload` reloads the configuration without interrupting downloads.
 
 The console shares 8080 with pulls: open `http://server:8080/admin/`, or the host name of your HTTPS reverse proxy. To keep it on the machine, set `admin.public: false` and use `ssh -L 8080:127.0.0.1:8080 server` from elsewhere.
 
@@ -274,15 +271,15 @@ cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 sha256sum --ignore-missing -c SHA256SUMS
 
-cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.4.0 \
+cosign verify ghcr.io/openlinkos/registry-mirrors-relay:v0.5.0 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.4.0 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/registry-mirrors-relay:v0.5.0 -R openlinkos/registry-mirrors-relay
 
-cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.4.0 \
+cosign verify ghcr.io/openlinkos/charts/registry-mirrors-relay:0.5.0 \
   --certificate-identity-regexp '^https://github.com/openlinkos/registry-mirrors-relay/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.4.0 -R openlinkos/registry-mirrors-relay
+gh attestation verify oci://ghcr.io/openlinkos/charts/registry-mirrors-relay:0.5.0 -R openlinkos/registry-mirrors-relay
 ```
 
 ## Usage page and service status
@@ -294,6 +291,15 @@ Opening any entrance's host in a browser shows the usage page: the mirror addres
 - Version and uptime. The figures live in memory and start again after a restart.
 
 The page reads `/status.json` and refreshes it every minute. Anyone can fetch it, so it holds only what is safe to publish: failures are reduced to a category (timeout, DNS, connection, TLS, HTTP status), never the raw error, addresses, upstream quotas or request counts. Set `site.show_status: false` to turn it off.
+
+## Upgrading from v0.4
+
+v0.5.0 changes no configuration, but some things you may notice:
+
+- **The `admin` subcommands work while the service runs**, through a local admin socket (`admin.sock` next to the operational database); `admin password` without a name sets the only administrator's password, and `--generate` makes one. `-name` still works.
+- **A first administrator is generated** when a writable operational database has none and the configuration names none: `admin`, with the password in the log once.
+- **Messages are English by default**: API errors, the console for browsers that ask for neither Chinese nor English, errors shown by `docker pull`, CLI output and logs. The console and the API answer in Chinese when the browser or `Accept-Language` asks for it. API errors now carry a stable `code` next to `error`; match on it instead of the text. Alerts that match log messages (`msg`) need the English text; field names are unchanged.
+- **The console's language cookie** is now `relay-lang` at `/`, shared with the usage page; the old `relay-admin-lang` is still read.
 
 ## Upgrading from v0.3
 

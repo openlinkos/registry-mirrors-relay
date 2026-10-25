@@ -1,8 +1,8 @@
 # Admin console
 
-[简体中文](admin.md) | English
+[简体中文](zh/admin.md) | English
 
-The admin console and the [admin API](api.en.md) share the pull port (8080) by default, under `/admin/`; with `listen.admin` they move to that separate port. They are open to every address by default and protected by sign-in, see [Opening the console](#opening-the-console). Every page is rendered on the server, nothing is loaded from third parties, and everything works without JavaScript. The styles come from the OpenLinkOS design system [`@openlinkos/ui`](https://www.npmjs.com/package/@openlinkos/ui), embedded in the binary. Chinese and English, light and dark.
+The admin console and the [admin API](api.md) share the pull port (8080) by default, under `/admin/`; with `listen.admin` they move to that separate port. They are open to every address by default and protected by sign-in, see [Opening the console](#opening-the-console). Every page is rendered on the server, nothing is loaded from third parties, and everything works without JavaScript. The styles come from the OpenLinkOS design system [`@openlinkos/ui`](https://www.npmjs.com/package/@openlinkos/ui), embedded in the binary. Chinese and English, light and dark: the language follows the browser (English when it asks for neither) until you choose one, which is kept in the `relay-lang` cookie that the usage page shares.
 
 ## Pages
 
@@ -26,9 +26,36 @@ Accounts, rules and tokens from the configuration file are shown read-only; entr
 
 ## The first administrator
 
-There is no default password, and there is no setup page where whoever opens the site first chooses the password: on a freshly started service such a page hands the console to the first visitor. Without administrators, the sign-in page only explains how to create one. Three ways:
+There is no default password, and no setup page where whoever opens the site first chooses one: on a freshly started service such a page would hand the console to the first visitor.
 
-- **A password file (recommended, fits containers)**: write the password into a file only the service can read and point `RELAY_ADMIN_PASSWORD_FILE` at it (user name `admin`, or `RELAY_ADMIN_USERNAME`). Docker Compose `secrets`, Kubernetes Secrets and systemd `LoadCredential` all work this way; see [Deployment](deploy.en.md). There is deliberately no variable that takes the password itself, since it would show up in `docker inspect`, the process environment and orchestration files.
+**On the first start**, when the operational database has no administrator and the configuration names none, the service creates `admin` (or the name in `RELAY_ADMIN_USERNAME`) with a random password and writes it to the log once:
+
+```bash
+docker logs relay 2>&1 | grep 'generated password'
+kubectl logs sts/registry-mirrors-relay | grep 'generated password'
+journalctl -u registry-mirrors-relay | grep 'generated password'
+```
+
+Sign in with it and choose your own; until then only My account is open, so the password in the log is worthless afterwards.
+
+**The command line** sets a password at any time, also while the service runs:
+
+```bash
+docker exec -it relay registry-mirrors-relay admin password                            # Docker
+docker compose exec relay registry-mirrors-relay admin password                        # Compose
+kubectl exec -it sts/registry-mirrors-relay -- registry-mirrors-relay admin password   # Kubernetes
+sudo registry-mirrors-relay admin password                                             # systemd
+```
+
+- Without a name it sets the password of the only administrator, or creates `admin` when there is none; with several administrators, name one: `admin password alice`.
+- It asks for the password twice on a terminal, or reads one line from standard input (`docker exec -i relay registry-mirrors-relay admin password < password.txt`); the password never appears in the arguments. `--generate` makes a random password and prints it once.
+- The change applies at once, re-enables the account and signs that administrator out of the console. A password set from the command line need not be changed at the first sign-in.
+- `admin create bob -role viewer` adds an administrator, and `admin list` lists them.
+- While the service runs, the command reaches it through the local admin socket `admin.sock` next to the operational database (see [Security](#security)); while the service is stopped, it opens the database itself.
+
+**Choosing the first password before the first start**:
+
+- **A password file** (fits containers): write the password into a file only the service can read and point `RELAY_ADMIN_PASSWORD_FILE` at it (user name `admin`, or `RELAY_ADMIN_USERNAME`). Docker Compose `secrets`, Kubernetes Secrets and systemd `LoadCredential` all work this way; see [Deployment](deploy.md). There is deliberately no variable that takes the password itself, since it would show up in `docker inspect`, the process environment and orchestration files.
 
   ```bash
   openssl rand -base64 18 > admin-password   # a random password
@@ -44,13 +71,11 @@ There is no default password, and there is no setup page where whoever opens the
       password: {file: /run/secrets/relay_admin_password}   # 12 to 72 bytes, not the user name
   ```
 
-- **The command line**: stop the service and run `registry-mirrors-relay admin create -name admin`, then type the password twice (it can also come from standard input; it never appears in the arguments). Only one process can open the operational database, so with the service running the command fails after 2 seconds.
+These two apply only while the operational database has no administrators, and **the administrator created this way must change the password at the first sign-in**: until then only My account is open and the API refuses the session; the new password must differ from the old one. A password left in the configuration, an environment variable, a password file or a shell history therefore works once at most. Afterwards the service log reminds you to delete `initial_admin` and the password file. Likewise, an account created or reset by another administrator must change its password at the first sign-in; passwords you set yourself or through the command line need no change.
 
-The first two apply only while the operational database has no administrators, and **the administrator created this way must change the password at the first sign-in**: until then only My account is open and the API refuses the session; the new password must differ from the old one. A password left in the configuration, an environment variable, a password file or a shell history therefore works once at most. Afterwards the service log reminds you to delete `initial_admin` and the password file. Likewise, an account created or reset by another administrator must change its password at the first sign-in; passwords you set yourself or through the command line need no change.
+With read-only operational data (`admin.store.driver: none`, several Kubernetes replicas) neither the console nor the command line can change passwords, so `initial_admin` is the only administrator and its password stays valid; change it in the configuration and restart the pods. Use a long random password.
 
-With read-only operational data (`admin.store.driver: none`, several Kubernetes replicas) the console cannot change passwords, so `initial_admin` is the only administrator and its password stays valid; change it in the configuration. Use a long random password and reach the console only through `kubectl port-forward`.
-
-If you forget your password, another administrator can reset it under Admins and tokens. If you are the only one, stop the service and run `registry-mirrors-relay admin password -name admin`. `admin list` lists the administrators.
+If you forget your password, another administrator can reset it under Admins and tokens, or run `registry-mirrors-relay admin password` as above.
 
 ## Opening the console
 
@@ -58,15 +83,15 @@ The console is open to every address by default (`admin.public: true`); open `/a
 
 - **Through a CDN, reverse proxy or Ingress**: `https://mirror.example.com/admin/`. When the browser side is https, the session cookie is `Secure`.
 - **Directly**: `http://server:8080/admin/`, or `https://<domain>/admin/` with `tls.mode: acme`.
-- **Kubernetes**: `kubectl port-forward svc/registry-mirrors-relay 8080:80` works too, then open `http://127.0.0.1:8080/admin/`; with the chart's `admin.separatePort`, use `svc/registry-mirrors-relay-admin 9090`. With several replicas behind an Ingress, turn on session affinity, see [Deployment](deploy.en.md#kubernetes).
+- **Kubernetes**: `kubectl port-forward svc/registry-mirrors-relay 8080:80` works too, then open `http://127.0.0.1:8080/admin/`; with the chart's `admin.separatePort`, use `svc/registry-mirrors-relay-admin 9090`. With several replicas behind an Ingress, turn on session affinity, see [Deployment](deploy.md#kubernetes).
 
 Sign-in protects it (see [Security](#security) below), so put it behind HTTPS when it faces the internet: without HTTPS or a configured reverse proxy, the startup log warns that passwords travel in clear text.
 
-**Keeping it to the local machine and the LAN**: set `admin.public: false`. The console then answers only direct connections from loopback and private addresses (`admin.allow`, `loopback` and `private_ranges` by default); requests through a CDN or reverse proxy get 404, as if the path didn't exist, and in the browser the Host must be `public_url`'s host, `localhost` or an IP address (others get 421, against DNS rebinding). Reach it with `kubectl port-forward` or `ssh -L 8080:127.0.0.1:8080 server`; to let fixed addresses in through an https reverse proxy, set `admin.public_url`, `client_ip.trusted_proxies` and `admin.proxied_allow`. The rule, and where it holds, are in [Deployment](deploy.en.md#admin-console-admin-api-and-metrics).
+**Keeping it to the local machine and the LAN**: set `admin.public: false`. The console then answers only direct connections from loopback and private addresses (`admin.allow`, `loopback` and `private_ranges` by default); requests through a CDN or reverse proxy get 404, as if the path didn't exist, and in the browser the Host must be `public_url`'s host, `localhost` or an IP address (others get 421, against DNS rebinding). Reach it with `kubectl port-forward` or `ssh -L 8080:127.0.0.1:8080 server`; to let fixed addresses in through an https reverse proxy, set `admin.public_url`, `client_ip.trusted_proxies` and `admin.proxied_allow`. The rule, and where it holds, are in [Deployment](deploy.md#admin-console-admin-api-and-metrics).
 
 ## Changing the configuration in the console
 
-The Configuration page (and [`/config/overrides`](api.en.md#endpoints) in the API) can change these settings:
+The Configuration page (and [`/config/overrides`](api.md#endpoints) in the API) can change these settings:
 
 | Setting | What can change | How it combines |
 | --- | --- | --- |
@@ -102,6 +127,7 @@ The console denies by default and checks at every layer:
 - **Cross-site requests**: every POST needs an `Origin` equal to `public_url` or the localhost or IP address in use, `Sec-Fetch-Site: cross-site` is refused, and the session's CSRF token is required; success answers with a 303 redirect.
 - **Sign-in limits**: passwords are checked one at a time (bcrypt); at most 10 failures per client and 100 overall in 10 minutes, after which even the right password is refused (429) until the window passes. Failures and blocks are audited once per window.
 - **Sensitive actions**: changes to administrators, API tokens, sessions and the configuration, and changing your own password, need your password within the last 10 minutes; otherwise you confirm it first. Changing an administrator's password, role or status ends all their sessions.
+- **The local admin socket**: `admin.sock` next to the operational database, mode 0600 in a directory only the service's user can enter; on Linux and macOS the service also refuses connections from processes that run as another user (root excepted). It serves only what the `admin` subcommands need: listing administrators, creating one and setting a password, audited as `cli:<user>`. It is opened only with writable operational data.
 - **Limited capabilities**: the console never touches docker.sock, runs no commands, and sends requests only to configured upstreams; upstreams added in the console can reach public addresses only. All writes go through a fixed set of 30 POST routes, pinned one by one by a test.
 
 The JSON API also accepts the console session: reads as they are, writes with `X-CSRF-Token` and the same origin checks.

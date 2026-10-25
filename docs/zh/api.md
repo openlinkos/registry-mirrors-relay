@@ -1,8 +1,8 @@
 # 管理 API
 
-简体中文 | [English](api.en.md)
+简体中文 | [English](../api.md)
 
-JSON API 在管理入口的 `/admin/api/v1/` 下：默认和拉取入口共用端口，写了 `listen.admin` 就在那个端口；只接受本机、内网不经代理的直连（见[部署](deploy.md#管理后台管理-api-和指标)）。网页后台见 [admin.md](admin.md)。两边的校验和写入是同一套代码，网页能做的事 API 都能做。
+JSON API 在管理入口的 `/admin/api/v1/` 下：默认和拉取入口共用端口，写了 `listen.admin` 就在那个端口；网页后台见 [admin.md](admin.md)。两边的校验和写入是同一套代码，网页能做的事 API 都能做。错误带固定的错误码和中文或英文的说明，见[错误](#错误)。
 
 ## 认证
 
@@ -69,6 +69,80 @@ curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json
 # 改回配置文件的值
 curl -X DELETE -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/admin/api/v1/config/overrides/limits
 ```
+
+## 错误
+
+错误都是 JSON：`code` 是固定的错误码，给程序用；`error` 是给人看的说明：
+
+```json
+{"error": "Operational data is read-only (admin.store.driver: none). Change the configuration file instead.", "code": "store.readonly"}
+```
+
+`error` 默认是英文；请求带 `Accept-Language: zh`（或带着后台的语言 Cookie `relay-lang`）时是中文。程序请按 `code` 判断，不要匹配 `error` 的文字。状态码固定的列在表里，其余的看具体操作（输入不对一般是 400，不存在是 404，冲突是 409，配置校验不通过是 422）。
+
+| 错误码 | 状态码 | 含义 |
+| --- | --- | --- |
+| `auth.required` | 401 | 需要有效的 API 令牌。 |
+| `auth.too_many` | 429 | 认证失败次数太多，请稍后再试。 |
+| `auth.viewer` | 403 | 只读身份不能修改。 |
+| `auth.cross_site` | 403 | 不接受跨站请求。 |
+| `auth.must_change` | 403 | 请先在管理后台修改口令。 |
+| `auth.origin` | 403 | 请求来源不对。 |
+| `auth.csrf` | 403 | 缺少或错误的 X-CSRF-Token。 |
+| `host.misdirected` | 421 | 请用 admin.public_url、localhost 或 IP 访问管理后台。 |
+| `request.media_type` | 415 | 请求体要用 application/json。 |
+| `request.json` | 400 | 请求体不是合法的 JSON。 |
+| `password.length` | | 口令要 12 到 72 个字节 |
+| `user.password_or_hash` | | password 和 hash 只能给一个 |
+| `user.hash` | | hash 只接受 bcrypt |
+| `user.name` | | 用户名只能用字母、数字和 . _ -，以字母或数字开头，最长 64 个字符 |
+| `user.in_file` | | 配置文件的 users_file 里已有这个用户 |
+| `user.password_required` | | 要给口令 |
+| `user.exists` | | 用户已存在 |
+| `user.not_found` | | 没有这个用户（users_file 里的用户要改文件） |
+| `limit.manifest_rate` | | 每秒 manifest 请求数应在 0 到 1000 之间 |
+| `limit.blob_streams` | | 同时下载的镜像层数应在 0 到 10000 之间 |
+| `note.length` | | 备注最长 500 个字节 |
+| `cidr.invalid` | | 应写成 IP 或 CIDR，例如 198.51.100.7、198.51.100.0/24 |
+| `cidr.all` | | 不能整段放开或封掉所有地址 |
+| `kind.invalid` | | kind 只能是 allow 或 deny |
+| `rule.exists` | | 规则已存在 |
+| `rule.not_found` | | 没有这条规则（配置文件里的要改配置文件） |
+| `ban.duration` | | 期限应写成 30m、2h、7d 这样，1 分钟到 365 天 |
+| `ban.reason` | | 原因最长 500 个字节 |
+| `ban.not_found` | | 没有这个封禁 |
+| `image.pattern` | | 规则写法不对：要写全上游，例如 ghcr.io/owner/**；* 匹配一段里的任意字符，** 匹配任意多段 |
+| `image.upstream` | | 第一段要写已配置的上游（或 *），例如 docker.io/library/nginx、ghcr.io/owner/** |
+| `image.status` | | 状态码只能是 403 或 451 |
+| `image.text` | | 说明最长 300 个字节，备注最长 500 个字节 |
+| `upstream.not_found` | | 没有这个上游 |
+| `host.invalid` | | 要写一个完整的主机名，例如 cdn99.quay.io（不支持通配，通配请改配置文件） |
+| `host.exists` | | 已经在白名单里 |
+| `host.not_found` | | 白名单里没有这个主机（配置文件里的要改配置文件） |
+| `role.invalid` | | 角色只能是 admin 或 viewer |
+| `token.in_config` | | 配置文件里已有同名令牌 |
+| `token.exists` | | 令牌已存在 |
+| `token.not_found` | | 没有这个令牌（配置文件里的要改配置文件） |
+| `password.same` | | 新口令不能和原来的一样 |
+| `password.username` | | 口令不能和用户名相同 |
+| `admin.exists` | | 管理员已存在 |
+| `admin.self` | | 不能停用自己，也不能降低自己的角色 |
+| `admin.delete_self` | | 不能删除自己 |
+| `admin.last` | | 至少要留一个能用的 admin 角色 |
+| `admin.not_found` | | 没有这个管理员 |
+| `site.name` | | 站点名称必填，最长 80 个字节；运营者最长 120 个字节 |
+| `site.link_key` | | 不认识的链接 … |
+| `site.link` | | 链接 … 要写完整的 http(s) 地址 |
+| `store.readonly` | | 运营数据是只读的（admin.store.driver: none），请改配置文件 |
+| `reload.failed` | | 重新加载配置失败 |
+| `config.invalid` | | 配置没有保存 |
+| `config.edit_off` | | 配置文件里写了 admin.config_edit: false，后台不能改配置，只能重置 |
+| `config.not_found` | | … 没有在后台改过 |
+| `config.view` | | view 只能是 effective 或 file |
+| `config.format` | | format 只能是 overrides 或 merged |
+| `config.upstreamName` | | 上游名应该是镜像地址里的 registry 写法，如 registry.example.com（小写，至少有一个点） |
+| `config.upstreamExists` | | 已经有上游 …，请在列表里修改它 |
+| `internal` | 500 | 其他错误；说明就是错误本身，英文 |
 
 ## 指标
 
