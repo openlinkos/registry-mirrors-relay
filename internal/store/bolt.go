@@ -19,6 +19,7 @@ var (
 	bucketData  = []byte("data")
 	bucketAudit = []byte("audit")
 	bucketHours = []byte("hours")
+	bucketState = []byte("state")
 	keyData     = []byte("v1")
 )
 
@@ -50,7 +51,7 @@ func OpenBolt(path string) (*Bolt, error) {
 	s := &Bolt{db: db, now: time.Now, maxAudit: maxAudit}
 	var d Data
 	err = db.Update(func(tx *bolt.Tx) error {
-		for _, b := range [][]byte{bucketData, bucketAudit, bucketHours} {
+		for _, b := range [][]byte{bucketData, bucketAudit, bucketHours, bucketState} {
 			if _, err := tx.CreateBucketIfNotExists(b); err != nil {
 				return err
 			}
@@ -182,6 +183,21 @@ func (s *Bolt) HourStats(since time.Time) [][]byte {
 		c := tx.Bucket(bucketHours).Cursor()
 		for k, v := c.Seek(start); k != nil; k, v = c.Next() {
 			out = append(out, append([]byte(nil), v...))
+		}
+		return nil
+	})
+	return out
+}
+
+func (s *Bolt) SaveState(name string, b []byte) error {
+	return s.db.Update(func(tx *bolt.Tx) error { return tx.Bucket(bucketState).Put([]byte(name), b) })
+}
+
+func (s *Bolt) State(name string) []byte {
+	var out []byte
+	_ = s.db.View(func(tx *bolt.Tx) error {
+		if v := tx.Bucket(bucketState).Get([]byte(name)); v != nil {
+			out = append([]byte(nil), v...)
 		}
 		return nil
 	})

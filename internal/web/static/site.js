@@ -447,6 +447,8 @@ function renderStatus() {
 
   const gen = Date.parse(status.generated) / 1000 || Date.now() / 1000;
   const started = Date.parse(status.started) / 1000 || gen;
+  // Figures survive restarts when the operational database is writable; since is where they begin.
+  const since = Date.parse(status.since) / 1000 || started;
   const checkedAt = Math.max(0, ...status.upstreams.map((u) => (u.checked ? Date.parse(u.checked) / 1000 : 0)));
   const meta = [];
   if (status.version) meta.push(msg('version', { v: /^\d/.test(status.version) ? `v${status.version}` : status.version }));
@@ -513,8 +515,11 @@ function renderStatus() {
 
   const note = $('[data-status-note]');
   if (note) {
-    const since = timeLabel(started);
-    note.textContent = status.probe_interval > 0 ? msg('note', { interval: dur(status.probe_interval), since }) : msg('noteNoProbe', { since });
+    let text = status.probe_interval > 0 ? msg('note', { interval: dur(status.probe_interval) }) : msg('noteNoProbe');
+    // Say where the figures begin only while they cover less than the 24 hours shown.
+    const windowStart = Math.floor(gen / 3600) * 3600 - 23 * 3600;
+    if (since > windowStart) text += msg('space') + msg('since', { since: timeLabel(since) });
+    note.textContent = text;
   }
 }
 

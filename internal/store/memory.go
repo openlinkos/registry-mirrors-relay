@@ -80,6 +80,11 @@ func (s *ReadOnly) HourStats(since time.Time) [][]byte {
 	return out
 }
 
+// SaveState keeps nothing: without a database there is nothing to restore after a restart.
+func (s *ReadOnly) SaveState(string, []byte) error { return nil }
+
+func (s *ReadOnly) State(string) []byte { return nil }
+
 func (s *ReadOnly) Writable() bool { return false }
 
 func (s *ReadOnly) Close() error { return nil }

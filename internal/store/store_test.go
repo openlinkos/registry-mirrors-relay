@@ -107,3 +107,35 @@ func TestReadOnly(t *testing.T) {
 		t.Fatalf("in-memory audit log: %d", len(l))
 	}
 }
+
+func TestState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	s, err := OpenBolt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.State("stats") != nil {
+		t.Fatal("no state yet")
+	}
+	if err := s.SaveState("stats", []byte(`{"a":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveState("stats", []byte(`{"a":2}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = OpenBolt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if got := string(s.State("stats")); got != `{"a":2}` {
+		t.Fatalf("the last state should survive reopening: %q", got)
+	}
+	r := NewReadOnly()
+	if err := r.SaveState("stats", []byte("x")); err != nil || r.State("stats") != nil {
+		t.Fatal("a read-only store keeps no state")
+	}
+}

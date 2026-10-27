@@ -4,11 +4,13 @@
 //
 // Anyone can see this, so it holds only what is harmless to publish: failure reasons are given only as
 // categories (timeout, DNS, connection, TLS, HTTP status code), never the raw error text (which may
-// contain addresses); no upstream quota, request volume or client information. The data is kept only
-// in memory and counting starts afresh after a restart.
+// contain addresses); no upstream quota, request volume or client information. The probe history is
+// kept in memory; with a writable operational database the app saves it (Snapshot) and restores it
+// after a restart (Restore).
 package status
 
 import (
+	"encoding/json"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,6 +56,67 @@ func (h *History) Record(name string, ok bool, latency time.Duration, at time.Ti
 		b.ok++
 		b.latency += latency
 	}
+}
+
+// savedHour is one hour of an upstream's probes as saved by Snapshot.
+type savedHour struct {
+	Start   int64         `json:"start"`
+	OK      int           `json:"ok"`
+	Total   int           `json:"total"`
+	Latency time.Duration `json:"latency"`
+}
+
+// Snapshot returns the probe results of the last 24 hours as JSON, for Restore after a restart.
+func (h *History) Snapshot(now time.Time) []byte {
+	cut := now.Truncate(time.Hour).Unix() - (Hours-1)*3600
+	out := map[string][]savedHour{}
+	h.mu.Lock()
+	for name, r := range h.runs {
+		for _, b := range r {
+			if b.start >= cut && b.total > 0 {
+				out[name] = append(out[name], savedHour{Start: b.start, OK: b.ok, Total: b.total, Latency: b.latency})
+			}
+		}
+	}
+	h.mu.Unlock()
+	for _, list := range out {
+		sort.Slice(list, func(i, j int) bool { return list[i].Start < list[j].Start })
+	}
+	raw, _ := json.Marshal(out)
+	return raw
+}
+
+// Restore adds the probe results saved by Snapshot that still fall within the last 24 hours. An hour
+// that was also recorded since start (a restart within the hour) adds up.
+func (h *History) Restore(raw []byte, now time.Time) error {
+	var in map[string][]savedHour
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return err
+	}
+	cur := now.Truncate(time.Hour).Unix()
+	cut := cur - (Hours-1)*3600
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for name, list := range in {
+		for _, s := range list {
+			if s.Start < cut || s.Start > cur || s.Start%3600 != 0 || s.Total <= 0 || s.OK < 0 || s.OK > s.Total {
+				continue
+			}
+			r := h.runs[name]
+			if r == nil {
+				r = new([Hours]bucket)
+				h.runs[name] = r
+			}
+			b := &r[(s.Start/3600)%Hours]
+			if b.start != s.Start {
+				*b = bucket{start: s.Start}
+			}
+			b.ok += s.OK
+			b.total += s.Total
+			b.latency += max(s.Latency, 0)
+		}
+	}
+	return nil
 }
 
 // Hour holds the statistics for one hour. Total 0 means there is no data for that hour (the service
@@ -119,6 +182,7 @@ type Report struct {
 	Status    string     `json:"status"` // ok | degraded | down | unknown
 	Version   string     `json:"version"`
 	Started   time.Time  `json:"started"`
+	Since     time.Time  `json:"since"` // start of the earliest hour with data in the last 24 hours (started when none)
 	Generated time.Time  `json:"generated"`
 	Interval  int        `json:"probe_interval"` // seconds, 0 means upstreams are not probed
 	Service   Service    `json:"service"`
@@ -203,6 +267,23 @@ func Build(in Input) Report {
 			x.Value = &v
 		}
 		r.Service.Hours = append(r.Service.Hours, x)
+	}
+	r.Since = r.Started
+	first := int64(0)
+	for _, u := range r.Upstreams {
+		for _, h := range u.Hours {
+			if h.Total > 0 && (first == 0 || h.Start < first) {
+				first = h.Start
+			}
+		}
+	}
+	for _, h := range in.Requests {
+		if h.Requests > 0 && (first == 0 || h.Start < first) {
+			first = h.Start
+		}
+	}
+	if first != 0 && first < r.Started.Unix() {
+		r.Since = time.Unix(first, 0).UTC()
 	}
 	return r
 }

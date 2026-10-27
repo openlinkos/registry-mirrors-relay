@@ -108,3 +108,71 @@ func TestSeriesSinceInFuture(t *testing.T) {
 		t.Fatalf("since in the future should return nothing: %d", len(got))
 	}
 }
+
+func TestSnapshotRestore(t *testing.T) {
+	now := time.Date(2026, 10, 23, 10, 0, 30, 0, time.UTC)
+	c := New(nil)
+	c.now = func() time.Time { return now }
+	c.hour = now.Truncate(time.Hour).Unix()
+	c.Log(entry(now.Add(-25*time.Hour), "198.51.100.1", "docker.io/library/old", 200, 1)) // outside the ring
+	c.Log(entry(now.Add(-3*time.Hour), "198.51.100.1", "docker.io/library/nginx", 200, 1000))
+	c.Log(entry(now, "198.51.100.2", "ghcr.io/a/b", 503, 0))
+	e := entry(now, "198.51.100.3", "quay.io/x/y", 404, 0)
+	e.UserID = "ci"
+	c.Log(e)
+	raw := c.Snapshot()
+
+	// After a restart ten minutes later that already served a request in the current minute
+	later := now.Add(10 * time.Minute)
+	r := New(nil)
+	r.now = func() time.Time { return later }
+	r.hour = later.Truncate(time.Hour).Unix()
+	r.Log(entry(later, "198.51.100.4", "docker.io/library/nginx", 200, 10))
+	if err := r.Restore(raw); err != nil {
+		t.Fatal(err)
+	}
+	series := r.Series(later.Add(-24 * time.Hour))
+	var req, b5, bytes uint64
+	for _, m := range series {
+		req += m.Requests
+		b5 += m.Status5xx
+		bytes += m.Bytes
+	}
+	if req != 4 || b5 != 1 || bytes != 1010 {
+		t.Fatalf("restored counters: %d requests, %d 5xx, %d bytes", req, b5, bytes)
+	}
+	if !r.LastSeen()["ci"].Equal(now) {
+		t.Fatalf("last use of an account should be restored: %v", r.LastSeen())
+	}
+	if err := r.Restore([]byte("{")); err == nil {
+		t.Fatal("broken JSON should be an error")
+	}
+}
+
+func TestResumeHour(t *testing.T) {
+	s, err := store.OpenBolt(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	hour := time.Now().Truncate(time.Hour)
+	c := New(s)
+	for i := 0; i < 3; i++ {
+		c.Log(entry(time.Now(), "198.51.100.1", "docker.io/library/nginx", 200, 100))
+	}
+	c.Flush() // as on exit
+	r := New(s)
+	r.Log(entry(time.Now(), "198.51.100.2", "ghcr.io/a/b", 200, 50))
+	if !time.Now().Truncate(time.Hour).Equal(hour) {
+		t.Skip("the hour changed during the test")
+	}
+	sum := r.Summarize(time.Hour, 10)
+	if sum.Totals.Requests != 4 || len(sum.Images) != 2 || sum.Images[0].Bytes != 300 {
+		t.Fatalf("the hour saved before a restart should carry on: %+v", sum)
+	}
+	r.Flush()
+	r2 := New(s)
+	if got := r2.Summarize(time.Hour, 10).Totals.Requests; got != 4 {
+		t.Fatalf("saving again should keep what was counted before the restart: %d", got)
+	}
+}

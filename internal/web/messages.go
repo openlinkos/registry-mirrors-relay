@@ -163,8 +163,10 @@ var messagesEN = map[string]string{
 	"js.barNone":          "{time}: no data",
 	"js.strip":            "{name}, last 24 hours: {pct} available",
 	"js.stripService":     "This site, last 24 hours: success rate by hour",
-	"js.note":             "Each registry's /v2/ is requested every {interval}; checks do not count against pull limits. This site's success rate is the share of responses that are not a server error; hours with fewer than 20 requests are not counted. Figures start at the last restart ({since}).",
-	"js.noteNoProbe":      "Registries are not checked on this site. This site's success rate is the share of responses that are not a server error; hours with fewer than 20 requests are not counted. Figures start at the last restart ({since}).",
+	"js.note":             "Each registry's /v2/ is requested every {interval}; checks do not count against pull limits. This site's success rate is the share of responses that are not a server error; hours with fewer than 20 requests are not counted.",
+	"js.noteNoProbe":      "Registries are not checked on this site. This site's success rate is the share of responses that are not a server error; hours with fewer than 20 requests are not counted.",
+	"js.since":            "Figures start at {since}.",
+	"js.space":            " ", // between two sentences
 	"js.outUpstream":      "Registry",
 	"js.outMirror":        "Mirror",
 	"js.commands":         "Commands",

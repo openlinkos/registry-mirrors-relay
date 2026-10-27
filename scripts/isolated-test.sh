@@ -8,7 +8,8 @@
 # Setups covered: entrances with one domain per upstream (*.relay.test, network aliases); on the single-domain
 # entrance, the root path (registry-mirrors in daemon.json), the path prefix and ns (ctr + hosts.toml). It also
 # checks the admin console (open to every address) and the metrics (direct connections only), which share the
-# pull port; with IMAGE, also the generated first password and the admin command against the running service.
+# pull port; with IMAGE, also the generated first password, the admin command against the running service and
+# that the service status survives a restart.
 #
 # Usage: scripts/isolated-test.sh <linux binary of the relay>
 #        IMAGE=<image> scripts/isolated-test.sh     # test the released image itself: uses the image's entrypoint, default configuration path and HEALTHCHECK
@@ -196,6 +197,27 @@ if [ -n "$IMAGE" ]; then
     ok "admin password works against the running service through docker exec"
   else
     bad "admin password through docker exec failed"
+  fi
+
+  echo "Service status across a restart (writable data)"
+  # The probes are saved on exit (docker restart sends SIGTERM) and read back on start, so the hours
+  # before the restart stay on the usage page and the figures reach back before the new start.
+  statusjson() { docker run --rm --network "container:$RELAY-w" --entrypoint sh "$CR" -c 'wget -q -O - http://127.0.0.1:8080/status.json' 2>/dev/null; }
+  probes() { jq '[.upstreams[].hours[].total] | add // 0'; }
+  n=0
+  for _ in $(seq 1 30); do
+    n="$(statusjson | probes || true)"; n="${n:-0}"
+    [ "$n" -gt 0 ] && break
+    sleep 1
+  done
+  docker restart -t 20 "$RELAY-w" >/dev/null
+  for _ in $(seq 1 30); do docker exec "$RELAY-w" "$RBIN" probe 2>/dev/null && break; sleep 1; done
+  sj="$(statusjson || true)"
+  after="$(printf '%s' "$sj" | probes 2>/dev/null || echo 0)"; after="${after:-0}"
+  if [ "$n" -gt 0 ] && [ "$after" -ge "$n" ] && printf '%s' "$sj" | jq -e '.since < .started' >/dev/null 2>&1; then
+    ok "Probe history survives a restart ($n before, $after after)"
+  else
+    bad "Probe history after a restart: $n before, $after after, since/started $(printf '%s' "$sj" | jq -c '[.since, .started]' 2>/dev/null)"
   fi
   docker rm -fv "$RELAY-w" >/dev/null && docker volume rm "$P-data" >/dev/null
 fi

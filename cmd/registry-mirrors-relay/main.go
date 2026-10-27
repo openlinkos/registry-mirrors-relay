@@ -169,6 +169,7 @@ func cmdServe(args []string, stderr io.Writer) int {
 	go a.Watch(ctx)          // reload automatically when the configuration file changes
 	go a.Stats.Run(ctx)      // save the statistics to the operational database every hour
 	go a.WatchUpstreams(ctx) // probe each upstream's /v2/ every proxy.health_interval
+	go a.KeepState(ctx)      // save the last 24 hours of counts and probes, so a restart keeps them
 	watchSignals(ctx, a, log)
 
 	m, err := mgmt.New(a, log)

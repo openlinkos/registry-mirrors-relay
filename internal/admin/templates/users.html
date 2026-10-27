@@ -28,7 +28,7 @@
         </div>{{end}}</td>
     </tr>{{end}}</tbody>
   </table></div>
-  <p class="ol-hint">{{.T "users.lastSeenHelp"}}</p></div>
+  {{if not .Writable}}<p class="ol-hint">{{.T "users.lastSeenHelp"}}</p>{{end}}</div>
   {{else if $d.Total}}{{template "empty" (dict "Icon" "search" "Title" (.T "users.noMatch") "Text" (.T "users.noMatchText") "Href" "/admin/users" "Action" (.T "users.clearFilter"))}}
   {{else if .CanWrite}}{{template "empty" (dict "Icon" "users" "Title" (.T "users.none") "Text" (.T "users.noneText") "Href" "/admin/users/new" "Action" (.T "users.create") "ActionIcon" "user-plus")}}
   {{else}}{{template "empty" (dict "Icon" "users" "Title" (.T "users.none") "Text" (.T "users.noneText"))}}{{end}}

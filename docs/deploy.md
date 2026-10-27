@@ -288,7 +288,7 @@ Opening any entrance's host in a browser shows the usage page: what the site mir
 
 - Whether each upstream is reachable right now and how fast it answers; upstreams behind an open circuit breaker are marked. The relay requests every upstream's `/v2/` once a minute (`proxy.health_interval`), which does not count against pull quotas.
 - One bar per hour for the last 24 hours: each upstream's availability, and this site's request success rate (the share of responses that are not 5xx; hours with fewer than 20 requests are not counted).
-- Version and uptime. The figures live in memory and start again after a restart.
+- Version and uptime. With writable operational data (`admin.store.driver: bolt`, the default) the figures are saved every five minutes and on exit, so a restart or an upgrade keeps the last 24 hours; with read-only operational data they start again after a restart, and the page says from when.
 
 The page reads `/status.json` and refreshes it every minute. Anyone can fetch it, so it holds only what is safe to publish: failures are reduced to a category (timeout, DNS, connection, TLS, HTTP status), never the raw error, addresses, upstream quotas or request counts. Set `site.show_status: false` to turn it off.
 

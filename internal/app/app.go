@@ -166,6 +166,7 @@ func New(res *config.Result, raw []byte, opt Options) (*App, error) {
 	}
 	a.accessLog = al
 	a.Stats = stats.New(a.Store)
+	a.restoreState()
 	a.Metrics = metrics.New(version.Version)
 	a.Limiter = limit.New(limitConfig(cfg))
 	a.Auth = access.NewAuthenticator()
@@ -675,10 +676,63 @@ func (a *App) WatchUpstreams(ctx context.Context) {
 	}
 }
 
-// Close saves the statistics, finishes writing the access log, and closes the connections and the
-// operational database.
+// Names of the runtime state kept in the operational database (store.SaveState).
+const (
+	stateStats  = "stats"
+	stateProbes = "probes"
+)
+
+// stateInterval is how often the runtime state is saved while the service runs; it is saved on exit too.
+const stateInterval = 5 * time.Minute
+
+// restoreState picks up the per-minute counts, the accounts' last requests and the upstream probes of the
+// last 24 hours saved before a restart, so the console's charts and the usage page's status carry on.
+func (a *App) restoreState() {
+	if raw := a.Store.State(stateStats); raw != nil {
+		if err := a.Stats.Restore(raw); err != nil {
+			a.log.Warn("saved statistics could not be read; they start afresh", "err", err)
+		}
+	}
+	if raw := a.Store.State(stateProbes); raw != nil {
+		if err := a.probes.Restore(raw, time.Now()); err != nil {
+			a.log.Warn("saved upstream probes could not be read; they start afresh", "err", err)
+		}
+	}
+}
+
+// SaveState saves the runtime state that restoreState reads. A read-only store keeps nothing.
+func (a *App) SaveState() {
+	if !a.Store.Writable() {
+		return
+	}
+	if err := a.Store.SaveState(stateStats, a.Stats.Snapshot()); err != nil {
+		a.log.Warn("failed to save the statistics", "err", err)
+	}
+	if err := a.Store.SaveState(stateProbes, a.probes.Snapshot(time.Now())); err != nil {
+		a.log.Warn("failed to save the upstream probes", "err", err)
+	}
+}
+
+// KeepState saves the runtime state every few minutes until ctx is done, so that little is lost if the
+// process dies without Close.
+func (a *App) KeepState(ctx context.Context) {
+	t := time.NewTicker(stateInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			a.SaveState()
+		}
+	}
+}
+
+// Close saves the statistics and the runtime state, finishes writing the access log, and closes the
+// connections and the operational database.
 func (a *App) Close() {
 	a.Stats.Flush()
+	a.SaveState()
 	if n := a.accessLog.Dropped(); n > 0 {
 		a.log.Warn("access log entries were dropped while the queue was full", "count", n)
 	}

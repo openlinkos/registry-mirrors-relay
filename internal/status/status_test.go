@@ -123,3 +123,69 @@ func TestReason(t *testing.T) {
 		t.Errorf("with a status code the reason should be http_<status code>: %s", got)
 	}
 }
+
+func TestHistorySnapshotRestore(t *testing.T) {
+	now := time.Date(2026, 10, 24, 12, 30, 0, 0, time.UTC)
+	h := NewHistory()
+	h.Record("docker.io", true, 100*time.Millisecond, now)
+	h.Record("docker.io", false, 0, now.Add(-2*time.Hour))
+	h.Record("quay.io", true, 30*time.Millisecond, now.Add(-23*time.Hour))
+	raw := h.Snapshot(now)
+
+	// An hour later, after a restart that already probed once in the current hour
+	later := now.Add(time.Hour)
+	r := NewHistory()
+	r.Record("docker.io", true, 80*time.Millisecond, later)
+	if err := r.Restore(raw, later); err != nil {
+		t.Fatal(err)
+	}
+	hs := r.Hours("docker.io", later)
+	if c := hs[Hours-2]; c.OK != 1 || c.Total != 1 {
+		t.Fatalf("the hour before the restart should be restored: %+v", c)
+	}
+	if c := hs[Hours-4]; c.OK != 0 || c.Total != 1 {
+		t.Fatalf("a failed probe should be restored as failed: %+v", c)
+	}
+	if c := hs[Hours-1]; c.OK != 1 || c.Total != 1 {
+		t.Fatalf("the probe since the restart should stay: %+v", c)
+	}
+	// quay.io's probe was 23 hours before the snapshot, so 24 hours before later: outside the window
+	for _, x := range r.Hours("quay.io", later) {
+		if x.Total != 0 {
+			t.Fatalf("data older than 24 hours should not be restored: %+v", x)
+		}
+	}
+	// Restoring the same hour after a restart within it adds up
+	again := NewHistory()
+	again.Record("docker.io", true, 0, now)
+	if err := again.Restore(raw, now); err != nil {
+		t.Fatal(err)
+	}
+	if c := again.Hours("docker.io", now)[Hours-1]; c.OK != 2 || c.Total != 2 {
+		t.Fatalf("a restart within the hour should add up: %+v", c)
+	}
+	if err := NewHistory().Restore([]byte("{"), now); err == nil {
+		t.Fatal("broken JSON should be an error")
+	}
+	if err := NewHistory().Restore([]byte(`{"x":[{"start":1,"ok":5,"total":1}]}`), now); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBuildSince(t *testing.T) {
+	now := time.Date(2026, 10, 24, 12, 30, 0, 0, time.UTC)
+	started := now.Add(-10 * time.Minute)
+	h := NewHistory()
+	in := Input{Started: started, Now: now, Names: []string{"docker.io"}, History: h}
+	if r := Build(in); !r.Since.Equal(started) {
+		t.Fatalf("without data, since should be the start: %v", r.Since)
+	}
+	h.Record("docker.io", true, 0, now.Add(-5*time.Hour))
+	if r := Build(in); !r.Since.Equal(now.Truncate(time.Hour).Add(-5 * time.Hour)) {
+		t.Fatalf("since should be the earliest hour with probes: %v", r.Since)
+	}
+	in.Requests = []RequestsHour{{Start: now.Truncate(time.Hour).Add(-8 * time.Hour).Unix(), Requests: 3}}
+	if r := Build(in); !r.Since.Equal(now.Truncate(time.Hour).Add(-8 * time.Hour)) {
+		t.Fatalf("since should count the hours with requests: %v", r.Since)
+	}
+}

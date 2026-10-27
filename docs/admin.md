@@ -24,6 +24,8 @@ The admin console and the [admin API](api.md) share the pull port (8080) by defa
 
 Your own password and preferences are under My account, in the account menu. Accounts, rules and tokens from the configuration file are shown read-only. Each setting is changed on the page that uses it, see [Changing the configuration in the console](#changing-the-configuration-in-the-console). With read-only operational data (`admin.store.driver: none`), every change goes into the configuration file.
 
+The 24-hour charts, the service status and the accounts' last use are saved with the operational data every five minutes and on exit, so a restart or an upgrade keeps them; the list of recent requests and the sessions are not. With read-only operational data they all start again after a restart.
+
 ## The first administrator
 
 There is no default password, and no setup page where whoever opens the site first chooses one: on a freshly started service such a page would hand the console to the first visitor.

@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/openlinkos/registry-mirrors-relay/internal/accesslog"
 	"github.com/openlinkos/registry-mirrors-relay/internal/config"
 	"github.com/openlinkos/registry-mirrors-relay/internal/stats"
 	"github.com/openlinkos/registry-mirrors-relay/internal/status"
@@ -283,5 +284,58 @@ func TestGenerateAdminSkipped(t *testing.T) {
 			}
 		}
 		a.Close()
+	}
+}
+
+func TestRestartKeepsState(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	yaml := "data_dir: " + filepath.ToSlash(dir) + "\nlog: {access: {output: \"off\"}}\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	start := func() *App {
+		res, err := config.Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, err := New(res, []byte(yaml), Options{ConfigPath: path, Log: slog.New(slog.DiscardHandler)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	a := start()
+	now := time.Now()
+	a.probes.Record("docker.io", true, 20*time.Millisecond, now.Add(-2*time.Hour))
+	for range 25 {
+		a.Stats.Log(&accesslog.Entry{Time: now.Add(-time.Hour), Status: 200, Size: 10, UserID: "ci"})
+	}
+	a.Close()
+
+	b := start()
+	defer b.Close()
+	r := b.StatusReport()
+	var probes int
+	for _, u := range r.Upstreams {
+		for _, h := range u.Hours {
+			probes += h.Total
+		}
+	}
+	if probes != 1 {
+		t.Fatalf("the probe before the restart should be kept: %d", probes)
+	}
+	var served bool
+	for _, h := range r.Service.Hours {
+		served = served || h.Value != nil
+	}
+	if !served {
+		t.Fatalf("the hour with 25 requests before the restart should have a success rate: %+v", r.Service.Hours)
+	}
+	if !r.Since.Before(b.Started) {
+		t.Fatalf("since should reach back before this start: %v, started %v", r.Since, b.Started)
+	}
+	if _, ok := b.Stats.LastSeen()["ci"]; !ok {
+		t.Fatal("the account's last use should be kept")
 	}
 }

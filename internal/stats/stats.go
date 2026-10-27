@@ -6,7 +6,9 @@
 //   - summaries of the last 5000 requests (ring buffer).
 //
 // At the end of each hour that hour's summary is written to the operational database, so the console
-// can show a longer history.
+// can show a longer history. The per-minute counters and the accounts' last requests can be saved too
+// (Snapshot) and restored after a restart (Restore); the current hour's summary saved on exit is picked
+// up again when the service starts within the same hour.
 package stats
 
 import (
@@ -99,7 +101,93 @@ func New(s store.Store) *Collector {
 		recent: make([]Request, 0, recentSize), unlist: map[string]int{}, seen: map[string]time.Time{}, hits: map[string]uint64{},
 		store: s, now: time.Now}
 	c.hour = c.now().Truncate(time.Hour).Unix()
+	c.resumeHour()
 	return c
+}
+
+// resumeHour continues the current hour's summary saved before a restart within the same hour, so that
+// saving the hour again does not replace what was counted before.
+func (c *Collector) resumeHour() {
+	if c.store == nil {
+		return
+	}
+	for _, b := range c.store.HourStats(time.Unix(c.hour, 0)) {
+		var h Hour
+		if json.Unmarshal(b, &h) != nil || h.Start != c.hour {
+			continue
+		}
+		c.hourTot.add(h.Totals)
+		for _, it := range h.Images {
+			c.images.Add(it.Key, it.Count, it.Bytes)
+		}
+		for _, it := range h.Clients {
+			c.clients.Add(it.Key, it.Count, it.Bytes)
+		}
+		for _, it := range h.Repeats {
+			c.repeats.Add(it.Key, it.Count, it.Bytes)
+		}
+	}
+}
+
+// savedState is what Snapshot saves: the per-minute counters as [start, requests, bytes, 4xx, 5xx,
+// limited, cache hits] and the time of each account's last request.
+type savedState struct {
+	Minutes [][7]uint64          `json:"minutes"`
+	Seen    map[string]time.Time `json:"seen,omitempty"`
+}
+
+// Snapshot returns the per-minute counters of the last 24 hours and each client account's last request,
+// as JSON for Restore after a restart.
+func (c *Collector) Snapshot() []byte {
+	c.mu.Lock()
+	now := c.now().Unix() / 60 * 60
+	cut := now - (minutes-1)*60
+	st := savedState{Seen: make(map[string]time.Time, len(c.seen))}
+	for _, m := range c.ring {
+		if m.Start >= cut && m.Start <= now && m.Requests > 0 {
+			st.Minutes = append(st.Minutes, [7]uint64{uint64(m.Start), m.Requests, m.Bytes, m.Status4xx, m.Status5xx, m.Limited, m.CacheHits})
+		}
+	}
+	for k, t := range c.seen {
+		st.Seen[k] = t
+	}
+	c.mu.Unlock()
+	sort.Slice(st.Minutes, func(i, j int) bool { return st.Minutes[i][0] < st.Minutes[j][0] })
+	raw, _ := json.Marshal(st)
+	return raw
+}
+
+// Restore adds the counters saved by Snapshot that still fall within the last 24 hours (a minute also
+// counted since start adds up) and keeps the later last request of each account.
+func (c *Collector) Restore(raw []byte) error {
+	var st savedState
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.now().Unix() / 60 * 60
+	cut := now - (minutes-1)*60
+	for _, v := range st.Minutes {
+		start := int64(v[0])
+		if start < cut || start > now || start%60 != 0 {
+			continue
+		}
+		slot := &c.ring[(start/60)%minutes]
+		if slot.Start != start {
+			*slot = Minute{Start: start}
+		}
+		slot.add(Minute{Requests: v[1], Bytes: v[2], Status4xx: v[3], Status5xx: v[4], Limited: v[5], CacheHits: v[6]})
+	}
+	for k, t := range st.Seen {
+		if prev, ok := c.seen[k]; ok && !t.After(prev) {
+			continue
+		}
+		if _, ok := c.seen[k]; ok || len(c.seen) < maxTracked {
+			c.seen[k] = t
+		}
+	}
+	return nil
 }
 
 // Log records one request.

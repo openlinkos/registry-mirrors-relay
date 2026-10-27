@@ -1,5 +1,7 @@
 // Package store keeps the operational data: client accounts, IP rules, temporary bans, image rules, API
-// tokens and console administrators, plus the audit log and hourly statistics. It never stores image data.
+// tokens and console administrators, plus the audit log, hourly statistics and the runtime state that
+// should survive a restart (the last 24 hours of per-minute counts and upstream probes). It never stores
+// image data.
 // There are two implementations:
 //   - bolt: a single bbolt file, writable by a single instance;
 //   - none: read-only, all operational data comes from the configuration file (for multiple k8s replicas);
@@ -151,6 +153,10 @@ type Store interface {
 	// SaveHour saves one hour of statistics (JSON); HourStats reads them back.
 	SaveHour(hour time.Time, b []byte) error
 	HourStats(since time.Time) [][]byte
+	// SaveState keeps a piece of runtime state (JSON) under name, replacing the previous one, so that it
+	// survives a restart; State reads it back (nil when there is none). A read-only store keeps nothing.
+	SaveState(name string, b []byte) error
+	State(name string) []byte
 	Writable() bool
 	Close() error
 }
