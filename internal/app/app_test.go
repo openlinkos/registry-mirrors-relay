@@ -332,8 +332,8 @@ func TestRestartKeepsState(t *testing.T) {
 	if !served {
 		t.Fatalf("the hour with 25 requests before the restart should have a success rate: %+v", r.Service.Hours)
 	}
-	if !r.Since.Before(b.Started) {
-		t.Fatalf("since should reach back before this start: %v, started %v", r.Since, b.Started)
+	if want := now.Add(-2 * time.Hour).Truncate(time.Hour); !r.Since.Equal(want) {
+		t.Fatalf("since should be the earliest data restored (the probe's hour): %v, want %v", r.Since, want)
 	}
 	if _, ok := b.Stats.LastSeen()["ci"]; !ok {
 		t.Fatal("the account's last use should be kept")

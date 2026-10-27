@@ -136,8 +136,12 @@ func TestHistorySnapshotRestore(t *testing.T) {
 	later := now.Add(time.Hour)
 	r := NewHistory()
 	r.Record("docker.io", true, 80*time.Millisecond, later)
-	if err := r.Restore(raw, later); err != nil {
+	first, err := r.Restore(raw, later)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if want := now.Truncate(time.Hour).Add(-2 * time.Hour); !first.Equal(want) {
+		t.Fatalf("Restore should report the earliest hour restored: %v, want %v", first, want)
 	}
 	hs := r.Hours("docker.io", later)
 	if c := hs[Hours-2]; c.OK != 1 || c.Total != 1 {
@@ -158,17 +162,17 @@ func TestHistorySnapshotRestore(t *testing.T) {
 	// Restoring the same hour after a restart within it adds up
 	again := NewHistory()
 	again.Record("docker.io", true, 0, now)
-	if err := again.Restore(raw, now); err != nil {
+	if _, err := again.Restore(raw, now); err != nil {
 		t.Fatal(err)
 	}
 	if c := again.Hours("docker.io", now)[Hours-1]; c.OK != 2 || c.Total != 2 {
 		t.Fatalf("a restart within the hour should add up: %+v", c)
 	}
-	if err := NewHistory().Restore([]byte("{"), now); err == nil {
+	if _, err := NewHistory().Restore([]byte("{"), now); err == nil {
 		t.Fatal("broken JSON should be an error")
 	}
-	if err := NewHistory().Restore([]byte(`{"x":[{"start":1,"ok":5,"total":1}]}`), now); err != nil {
-		t.Fatal(err)
+	if first, err := NewHistory().Restore([]byte(`{"x":[{"start":1,"ok":5,"total":1}]}`), now); err != nil || !first.IsZero() {
+		t.Fatalf("nothing usable should be restored: %v %v", first, err)
 	}
 }
 
@@ -176,16 +180,18 @@ func TestBuildSince(t *testing.T) {
 	now := time.Date(2026, 10, 24, 12, 30, 0, 0, time.UTC)
 	started := now.Add(-10 * time.Minute)
 	h := NewHistory()
+	// Data recorded since start, in the hour that began before it, does not move since back
+	h.Record("docker.io", true, 0, now)
 	in := Input{Started: started, Now: now, Names: []string{"docker.io"}, History: h}
 	if r := Build(in); !r.Since.Equal(started) {
-		t.Fatalf("without data, since should be the start: %v", r.Since)
+		t.Fatalf("without restored data, since should be the start: %v", r.Since)
 	}
-	h.Record("docker.io", true, 0, now.Add(-5*time.Hour))
-	if r := Build(in); !r.Since.Equal(now.Truncate(time.Hour).Add(-5 * time.Hour)) {
-		t.Fatalf("since should be the earliest hour with probes: %v", r.Since)
+	in.Since = now.Add(-5 * time.Hour)
+	if r := Build(in); !r.Since.Equal(in.Since) {
+		t.Fatalf("since should be where the restored data begins: %v", r.Since)
 	}
-	in.Requests = []RequestsHour{{Start: now.Truncate(time.Hour).Add(-8 * time.Hour).Unix(), Requests: 3}}
-	if r := Build(in); !r.Since.Equal(now.Truncate(time.Hour).Add(-8 * time.Hour)) {
-		t.Fatalf("since should count the hours with requests: %v", r.Since)
+	in.Since = now
+	if r := Build(in); !r.Since.Equal(started) {
+		t.Fatalf("a since after the start is ignored: %v", r.Since)
 	}
 }

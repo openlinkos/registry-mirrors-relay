@@ -125,6 +125,8 @@ type App struct {
 	healthMu sync.Mutex
 	health   map[string]upstream.Health
 	probes   *status.History // hourly probe results, for the service status on the usage page
+	// dataSince is where the figures restored at start begin (zero when nothing was restored)
+	dataSince time.Time
 }
 
 // ReloadStatus is the result of the last reload.
@@ -620,7 +622,7 @@ func (a *App) StatusReport() status.Report {
 	rt := a.Runtime()
 	now := time.Now()
 	in := status.Input{
-		Version: version.Version, Started: a.Started, Now: now,
+		Version: version.Version, Started: a.Started, Since: a.dataSince, Now: now,
 		Interval: rt.Config.Proxy.HealthInterval.D(), Names: rt.Pool.Names(),
 		Probes: map[string]status.Probe{}, Open: map[string]bool{}, History: a.probes,
 	}
@@ -686,17 +688,27 @@ const (
 const stateInterval = 5 * time.Minute
 
 // restoreState picks up the per-minute counts, the accounts' last requests and the upstream probes of the
-// last 24 hours saved before a restart, so the console's charts and the usage page's status carry on.
+// last 24 hours saved before a restart, so the console's charts and the usage page's status carry on. It
+// notes where the restored figures begin (dataSince).
 func (a *App) restoreState() {
-	if raw := a.Store.State(stateStats); raw != nil {
-		if err := a.Stats.Restore(raw); err != nil {
-			a.log.Warn("saved statistics could not be read; they start afresh", "err", err)
+	earliest := func(t time.Time) {
+		if !t.IsZero() && (a.dataSince.IsZero() || t.Before(a.dataSince)) {
+			a.dataSince = t
 		}
 	}
+	if raw := a.Store.State(stateStats); raw != nil {
+		t, err := a.Stats.Restore(raw)
+		if err != nil {
+			a.log.Warn("saved statistics could not be read; they start afresh", "err", err)
+		}
+		earliest(t)
+	}
 	if raw := a.Store.State(stateProbes); raw != nil {
-		if err := a.probes.Restore(raw, time.Now()); err != nil {
+		t, err := a.probes.Restore(raw, time.Now())
+		if err != nil {
 			a.log.Warn("saved upstream probes could not be read; they start afresh", "err", err)
 		}
+		earliest(t)
 	}
 }
 

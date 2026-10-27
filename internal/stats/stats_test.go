@@ -128,8 +128,12 @@ func TestSnapshotRestore(t *testing.T) {
 	r.now = func() time.Time { return later }
 	r.hour = later.Truncate(time.Hour).Unix()
 	r.Log(entry(later, "198.51.100.4", "docker.io/library/nginx", 200, 10))
-	if err := r.Restore(raw); err != nil {
+	first, err := r.Restore(raw)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if want := now.Add(-3 * time.Hour).Truncate(time.Minute); !first.Equal(want) {
+		t.Fatalf("Restore should report the earliest minute restored: %v, want %v", first, want)
 	}
 	series := r.Series(later.Add(-24 * time.Hour))
 	var req, b5, bytes uint64
@@ -144,7 +148,7 @@ func TestSnapshotRestore(t *testing.T) {
 	if !r.LastSeen()["ci"].Equal(now) {
 		t.Fatalf("last use of an account should be restored: %v", r.LastSeen())
 	}
-	if err := r.Restore([]byte("{")); err == nil {
+	if _, err := r.Restore([]byte("{")); err == nil {
 		t.Fatal("broken JSON should be an error")
 	}
 }

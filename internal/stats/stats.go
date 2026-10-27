@@ -158,12 +158,14 @@ func (c *Collector) Snapshot() []byte {
 }
 
 // Restore adds the counters saved by Snapshot that still fall within the last 24 hours (a minute also
-// counted since start adds up) and keeps the later last request of each account.
-func (c *Collector) Restore(raw []byte) error {
+// counted since start adds up) and keeps the later last request of each account. It returns the earliest
+// minute restored (zero when none was).
+func (c *Collector) Restore(raw []byte) (time.Time, error) {
 	var st savedState
 	if err := json.Unmarshal(raw, &st); err != nil {
-		return err
+		return time.Time{}, err
 	}
+	var first int64
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now().Unix() / 60 * 60
@@ -178,6 +180,9 @@ func (c *Collector) Restore(raw []byte) error {
 			*slot = Minute{Start: start}
 		}
 		slot.add(Minute{Requests: v[1], Bytes: v[2], Status4xx: v[3], Status5xx: v[4], Limited: v[5], CacheHits: v[6]})
+		if first == 0 || start < first {
+			first = start
+		}
 	}
 	for k, t := range st.Seen {
 		if prev, ok := c.seen[k]; ok && !t.After(prev) {
@@ -187,7 +192,10 @@ func (c *Collector) Restore(raw []byte) error {
 			c.seen[k] = t
 		}
 	}
-	return nil
+	if first == 0 {
+		return time.Time{}, nil
+	}
+	return time.Unix(first, 0).UTC(), nil
 }
 
 // Log records one request.

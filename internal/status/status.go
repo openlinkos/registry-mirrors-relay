@@ -87,12 +87,14 @@ func (h *History) Snapshot(now time.Time) []byte {
 }
 
 // Restore adds the probe results saved by Snapshot that still fall within the last 24 hours. An hour
-// that was also recorded since start (a restart within the hour) adds up.
-func (h *History) Restore(raw []byte, now time.Time) error {
+// that was also recorded since start (a restart within the hour) adds up. It returns the start of the
+// earliest hour restored (zero when none was).
+func (h *History) Restore(raw []byte, now time.Time) (time.Time, error) {
 	var in map[string][]savedHour
 	if err := json.Unmarshal(raw, &in); err != nil {
-		return err
+		return time.Time{}, err
 	}
+	var first int64
 	cur := now.Truncate(time.Hour).Unix()
 	cut := cur - (Hours-1)*3600
 	h.mu.Lock()
@@ -114,9 +116,15 @@ func (h *History) Restore(raw []byte, now time.Time) error {
 			b.ok += s.OK
 			b.total += s.Total
 			b.latency += max(s.Latency, 0)
+			if first == 0 || s.Start < first {
+				first = s.Start
+			}
 		}
 	}
-	return nil
+	if first == 0 {
+		return time.Time{}, nil
+	}
+	return time.Unix(first, 0).UTC(), nil
 }
 
 // Hour holds the statistics for one hour. Total 0 means there is no data for that hour (the service
@@ -161,6 +169,7 @@ type Probe struct {
 type Input struct {
 	Version  string
 	Started  time.Time
+	Since    time.Time // the earliest data restored after a restart; zero when nothing was restored
 	Now      time.Time
 	Interval time.Duration    // probe interval, 0 means no probing
 	Names    []string         // upstreams, sorted by name
@@ -182,7 +191,7 @@ type Report struct {
 	Status    string     `json:"status"` // ok | degraded | down | unknown
 	Version   string     `json:"version"`
 	Started   time.Time  `json:"started"`
-	Since     time.Time  `json:"since"` // start of the earliest hour with data in the last 24 hours (started when none)
+	Since     time.Time  `json:"since"` // where the figures begin: the earliest data restored after a restart, or started
 	Generated time.Time  `json:"generated"`
 	Interval  int        `json:"probe_interval"` // seconds, 0 means upstreams are not probed
 	Service   Service    `json:"service"`
@@ -269,21 +278,8 @@ func Build(in Input) Report {
 		r.Service.Hours = append(r.Service.Hours, x)
 	}
 	r.Since = r.Started
-	first := int64(0)
-	for _, u := range r.Upstreams {
-		for _, h := range u.Hours {
-			if h.Total > 0 && (first == 0 || h.Start < first) {
-				first = h.Start
-			}
-		}
-	}
-	for _, h := range in.Requests {
-		if h.Requests > 0 && (first == 0 || h.Start < first) {
-			first = h.Start
-		}
-	}
-	if first != 0 && first < r.Started.Unix() {
-		r.Since = time.Unix(first, 0).UTC()
+	if !in.Since.IsZero() && in.Since.Before(in.Started) {
+		r.Since = in.Since.UTC().Truncate(time.Second)
 	}
 	return r
 }
