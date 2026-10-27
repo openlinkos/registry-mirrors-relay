@@ -698,4 +698,8 @@ var messagesZH = map[string]string{ //nolint:gosec // 界面文案，里面的�
 	"system.mgmtPort":              "端口",
 	"notice.user.enabled":          "已启用账号 {v}。",
 	"notice.user.disabled":         "已停用账号 {v}。",
+
+	"entrance.containerdLoginHelp": "containerd 2.x 默认读取 /etc/containerd/certs.d；1.x 要在配置里写 config_path。这个入口要求登录：在 authorization 头里填客户端账号，值是「用户名:口令」的 base64。",
+	"entrance.k3sLoginHelp":        "k3s 和 RKE2 用这个文件生成 containerd 的配置。这个入口要求登录：在 configs 下填上客户端账号。改完重启 k3s。",
+	"entrance.podmanLoginHelp":     "Podman、CRI-O、Buildah、Skopeo 都读这个文件。这个入口要求登录：先运行一次 podman login {host}。",
 }

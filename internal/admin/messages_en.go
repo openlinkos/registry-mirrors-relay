@@ -698,4 +698,8 @@ var messagesEN = map[string]string{ //nolint:gosec // interface text: the passwo
 	"system.mgmtPort":              "Port",
 	"notice.user.enabled":          "Enabled the account {v}.",
 	"notice.user.disabled":         "Disabled the account {v}.",
+
+	"entrance.containerdLoginHelp": "containerd 2.x reads /etc/containerd/certs.d by default; 1.x needs config_path in its configuration. This entrance requires sign-in: put a client account in the authorization header, as the base64 of user:password.",
+	"entrance.k3sLoginHelp":        "k3s and RKE2 generate containerd's configuration from this file. This entrance requires sign-in: fill in a client account under configs. Restart k3s afterwards.",
+	"entrance.podmanLoginHelp":     "Podman, CRI-O, Buildah and Skopeo read this file. This entrance requires sign-in: run podman login {host} once.",
 }

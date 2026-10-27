@@ -589,6 +589,35 @@ func checkPage(t *testing.T, name, body string) {
 	}
 }
 
+// An entrance requiring sign-in gets client configuration that carries an account, and no Docker
+// registry-mirrors (Docker sends no credentials to a mirror).
+func TestEntranceSnippetsSignIn(t *testing.T) {
+	e := newEnv(t, envOpts{yaml: "entrances:\n  - {name: open, hosts: [open.test]}\n  - {name: single, hosts: [mirror.test], auth: basic}\n  - {hosts: [docker.test], upstream: docker.io, auth: basic}\n  - {hosts: [hub.test], upstream: docker.io}\n"})
+	admin := e.login("alice", alicePW)
+	for _, c := range []struct {
+		i     string
+		login bool
+	}{{"0", false}, {"1", true}, {"2", true}, {"3", false}} {
+		r := e.get("/admin/entrances/view?i="+c.i, admin.cookie, langCookie+"=en")
+		if r.StatusCode != 200 {
+			t.Fatalf("entrance %s: %d", c.i, r.StatusCode)
+		}
+		for marker, want := range map[string]bool{
+			`id="snippet-login"`:     c.login,
+			`id="snippet-docker"`:    !c.login,
+			`.header]`:               c.login,
+			"Basic &lt;base64 of":    c.login,
+			"configs:":               c.login,
+			"username: &lt;username": c.login,
+			"run podman login":       c.login,
+		} {
+			if strings.Contains(r.body, marker) != want {
+				t.Errorf("entrance %s: %q present = %v, want %v", c.i, marker, !want, want)
+			}
+		}
+	}
+}
+
 func TestPagesRender(t *testing.T) {
 	e := newEnv(t, envOpts{yaml: "entrances:\n  - {name: mirror, hosts: [mirror.test]}\n  - {hosts: [ghcr.test], upstream: ghcr.io, auth: basic}\n"})
 	admin := e.login("alice", alicePW)

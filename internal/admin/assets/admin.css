@@ -20,7 +20,9 @@
   display: none;
 }
 
-/* A code block without a label leaves room on its first line for the copy button. */
+/* A code block without a label keeps its text clear of the copy button: the code scrolls inside a narrower
+   box, so a long line never slides under the button. */
 .ol-code:has(> .ol-copy):not(:has(> .ol-code-label)) > pre {
-  padding-inline-end: var(--ol-space-10);
+  margin-inline-end: var(--ol-space-10);
+  padding-inline-end: 0;
 }

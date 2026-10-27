@@ -130,7 +130,7 @@ func (h *Handler) entrancePage(c *ctx) error {
 		if e.Upstream != "" {
 			d.Snippets = fixedSnippets(c.lang, rt.Config, e, d.Scheme, d.Host)
 		} else {
-			d.Snippets = snippets(c.lang, rt.Pool.Names(), rt.Config, d.Scheme, d.Host)
+			d.Snippets = snippets(c.lang, rt.Pool.Names(), rt.Config, d.Scheme, d.Host, e.Auth == "basic")
 		}
 		if e.Auth == "basic" {
 			d.Snippets = append([]snippetView{{ID: "snippet-login", Label: tr(c.lang, "entrance.loginLabel"),
@@ -218,16 +218,20 @@ type snippetView struct {
 // snippets generates the configuration that points each kind of client at a single-domain entrance.
 // containerd adds ?ns=<upstream> to its requests, Podman's mirror location is written as <domain>/<upstream>
 // (a path prefix), and Docker's registry-mirrors only applies to Docker Hub (the root path).
-func snippets(lang i18n.Lang, names []string, cfg *config.Config, scheme, host string) []snippetView {
+// When the entrance requires sign-in (login), Docker's registry-mirrors is left out, since Docker sends no
+// credentials to a mirror, and the others carry a client account.
+func snippets(lang i18n.Lang, names []string, cfg *config.Config, scheme, host string, login bool) []snippetView {
 	base := scheme + "://" + host
 	var out []snippetView
 
-	daemon := "{\n  \"registry-mirrors\": [\"" + base + "\"]"
-	if scheme == "http" {
-		daemon += ",\n  \"insecure-registries\": [\"" + host + "\"]"
+	if !login {
+		daemon := "{\n  \"registry-mirrors\": [\"" + base + "\"]"
+		if scheme == "http" {
+			daemon += ",\n  \"insecure-registries\": [\"" + host + "\"]"
+		}
+		daemon += "\n}"
+		out = append(out, snippetView{ID: "snippet-docker", Label: "/etc/docker/daemon.json", Code: daemon, Help: tr(lang, "usage.dockerHelp")})
 	}
-	daemon += "\n}"
-	out = append(out, snippetView{ID: "snippet-docker", Label: "/etc/docker/daemon.json", Code: daemon, Help: tr(lang, "usage.dockerHelp")})
 
 	var ctr strings.Builder
 	for _, n := range names {
@@ -236,17 +240,16 @@ func snippets(lang i18n.Lang, names []string, cfg *config.Config, scheme, host s
 		if n == config.DefaultUpstream {
 			server = "https://registry-1.docker.io"
 		}
-		dir := "/etc/containerd/certs.d/" + n
-		ctr.WriteString("mkdir -p " + dir + "\ncat > " + dir + "/hosts.toml <<'EOF'\nserver = \"" + server + "\"\n\n[host.\"" + base + "\"]\n  capabilities = [\"pull\", \"resolve\"]\nEOF\n")
+		ctr.WriteString(hostsToml(n, server, base, login) + "\n")
 	}
-	out = append(out, snippetView{ID: "snippet-containerd", Label: "containerd hosts.toml", Code: strings.TrimSuffix(ctr.String(), "\n"), Help: tr(lang, "usage.containerdHelp")})
+	out = append(out, snippetView{ID: "snippet-containerd", Label: "containerd hosts.toml", Code: strings.TrimSuffix(ctr.String(), "\n"), Help: loginHelp(lang, login, "usage.containerdHelp", "entrance.containerdLoginHelp", host)})
 
 	var k3s strings.Builder
 	k3s.WriteString("mirrors:\n")
 	for _, n := range names {
 		k3s.WriteString("  " + n + ":\n    endpoint:\n      - \"" + base + "\"\n")
 	}
-	out = append(out, snippetView{ID: "snippet-k3s", Label: "/etc/rancher/k3s/registries.yaml", Code: strings.TrimSuffix(k3s.String(), "\n"), Help: tr(lang, "usage.k3sHelp")})
+	out = append(out, snippetView{ID: "snippet-k3s", Label: "/etc/rancher/k3s/registries.yaml", Code: strings.TrimSuffix(k3s.String(), "\n") + k3sAuth(login, host), Help: loginHelp(lang, login, "usage.k3sHelp", "entrance.k3sLoginHelp", host)})
 
 	var pod strings.Builder
 	for i, n := range names {
@@ -262,7 +265,7 @@ func snippets(lang i18n.Lang, names []string, cfg *config.Config, scheme, host s
 			pod.WriteString("insecure = true\n")
 		}
 	}
-	out = append(out, snippetView{ID: "snippet-podman", Label: "/etc/containers/registries.conf", Code: strings.TrimSuffix(pod.String(), "\n"), Help: tr(lang, "usage.podmanHelp")})
+	out = append(out, snippetView{ID: "snippet-podman", Label: "/etc/containers/registries.conf", Code: strings.TrimSuffix(pod.String(), "\n"), Help: loginHelp(lang, login, "usage.podmanHelp", "entrance.podmanLoginHelp", host)})
 
 	pull := "docker pull " + host + "/library/nginx:latest\ndocker pull " + host + "/ghcr.io/<owner>/<image>:<tag>\nnerdctl pull " + host + "/quay.io/<owner>/<image>:<tag>"
 	out = append(out, snippetView{ID: "snippet-pull", Label: tr(lang, "usage.pullLabel"), Code: pull, Help: tr(lang, "usage.pullHelp")})
@@ -271,9 +274,10 @@ func snippets(lang i18n.Lang, names []string, cfg *config.Config, scheme, host s
 
 // fixedSnippets generates the configuration for an entrance with a fixed upstream: pulls name the entrance's
 // host instead of the upstream's, and containerd, k3s and Podman can use it as a mirror of that upstream.
+// Sign-in is handled as in snippets.
 func fixedSnippets(lang i18n.Lang, cfg *config.Config, e config.Entrance, scheme, host string) []snippetView {
 	base := scheme + "://" + host
-	n := e.Upstream
+	n, login := e.Upstream, e.Auth == "basic"
 	server, prefix := "https://"+n, n
 	if u := cfg.Upstreams[n]; u != nil {
 		server = "https://" + u.Registry
@@ -287,20 +291,47 @@ func fixedSnippets(lang i18n.Lang, cfg *config.Config, e config.Entrance, scheme
 	}
 	out := []snippetView{{ID: "snippet-pull", Label: tr(lang, "usage.pullLabel"), Code: "docker pull " + host + "/" + example,
 		Help: tr(lang, "entrance.fixedPullHelp", "upstream", n)}}
-	if n == config.DefaultUpstream {
+	if n == config.DefaultUpstream && !login {
 		daemon := "{\n  \"registry-mirrors\": [\"" + base + "\"]\n}"
 		out = append(out, snippetView{ID: "snippet-docker", Label: "/etc/docker/daemon.json", Code: daemon, Help: tr(lang, "usage.dockerHelp")})
 	}
-	dir := "/etc/containerd/certs.d/" + n
-	out = append(out, snippetView{ID: "snippet-containerd", Label: "containerd hosts.toml",
-		Code: "mkdir -p " + dir + "\ncat > " + dir + "/hosts.toml <<'EOF'\nserver = \"" + server + "\"\n\n[host.\"" + base + "\"]\n  capabilities = [\"pull\", \"resolve\"]\nEOF",
-		Help: tr(lang, "usage.containerdHelp")})
+	out = append(out, snippetView{ID: "snippet-containerd", Label: "containerd hosts.toml", Code: hostsToml(n, server, base, login),
+		Help: loginHelp(lang, login, "usage.containerdHelp", "entrance.containerdLoginHelp", host)})
 	out = append(out, snippetView{ID: "snippet-k3s", Label: "/etc/rancher/k3s/registries.yaml",
-		Code: "mirrors:\n  " + n + ":\n    endpoint:\n      - \"" + base + "\"", Help: tr(lang, "usage.k3sHelp")})
+		Code: "mirrors:\n  " + n + ":\n    endpoint:\n      - \"" + base + "\"" + k3sAuth(login, host),
+		Help: loginHelp(lang, login, "usage.k3sHelp", "entrance.k3sLoginHelp", host)})
 	pod := "[[registry]]\nprefix = \"" + prefix + "\"\nlocation = \"" + prefix + "\"\n\n[[registry.mirror]]\nlocation = \"" + host + "\""
 	if scheme == "http" {
 		pod += "\ninsecure = true"
 	}
-	out = append(out, snippetView{ID: "snippet-podman", Label: "/etc/containers/registries.conf", Code: pod, Help: tr(lang, "usage.podmanHelp")})
+	out = append(out, snippetView{ID: "snippet-podman", Label: "/etc/containers/registries.conf", Code: pod,
+		Help: loginHelp(lang, login, "usage.podmanHelp", "entrance.podmanLoginHelp", host)})
 	return out
+}
+
+// hostsToml writes containerd's hosts.toml for one upstream (server) mirrored at base. An entrance requiring
+// sign-in gets the client account in an authorization header.
+func hostsToml(upstream, server, base string, login bool) string {
+	dir := "/etc/containerd/certs.d/" + upstream
+	s := "mkdir -p " + dir + "\ncat > " + dir + "/hosts.toml <<'EOF'\nserver = \"" + server + "\"\n\n[host.\"" + base + "\"]\n  capabilities = [\"pull\", \"resolve\"]\n"
+	if login {
+		s += "  [host.\"" + base + "\".header]\n    authorization = \"Basic <base64 of user:password>\"\n"
+	}
+	return s + "EOF"
+}
+
+// k3sAuth is the configs section of registries.yaml with the client account, for an entrance requiring sign-in.
+func k3sAuth(login bool, host string) string {
+	if !login {
+		return ""
+	}
+	return "\nconfigs:\n  \"" + host + "\":\n    auth:\n      username: <username>\n      password: <password>"
+}
+
+// loginHelp is a snippet's hint: the sign-in variant (which names host) when the entrance requires it.
+func loginHelp(lang i18n.Lang, login bool, key, loginKey, host string) string {
+	if login {
+		return tr(lang, loginKey, "host", host)
+	}
+	return tr(lang, key)
 }
