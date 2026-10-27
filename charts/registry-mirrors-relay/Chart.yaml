@@ -3,8 +3,8 @@ name: registry-mirrors-relay
 description: A container registry mirror that relays and never stores image data, with a built-in admin console.
 type: application
 # release.yml changes this to the tag's version when releasing (the chart and the application share one version number)
-version: 0.6.2
-appVersion: "v0.6.2"
+version: 0.6.3
+appVersion: "v0.6.3"
 # the preStop sleep action needs 1.30+
 kubeVersion: ">=1.30.0-0"
 home: https://github.com/openlinkos/registry-mirrors-relay

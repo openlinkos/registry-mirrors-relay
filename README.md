@@ -24,7 +24,7 @@ docker run -d --name relay --restart unless-stopped \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
   -p 8080:8080 \
   -v relay-data:/var/lib/registry-mirrors-relay \
-  ghcr.io/openlinkos/registry-mirrors-relay:v0.6.2
+  ghcr.io/openlinkos/registry-mirrors-relay:v0.6.3
 docker logs relay 2>&1 | grep 'generated password'   # the first administrator's password, shown once
 ```
 
