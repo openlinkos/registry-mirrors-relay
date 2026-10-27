@@ -23,4 +23,4 @@ configMapGenerator:
 
 images:
   - name: ghcr.io/openlinkos/registry-mirrors-relay
-    newTag: v0.6.1
+    newTag: v0.6.2
