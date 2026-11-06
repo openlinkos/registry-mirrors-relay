@@ -108,7 +108,7 @@
     "mark": "rings",
     "word": "LinkOS",
     "descriptor": "Status",
-    "url": { "en": "https://uptime.linkos.org/", "zh": "https://uptime.linkos.org/" },
+    "url": { "en": "https://status.linkos.io/", "zh": "https://status.linkos.io/" },
     "description": {
       "en": "Live status of LinkOS services",
       "zh": "LinkOS 各项服务的实时状态"
