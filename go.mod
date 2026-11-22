@@ -1,6 +1,6 @@
 module github.com/openlinkos/registry-mirrors-relay
 
-go 1.27.3
+go 1.27.4
 
 require (
 	go.etcd.io/bbolt v1.5.0
