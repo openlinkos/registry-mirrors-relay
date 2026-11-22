@@ -19,7 +19,7 @@ services:
     depends_on: [relay]
 
   relay:
-    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.6.3
+    image: ghcr.io/openlinkos/registry-mirrors-relay:v0.6.4
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
